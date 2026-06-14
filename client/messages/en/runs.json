@@ -39,7 +39,6 @@
     "stat": {
       "duration": "DURATION",
       "tokens": "TOKENS",
-      "cost": "COST",
       "findings": "FINDINGS"
     },
     "prompt": {
