@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { languageIdForFile, SUPPORTED_EXT, LANGUAGES } from '../src/modules/repo-intel/languages/index.js';
+import {
+  languageIdForFile,
+  languagesPresent,
+  labelForLanguageId,
+  SUPPORTED_EXT,
+  LANGUAGES,
+} from '../src/modules/repo-intel/languages/index.js';
 
 /**
  * The single language registry — replaces what used to be three (really
@@ -35,5 +41,31 @@ describe('SUPPORTED_EXT', () => {
         expect(SUPPORTED_EXT).toContain(ext);
       }
     }
+  });
+});
+
+describe('labelForLanguageId', () => {
+  it('returns the registered label for a known id', () => {
+    expect(labelForLanguageId('go')).toBe('Go');
+    expect(labelForLanguageId('typescript')).toBe('TypeScript/JavaScript');
+  });
+
+  it('falls back to the id itself for an unknown id', () => {
+    expect(labelForLanguageId('rust')).toBe('rust');
+  });
+});
+
+describe('languagesPresent', () => {
+  it('returns the distinct, sorted set of languages across the given files', () => {
+    expect(languagesPresent(['a.go', 'b.ts', 'c.go', 'd.tsx'])).toEqual(['go', 'typescript']);
+  });
+
+  it('excludes files with no recognized extension', () => {
+    expect(languagesPresent(['a.go', 'README.md'])).toEqual(['go']);
+  });
+
+  it('returns [] for an empty or all-unrecognized file list', () => {
+    expect(languagesPresent([])).toEqual([]);
+    expect(languagesPresent(['README.md', 'go.mod'])).toEqual([]);
   });
 });

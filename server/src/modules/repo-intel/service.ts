@@ -198,6 +198,7 @@ export class RepoIntelService implements RepoIntel {
       reason: 'no_data',
       lastIndexedSha: '',
       indexerVersion: INDEXER_VERSION,
+      languages: [],
       updatedAt: new Date(0),
       degraded: true,
       degradedReason: 'no_data',

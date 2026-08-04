@@ -170,8 +170,11 @@ language-agnostic.
 `@ast-grep/lang-go`, regex fallback, and test coverage (unit:
 `astgrep-go.test.ts`/`extract-go.test.ts`/`languages.test.ts`; integration:
 `repo-intel-go.it.test.ts` indexes a real Go fixture end-to-end against
-Postgres). **Phase 3 (import graph) done.** **Phase 4 (de-hardcode system prompts) done.**
-Phases 5-6 (remainder) remain deferred.
+Postgres). **Phase 3 (import graph) done.** **Phase 4 (de-hardcode system prompts)
+done.** **Phase 5 (repo language detection) done.** All 6 phases are now
+complete — Phase 6 (tests) was covered incrementally alongside each phase
+rather than as a separate final pass; see each phase's own "Tests:" note
+above.
 
 Verified against the actual codebase and the real `@ast-grep/lang-go`
 package before implementing (not trusted from the analysis above as-is):
@@ -337,3 +340,78 @@ Go-only, mixed TS+Go, and no-recognized-language (undefined). The >3-
 languages generic-fallback branch is unreachable with only 2 languages
 currently registered — left uncovered rather than tested via a contrived
 mock, and worth revisiting once a 3rd+ language pack exists.
+
+## Implementation notes — Phase 5 (repo language detection)
+
+**Status: done.** One deliberate deviation from the plan sketch above, and
+one genuinely new column.
+
+**Marker files → derived from the indexed file set.** The plan originally
+suggested detecting languages via `go.mod`/`package.json`/`tsconfig.json`
+marker files. Implemented differently: `languagesPresent(files)`
+(`server/src/modules/repo-intel/languages/index.ts`) derives the set from
+`languageIdForFile` over the *actual walked/indexed file list* instead —
+`walk.files` in `runFullIndex`, `allFiles` in `runIncremental` (both
+already computed for other T3 steps, so this is free). Reasoning: a marker
+file answers "what does this repo claim to contain" (a `go.mod` can exist
+with zero `.go` files actually indexed, e.g. an empty scaffold or a
+walk that skipped everything as oversized) while the indexed-file-derived
+set answers "what did we actually index" — strictly more accurate for the
+stated purpose (informational badge/filtering), and needs no new
+marker-file-parsing code since Phase 0's registry already does the
+per-file lookup.
+
+**Schema**: `repo_index_state.languages` — a `jsonb` column typed
+`string[]`, defaulting to an empty JSON array
+(`server/src/db/schema/repo-intel.ts`), following the existing
+`prIntent.inScope`/`outOfScope` precedent (`server/src/db/schema/reviews.ts:55-56`)
+rather than a native Postgres array column — no array-column precedent
+exists anywhere else in this schema. Migration
+`0011_high_zeigeist.sql` (auto-numbered by `drizzle-kit generate`), applied
+via `pnpm db:migrate`.
+
+**Write paths**: `IndexStateUpsert.languages` (`server/src/modules/repo-intel/repository.ts`)
+threads through `upsertIndexState()`'s insert + `onConflictDoUpdate`.
+`runFullIndex` computes it once from `walk.files` right before the final
+upsert; the two `safePersist()` early-exit paths (no clone / no files)
+always write `[]` since neither has a real walked set. `runIncremental` is
+the subtler case: its only full walk (`allFiles`) happens inside a
+try/catch around the T3 graph rebuild
+(`server/src/modules/repo-intel/pipeline/incremental.ts`), so a transient
+failure there must NOT blank out a previously-known-good `languages` set —
+`allFiles` is hoisted above the `try` (stays `[]` on failure) and the
+final upsert uses `languagesPresent(allFiles)` when the walk succeeded, or
+falls back to the prior `state.languages` (already in scope from the
+earlier `tryGetIndexState` call) otherwise.
+
+**Read path**: `IndexState` (`server/src/modules/repo-intel/types.ts`)
+gained a required `languages: string[]` field, projected in
+`tryGetIndexState()`. Confirmed via `pnpm typecheck` (`src/**/*.ts` only —
+`server/test/**` is NOT type-checked by this repo's `tsconfig.json`
+`include`, so the compiler didn't catch 3 test fixtures that constructed
+`IndexState`/`IndexStateUpsert`-shaped literals without the new field;
+found and fixed by re-running the full test suite and cross-checking
+against the plan-mode research instead) — updated
+`repo-intel-resync.test.ts`'s `stateAt()`, `indexer-pipeline.test.ts`'s
+`makeInitialState()` and its in-memory repository stub's `upsertIndexState`
+(which was silently dropping `languages` before this fix), plus
+`service.ts`'s synthesized degraded-state stub (`getIndexState`'s no-row
+fallback).
+
+**No consumer yet** — confirmed via the plan-mode research that nothing
+reads `languages` downstream today (not in `service.ts`, not in any route,
+not in the client's `PrMeta`/repo contracts). Purely informational/future-
+use, exactly as the plan text states — the client's `RepoIntelState` hook
+(`client/src/lib/hooks/repo-intel.ts`) is the closest existing "badge"
+surface but is itself currently unwired to any component, so wiring
+`languages` into it wouldn't yet produce a visible UI change without also
+building that UI — out of scope here.
+
+Tests: `server/test/languages.test.ts` gained `languagesPresent`/
+`labelForLanguageId` unit coverage (dedup, sort, exclude-unrecognized,
+empty-input). `server/test/indexer-pipeline.test.ts` asserts
+`languages: ['typescript']` after a full index and after an incremental
+slice (the latter proving the T3-walk-recompute path, not just the
+initial-state passthrough). `server/test/repo-intel-go.it.test.ts` asserts
+`languages: ['go']` against a real Postgres row after `runFullIndex` on
+the Go fixture.

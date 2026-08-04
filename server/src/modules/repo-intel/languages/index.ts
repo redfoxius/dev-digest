@@ -50,3 +50,18 @@ const LABEL_BY_ID: ReadonlyMap<string, string> = new Map(LANGUAGES.map((l) => [l
 export function labelForLanguageId(id: string): string {
   return LABEL_BY_ID.get(id) ?? id;
 }
+
+/**
+ * The distinct, sorted set of language ids present across `files` — e.g. for
+ * persisting `repo_index_state.languages` (Phase 5). Files with no
+ * recognized extension are silently excluded, same as everywhere else this
+ * registry gates indexing.
+ */
+export function languagesPresent(files: readonly string[]): string[] {
+  const ids = new Set<string>();
+  for (const f of files) {
+    const id = languageIdForFile(f);
+    if (id) ids.add(id);
+  }
+  return [...ids].sort();
+}

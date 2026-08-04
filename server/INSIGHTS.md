@@ -83,6 +83,18 @@ workflow and quality bar.
   that added per-diff `# Languages in this diff` framing, see
   `server/src/modules/reviews/helpers.ts:buildStackFraming`)
 
+- 2026-08-04 — `pnpm typecheck` only covers `src/**/*.ts` (per
+  `server/tsconfig.json`'s `include`) — `server/test/**` is NEVER
+  type-checked, only transpiled by vitest's esbuild (which strips types
+  without checking them). Adding a required field to a shared interface
+  (`IndexState.languages`) silently left 3 test fixtures constructing that
+  interface's shape without the new field — `pnpm typecheck` passed clean
+  every time; only running the actual test suite (or manually re-reading
+  every literal typed as that interface) surfaced them. Don't trust
+  `pnpm typecheck` alone as a completeness signal when growing a type that
+  test fixtures also construct.
+  (`server/tsconfig.json:26` `"include": ["src/**/*.ts"]`)
+
 ## Tool & Library Notes
 
 - 2026-08-04 — `server/pnpm-workspace.yaml` is pnpm's own `allowBuilds`
@@ -156,3 +168,14 @@ workflow and quality bar.
   the plain `systemPrompt` string server-side, before the
   `reviewPullRequest()` call. Phase 5 (`languages[]` DB column) is the
   only phase still deferred.
+
+- 2026-08-04 — Phase 5 (repo language detection) also landed same
+  branch/PR, closing out all 6 phases of `docs/go-language-support-plan.md`.
+  `repo_index_state.languages` is derived from the actually-walked/indexed
+  file set (`languagesPresent()` over `walk.files`/`allFiles`) rather than
+  `go.mod`/`package.json` marker files as the plan originally sketched —
+  more accurate for "what did we actually index" and free (both pipelines
+  already compute that file list for other T3 steps). No downstream
+  consumer reads this column yet — confirmed via a repo-wide grep before
+  implementing, so it's genuinely informational/future-use, not dead code
+  masquerading as used.

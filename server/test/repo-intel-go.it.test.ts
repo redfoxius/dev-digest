@@ -1,13 +1,13 @@
 /**
  * Go support — end-to-end integration: walk a real Go "repo" on disk, run it
  * through `runFullIndex` against a real Postgres, and confirm actual
- * `symbols`/`references`/`file_edges` rows land correctly. Unit-level
- * coverage of the parsing itself lives in astgrep-go.test.ts/
- * extract-go.test.ts/languages.test.ts (hermetic, no DB), and of the Go
- * import-graph resolver itself in depgraph-go.test.ts; this is the one test
- * that proves the whole pipeline (walk → parse → persist → depgraph) wires
- * together for a real language other than TS/JS, matching Phase 6 of
- * docs/go-language-support-plan.md.
+ * `symbols`/`references`/`file_edges`/`repo_index_state` rows land
+ * correctly. Unit-level coverage of the parsing itself lives in
+ * astgrep-go.test.ts/extract-go.test.ts/languages.test.ts (hermetic, no
+ * DB), and of the Go import-graph resolver itself in depgraph-go.test.ts;
+ * this is the one test that proves the whole pipeline (walk → parse →
+ * persist → depgraph → index-state) wires together for a real language
+ * other than TS/JS, matching Phase 6 of docs/go-language-support-plan.md.
  *
  * Fixture is generated on disk per-test (mkdtemp + writeFile), not a
  * committed fixtures/ directory — matches this repo's existing convention
@@ -142,6 +142,15 @@ d('Go language support — runFullIndex over a real Go repo (Testcontainers pg)'
       .where(eq(t.fileEdges.repoId, repoId));
     expect(edgeRows).toContainEqual({ fromFile: 'main.go', toFile: 'internal/util/util.go' });
     expect(edgeRows.some((e) => e.fromFile === 'fmt' || e.toFile === 'fmt')).toBe(false);
+
+    // Phase 5 — repo_index_state.languages reflects this Go-only fixture
+    // (go.mod isn't a parsed extension, so the walked+indexed set is
+    // Go-only — a clean single-language assertion).
+    const [indexState] = await pg.handle.db
+      .select({ languages: t.repoIndexState.languages })
+      .from(t.repoIndexState)
+      .where(eq(t.repoIndexState.repoId, repoId));
+    expect(indexState?.languages).toEqual(['go']);
 
     await app.close();
   });
