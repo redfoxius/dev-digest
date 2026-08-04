@@ -40,6 +40,47 @@ extraction code, not just a read of `node-types.json` or the grammar's
 published docs. A field list documents *what exists*, not *what order it
 appears in* — that gap is where this bug lived.
 
+## The missing phantom-globals entry — a dispatcher being language-aware doesn't mean its consumers are
+
+**What looked complete:** Phase 1 gave `parseInvocationHeads` a full Go
+implementation, wired into `astgrep/index.ts`'s per-language dispatcher
+alongside the other 3 functions. All 6 phases of the plan shipped, every
+phase's own tests passed, `pnpm typecheck` was clean.
+
+**What actually happened:** `parseInvocationHeads`'s only real consumer,
+`service.ts`'s `getUnresolvedReferences` (the phantom-API gate), filters
+its output through a hardcoded `PHANTOM_GLOBALS_ALLOWLIST` — a flat list
+of JS/TS builtins (`console`, `Math`, `Buffer`, `fetch`, ...) written long
+before Go existed in this codebase. This allowlist lives one layer above
+the astgrep dispatcher; Phase 1's per-language-module refactor touched the
+dispatcher and the two `langs/*.ts` files, not this. Verified empirically:
+parsing `s := make([]int, 0); s = append(s, 1); n := len(s)` returns
+`make`, `append`, `len` as bare invocation heads — all `identifier`-kind
+calls, syntactically indistinguishable from a real phantom call — and none
+of them were in the TS-only allowlist. **Every ordinary Go file would have
+had its builtins flagged as phantom APIs.** This was undiscovered for the
+entire span of the Go implementation because `getUnresolvedReferences`
+itself had zero positive-path test coverage, for either language — only
+degraded-contract tests (flag-off, no-clone) existed.
+
+**The fix:** split the allowlist per language
+(`PHANTOM_GLOBALS_BY_LANGUAGE`, keyed by `languageIdForFile`), and added
+Go's predeclared identifiers (builtin functions AND builtin types used in
+conversion-call syntax like `string(b)` — both parse as bare calls in
+Go's grammar).
+
+**Why this generalizes:** the per-language-module design (this skill's own
+headline principle) correctly isolates language-specific logic *inside*
+the dispatch layer — but says nothing about code that sits *above* it and
+reads its output with its own implicit single-language assumption. Before
+declaring a language done, grep every consumer of `parseSymbols` /
+`parseReferences` / `parseInvocationHeads` / `parseImports` (not just the
+dispatcher itself) for a hardcoded list, keyword set, or allowlist that
+predates this being a multi-language codebase. `pnpm typecheck` cannot
+find this class of bug — it's logically wrong, not a type error — which is
+exactly why [SKILL.md](SKILL.md)'s workflow now requires a positive-path
+test through the real facade method, not just the astgrep layer.
+
 ## The 5th consumer — `pnpm typecheck` finds what grep misses
 
 **What looked complete:** before adding `.go` to the shared registry, a
