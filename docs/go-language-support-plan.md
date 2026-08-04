@@ -162,3 +162,58 @@ integration test that indexes a Go repo end-to-end.
 ## Out of scope
 `reviewer-core/` and `client/` need zero changes — both are already
 language-agnostic.
+
+## Implementation notes — Phase 0+1+2 (this iteration)
+
+**Status: in progress.** Phases 3-6 remain deferred to a later pass.
+
+Verified against the actual codebase and the real `@ast-grep/lang-go`
+package before implementing (not trusted from the analysis above as-is):
+
+- `@ast-grep/lang-go@0.0.6` exists on npm — the "needs to be checked"
+  risk flagged above is resolved. Its `index.js` already exports the exact
+  `{ libraryPath (getter), extensions, languageSymbol, expandoChar }` shape
+  `registerDynamicLanguage()` expects and resolves the platform prebuilt
+  binary itself — no manual native-path resolution needed on our side.
+- Real tree-sitter-Go field names, read from the package's own
+  `node-types.json`: `call_expression{function}`,
+  `selector_expression{operand,field}`,
+  `method_declaration{name,receiver,body,parameters,result}`,
+  `type_declaration` → `type_spec{name,type}`, `import_declaration` →
+  `import_spec{name?,path}` (possibly nested in `import_spec_list`),
+  `pointer_type` wraps a bare `_type` child. Go's grammar reuses the
+  `identifier`/`type_identifier` leaf-kind names TS/JS already uses.
+- Two gaps in the "triple-duplicated" framing above, corrected: `astgrep/
+  index.ts` is a **4th** consumer of `SUPPORTED_EXT` beyond the three named
+  (`walk.ts`/`service.ts`/`incremental.ts`); it also has a **4th** function
+  with the same hardcoded-node-kind structure as `parseSymbols`/
+  `parseReferences`/`parseImports` — `parseInvocationHeads()` (the
+  phantom-gate's call-head extractor) — needing the same per-language
+  treatment.
+- Real gap in the fallback wiring: `codeindex/ripgrep.ts`'s `symbols()`/
+  `references()` call the TS/JS regex extractor **unconditionally** for any
+  file passing the extension gate (today that gate only ever admits TS/JS).
+  Once the gate also admits `.go`, this call site needs explicit language
+  dispatch or Go files silently run through TS/JS regexes.
+
+**Design decision — per-language modules, not one generic node-kind config
+object** (this iteration deviates from the sketch above): TS/JS and Go
+differ structurally, not just in kind-name spelling — TS/JS tracks
+"exported" via an `export` keyword node; Go's exported-ness is a naming
+convention (`/^[A-Z]/`), not an AST fact at all. TS/JS member access is
+`member_expression{object,property}`; Go's is
+`selector_expression{operand,field}` — different field names, not
+substitutable via a lookup table. A single generic walker parameterized by
+kind-name mapping would need to grow into most of a second interpreter to
+cover this. Instead: extract the genuinely language-agnostic tree helpers
+(`headSignature`, `lineOf`, `endLineOf`, `childrenOfKind`, `getField`,
+`dedupe` — none of these reference a TS/JS-specific kind name today) into
+`astgrep/shared.ts`, then give TS/JS and Go their own concrete
+`parseSymbols`/`parseReferences`/`parseInvocationHeads`/`parseImports`
+implementations (`astgrep/langs/typescript.ts`, `astgrep/langs/go.ts`)
+built on those shared primitives. `astgrep/index.ts` stays a thin
+dispatcher — the public API and every existing caller are unchanged.
+
+Full implementation-level plan (files, signatures, exact Go AST shapes)
+lives in the plan-mode session that scoped this iteration; see git history
+for the corresponding commits.
