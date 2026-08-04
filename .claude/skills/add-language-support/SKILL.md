@@ -66,6 +66,23 @@ this skill is the condensed, reusable version of the same shape.
    `case '<id>':` line in each of the 4 switch statements, plus one more
    `?? <lang>.langForFile(file)` link in `langForFile`'s chain.
 
+   **Then check every *consumer* of these 4 functions for its own hardcoded
+   per-language assumption** — the dispatcher being language-aware does not
+   mean everything downstream of it is. `parseInvocationHeads` in
+   particular feeds `server/src/modules/repo-intel/service.ts`'s
+   `getUnresolvedReferences` (the phantom-API gate), which filters bare
+   call heads through `PHANTOM_GLOBALS_BY_LANGUAGE` — **add your language's
+   entry to this map** (its builtin functions / predeclared globals /
+   builtin-type conversion syntax) or every ordinary use of a builtin will
+   be flagged as a phantom API. This bit Go: `len`/`make`/`append` are
+   `identifier`-kind bare calls exactly like a real phantom, and nothing
+   in Phase 1's per-language astgrep refactor touched this TS-only
+   allowlist one layer up — see "The missing phantom-globals entry" in
+   [examples.md](examples.md). `pnpm typecheck` will NOT catch this — it's
+   a silently-wrong-but-type-safe logic bug, not an import error. Write a
+   positive-path test through the real facade method (not just the astgrep
+   layer) to catch it instead.
+
 3. **Regex fallback** — new `server/src/adapters/codeindex/extract-<id>.ts`,
    mirroring `extract.ts`'s contract: never throw, degrade to a partial
    result on anything unparseable. This is the always-available path when
@@ -154,6 +171,15 @@ this skill is the condensed, reusable version of the same shape.
      `runFullIndex` call. This is the one test that proves the whole
      pipeline actually wires together — write it before declaring the
      language "supported," not as an afterthought.
+   - **Positive-path test for `getUnresolvedReferences`** (the phantom-API
+     gate, `service.ts`) — mirror
+     `server/test/repo-intel-phantom-gate.test.ts`'s pattern (hermetic,
+     real files on disk, `repo.getRepoBasics` stubbed to skip the DB).
+     Assert the new language's builtins are NOT flagged and a genuinely
+     undeclared call IS — this is the test category that was missing
+     entirely until a post-completion audit of the Go work found it hiding
+     a real bug (see [examples.md](examples.md)). Don't skip it a second
+     time.
 
 10. **Docs + insights** — save the plan to
     `docs/<language>-language-support-plan.md` per this repo's root
