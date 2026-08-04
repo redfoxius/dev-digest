@@ -170,8 +170,8 @@ language-agnostic.
 `@ast-grep/lang-go`, regex fallback, and test coverage (unit:
 `astgrep-go.test.ts`/`extract-go.test.ts`/`languages.test.ts`; integration:
 `repo-intel-go.it.test.ts` indexes a real Go fixture end-to-end against
-Postgres). **Phase 3 (import graph) in progress.** Phases 4-6 (remainder)
-remain deferred.
+Postgres). **Phase 3 (import graph) done.** **Phase 4 (de-hardcode system prompts) done.**
+Phases 5-6 (remainder) remain deferred.
 
 Verified against the actual codebase and the real `@ast-grep/lang-go`
 package before implementing (not trusted from the analysis above as-is):
@@ -274,3 +274,66 @@ concatenation behavior. `server/test/repo-intel-go.it.test.ts` was
 extended with a second local package (`internal/util`) imported by
 `main.go`, asserting the resulting `file_edges` row lands in Postgres via
 the real `runFullIndex` pipeline.
+
+## Implementation notes — Phase 4 (de-hardcode system prompts)
+
+**Status: done.** Two changes, matching the two things that were actually
+wrong: a static prompt that named the wrong stack, and no mechanism at all
+for per-diff stack framing.
+
+**Static prompt rewrite** — `GENERAL_REVIEWER_PROMPT` and
+`PERFORMANCE_REVIEWER_PROMPT` (`server/src/db/seed-prompts.ts`, mirrored in
+`docs/agent-prompts/{general,performance}-reviewer.md`) opened with "You
+are ... reviewing a pull-request diff for a Node.js (TypeScript, ESM)
+service" and a "# Stack context (assume this unless the diff shows
+otherwise)" block naming DevDigest's own dependencies (Fastify, Drizzle,
+postgres-js, octokit, simple-git, ripgrep, p-queue) as if they were a fact
+about *any* reviewed repo — including one specific, concrete error: "With
+max ~10 connections this stalls the whole service" is DevDigest's own pool
+size, asserted as true of the target repo being reviewed. Rewrote both to
+match `SECURITY_REVIEWER_PROMPT`'s already-neutral style: a stack-agnostic
+role sentence + a "# Stack context" instruction to infer the stack from the
+diff itself rather than assume one. `PERFORMANCE_REVIEWER_PROMPT`'s
+checklist section headers/bullets (`## 1. Database (Drizzle / postgres-js /
+Postgres)`, `## 4. Event loop & memory (Node)`) were similarly genericized
+to name patterns (N+1 queries, connection-pool starvation, event-loop/
+goroutine blocking) rather than DevDigest's specific libraries, keeping
+concrete technology names only as illustrative examples. Verified the
+`.ts`/`.md` mirrors are still byte-identical (was already true pre-change,
+confirmed no test pins the exact prompt text — see the plan-mode research
+for this iteration).
+
+**Per-diff dynamic framing** — the static rewrite alone leaves the model
+with *no* stack information at all, which is worse than a wrong guess for
+a monolingual repo. `reviewer-core` intentionally has no `language`
+concept anywhere in its types (confirmed: `ReviewInput`/`PromptParts` have
+no such field) and its system message is exactly `agent.systemPrompt +
+INJECTION_GUARD` with no templating hook — so per-run framing has to be
+assembled server-side, before the `reviewPullRequest()` call, as plain
+text folded into the `systemPrompt` string itself rather than a new
+reviewer-core field (keeps Phase 4 change local to `server/`, matches this
+doc's "Out of scope: reviewer-core needs zero changes"). New pure
+`buildStackFraming(changedFiles)` (`server/src/modules/reviews/helpers.ts`,
+alongside the existing pure `taskLine` helper — kept a standalone exported
+function rather than a private class method specifically so it's directly
+unit-testable without constructing a `ReviewRunExecutor`) maps every
+`diff.files[].path` through `languageIdForFile` (already built in Phase 0),
+dedupes into a set of touched language ids, and renders a `# Languages in
+this diff` line (capped at 3 languages before falling back to a generic
+"multiple languages" phrase). `ReviewRunExecutor.runOneAgent`
+(`server/src/modules/reviews/run-executor.ts`) calls it and appends the
+result to `agent.systemPrompt` before the `reviewPullRequest()` call.
+Computed **per run, from the diff actually being reviewed** — not a
+repo-wide label — so a Go-only PR in a mixed TS+Go repo gets Go framing
+and a mixed PR gets both, per this doc's original polyglot note for this
+phase. `LanguageDef` gained a `label` field
+(`server/src/modules/repo-intel/languages/index.ts`) as the single source
+of truth for the human-readable name used in this framing line, plus a
+`labelForLanguageId()` lookup, rather than a second labels map duplicated
+in `helpers.ts`.
+
+Tests: `server/test/stack-framing.test.ts` (new, hermetic) covers TS-only,
+Go-only, mixed TS+Go, and no-recognized-language (undefined). The >3-
+languages generic-fallback branch is unreachable with only 2 languages
+currently registered — left uncovered rather than tested via a contrived
+mock, and worth revisiting once a 3rd+ language pack exists.

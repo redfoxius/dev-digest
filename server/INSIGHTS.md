@@ -70,6 +70,19 @@ workflow and quality bar.
   threading a language switch through call sites.
   (`server/src/adapters/depgraph/union.ts`)
 
+- 2026-08-04 — The seeded `PERFORMANCE_REVIEWER_PROMPT`
+  (`server/src/db/seed-prompts.ts`) had asserted, as a static fact sent to
+  the LLM on every review, "With max ~10 connections this stalls the whole
+  service" — DevDigest's own DB pool size, stated as if it were true of
+  whatever repo is actually being reviewed. Not a code bug (typechecks,
+  runs fine), but a correctness bug in prompt content — worth grepping
+  seeded prompt strings for other repo-specific facts (pool sizes,
+  concurrency limits, provider names) whenever "review any repo" tooling
+  is extended, since nothing catches a wrong assumption baked into prose.
+  (`server/src/db/seed-prompts.ts` pre-Phase-4; removed in the same change
+  that added per-diff `# Languages in this diff` framing, see
+  `server/src/modules/reviews/helpers.ts:buildStackFraming`)
+
 ## Tool & Library Notes
 
 - 2026-08-04 — `server/pnpm-workspace.yaml` is pnpm's own `allowBuilds`
@@ -133,3 +146,13 @@ workflow and quality bar.
   the imported package's directory (Go resolves at package granularity,
   not file granularity — picking a single representative file would have
   undercounted a package's PageRank fan-in). Phase 4/5 still deferred.
+
+- 2026-08-04 — Phase 4 (de-hardcode system prompts) also landed same
+  branch/PR: rewrote `GENERAL_REVIEWER_PROMPT`/`PERFORMANCE_REVIEWER_PROMPT`
+  neutral (matching `SECURITY_REVIEWER_PROMPT`'s existing style) and added
+  `buildStackFraming()` to inject per-diff language framing at review-run
+  time instead — kept out of `reviewer-core` entirely (it has no
+  `language` concept anywhere in its types) by folding the framing into
+  the plain `systemPrompt` string server-side, before the
+  `reviewPullRequest()` call. Phase 5 (`languages[]` DB column) is the
+  only phase still deferred.

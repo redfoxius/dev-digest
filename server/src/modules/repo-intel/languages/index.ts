@@ -16,12 +16,18 @@ import { extname } from 'node:path';
 
 export interface LanguageDef {
   id: string;
+  /** Human-readable name, e.g. for a review prompt's "languages touched" framing. */
+  label: string;
   extensions: readonly string[];
 }
 
 export const LANGUAGES: readonly LanguageDef[] = [
-  { id: 'typescript', extensions: ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs'] },
-  { id: 'go', extensions: ['.go'] },
+  {
+    id: 'typescript',
+    label: 'TypeScript/JavaScript',
+    extensions: ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs'],
+  },
+  { id: 'go', label: 'Go', extensions: ['.go'] },
 ];
 
 /** Flattened list of every indexed extension, across every language. */
@@ -36,4 +42,11 @@ const LANG_BY_EXT: ReadonlyMap<string, string> = new Map(
 /** Language id for a file's extension, or null when it's not indexed. */
 export function languageIdForFile(file: string): string | null {
   return LANG_BY_EXT.get(extname(file).toLowerCase()) ?? null;
+}
+
+const LABEL_BY_ID: ReadonlyMap<string, string> = new Map(LANGUAGES.map((l) => [l.id, l.label]));
+
+/** Human-readable label for a language id, falling back to the id itself. */
+export function labelForLanguageId(id: string): string {
+  return LABEL_BY_ID.get(id) ?? id;
 }
