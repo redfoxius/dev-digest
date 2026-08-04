@@ -1,5 +1,13 @@
 # Go language support — analysis + plan
 
+**This plan is the canonical worked example for the `add-language-support`
+skill** (`.claude/skills/add-language-support/`) — the findings below (the
+pointer-type bug, the 5th `SUPPORTED_EXT` consumer, the per-language-module
+design decision, etc.) were distilled into that skill so the next language
+(Rust, C++, ...) starts from a checklist instead of rediscovering the same
+lessons. Read that skill first if you're adding a new language; read this
+doc for the full phase-by-phase reasoning behind it.
+
 ## Context
 
 DevDigest's review pipeline is JS/TS-only today. This doc analyzes exactly
