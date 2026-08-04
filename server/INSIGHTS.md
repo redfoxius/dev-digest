@@ -45,9 +45,50 @@ workflow and quality bar.
   (`server/src/modules/pulls/routes.ts:137-145`, mirroring the pre-existing
   `latestReviewByPr` map at `server/src/modules/pulls/routes.ts:119-128`)
 
+- 2026-08-04 — Extending a shared allowlist constant (`SUPPORTED_EXT` →
+  `repo-intel/languages/index.ts`) means auditing every consumer via
+  `pnpm typecheck`, not just `grep`. A pre-refactor grep found 3 documented
+  consumers + 1 already-known 4th; `depgraph/index.ts` was a genuine 5th
+  that only surfaced as a `tsc` import error after the migration. Separately:
+  `dependency-cruiser` (used there to build the TS/JS import graph) has no
+  concept of Go — once the shared registry started admitting `.go` files,
+  this call site needed an explicit `languageIdForFile(f) === 'typescript'`
+  filter before `cruise()`, or Go paths would silently flow into a tool that
+  can't parse them.
+  (`server/src/adapters/depgraph/index.ts:20,55`)
+
 ## Tool & Library Notes
 
+- 2026-08-04 — `server/pnpm-workspace.yaml` is pnpm's own `allowBuilds`
+  build-script-approval file, not a stray tooling artifact (previously
+  assumed so and excluded from commits — it's real and meant to be
+  committed). `pnpm add <pkg-with-a-postinstall>` auto-appends a placeholder
+  line here; `pnpm install`/`pnpm typecheck` hard-fail until it's resolved
+  to `true`/`false`. This is where to approve a new native/build-script dep.
+  (`server/pnpm-workspace.yaml:2`)
+
 ## Recurring Errors & Fixes
+
+- 2026-08-04 — tree-sitter-Go's `pointer_type` node (`*Foo`) has TWO
+  children in order `['*', 'type_identifier']` — taking `children()[0]` to
+  "unwrap the pointer" silently grabs the `*` token, not the type. No
+  crash, no type error: a Go method's receiver-type resolution just always
+  returned `null`, so the `Receiver.Method` dual-emit convention (mirrored
+  from the TS/JS class-method pattern) quietly degraded to bare-name-only
+  until checked against a real parse, not just the grammar's field list.
+  Fix: filter children by `kind() === 'type_identifier'`, never assume
+  position. (`server/src/adapters/astgrep/langs/go.ts:67-72`)
+
+- 2026-08-04 — A literal NUL byte (0x00) was found embedded mid-template-
+  literal in `depgraph/index.ts` (sitting where a space should be, between
+  two `${}` interpolations) — pre-existing, unrelated to any session's
+  edits. It silently broke exact-string-match `Edit` calls against that
+  line (the text looked like a normal space in `Read` output). Diagnosed
+  with `sed -n '<n>p' file | od -c` after repeated no-visible-cause
+  replace failures; fixed by rewriting the file's bytes directly (Python,
+  `bytes.replace(b'\x00', b' ')`) rather than another string-based edit.
+  Worth trying `od -c` early if an `Edit` inexplicably can't find text that
+  `Read` clearly shows.
 
 ## Open Questions
 
@@ -64,3 +105,11 @@ workflow and quality bar.
   explicitly asked whether it had fired. Confirms the skill's own
   "Course arc" note in `references.md`: a description/manual trigger alone
   is not reliable enough without a `Stop` hook forcing it.
+
+- 2026-08-04 — Go language support (Phase 0+1+2 of
+  `docs/go-language-support-plan.md`) landed on `docs/go-language-support-plan`
+  (PR #3, fork). Verified end-to-end against real Go source (not just unit
+  fixtures) before writing formal tests — caught the pointer-receiver bug
+  above that way. Phase 3 (import graph without `dependency-cruiser`),
+  Phase 4 (de-hardcode system prompts), Phase 5 (`languages[]` DB column)
+  remain deferred.
