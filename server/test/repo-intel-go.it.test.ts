@@ -1,11 +1,12 @@
 /**
  * Go support — end-to-end integration: walk a real Go "repo" on disk, run it
  * through `runFullIndex` against a real Postgres, and confirm actual
- * `symbols`/`references` rows land correctly. Unit-level coverage of the
- * parsing itself lives in astgrep-go.test.ts/extract-go.test.ts/
- * languages.test.ts (hermetic, no DB); this is the one test that proves the
- * whole pipeline (walk → parse → persist) wires together for a real
- * language other than TS/JS, matching Phase 6 of
+ * `symbols`/`references`/`file_edges` rows land correctly. Unit-level
+ * coverage of the parsing itself lives in astgrep-go.test.ts/
+ * extract-go.test.ts/languages.test.ts (hermetic, no DB), and of the Go
+ * import-graph resolver itself in depgraph-go.test.ts; this is the one test
+ * that proves the whole pipeline (walk → parse → persist → depgraph) wires
+ * together for a real language other than TS/JS, matching Phase 6 of
  * docs/go-language-support-plan.md.
  *
  * Fixture is generated on disk per-test (mkdtemp + writeFile), not a
@@ -32,14 +33,18 @@ const GO_MOD = `module example.com/greeter\n\ngo 1.22\n`;
 
 const MAIN_GO = `package main
 
-import "fmt"
+import (
+	"fmt"
+
+	"example.com/greeter/internal/util"
+)
 
 type Greeter struct {
 	Name string
 }
 
 func (g *Greeter) Greet() string {
-	return fmt.Sprintf("Hello, %s", g.Name)
+	return fmt.Sprintf("Hello, %s", util.Shout(g.Name))
 }
 
 type Speaker interface {
@@ -56,6 +61,13 @@ func main() {
 }
 `;
 
+const UTIL_GO = `package util
+
+func Shout(s string) string {
+	return s + "!"
+}
+`;
+
 d('Go language support — runFullIndex over a real Go repo (Testcontainers pg)', () => {
   let pg: PgFixture;
   let cloneDir: string;
@@ -66,9 +78,10 @@ d('Go language support — runFullIndex over a real Go repo (Testcontainers pg)'
     const { workspaceId } = await seed(pg.handle.db);
 
     cloneDir = await mkdtemp(join(tmpdir(), 'devdigest-go-fixture-'));
-    await mkdir(join(cloneDir, 'internal'), { recursive: true });
+    await mkdir(join(cloneDir, 'internal', 'util'), { recursive: true });
     await writeFile(join(cloneDir, 'go.mod'), GO_MOD);
     await writeFile(join(cloneDir, 'main.go'), MAIN_GO);
+    await writeFile(join(cloneDir, 'internal', 'util', 'util.go'), UTIL_GO);
 
     const [repo] = await pg.handle.db
       .insert(t.repos)
@@ -119,6 +132,16 @@ d('Go language support — runFullIndex over a real Go repo (Testcontainers pg)'
     const refNames = referenceRows.map((r) => r.toSymbol);
     expect(refNames).toContain('NewGreeter'); // bare call
     expect(refNames).toContain('Greet'); // selector_expression call (g.Greet())
+
+    // Phase 3 — GoDepGraph resolves the local "example.com/greeter/internal/util"
+    // import (via go.mod's module directive) to a file_edges row; the stdlib
+    // "fmt" import is skipped, same "local files only" contract as TS/JS.
+    const edgeRows = await pg.handle.db
+      .select({ fromFile: t.fileEdges.fromFile, toFile: t.fileEdges.toFile })
+      .from(t.fileEdges)
+      .where(eq(t.fileEdges.repoId, repoId));
+    expect(edgeRows).toContainEqual({ fromFile: 'main.go', toFile: 'internal/util/util.go' });
+    expect(edgeRows.some((e) => e.fromFile === 'fmt' || e.toFile === 'fmt')).toBe(false);
 
     await app.close();
   });

@@ -57,6 +57,19 @@ workflow and quality bar.
   can't parse them.
   (`server/src/adapters/depgraph/index.ts:20,55`)
 
+- 2026-08-04 — Adding a second `DepGraph` implementation didn't need a
+  registry or a container-level branch: `UnionDepGraph` composes
+  `[DepCruiseGraph, GoDepGraph]` behind the same `DepGraph` port and the
+  container swaps one `new X()` for `new UnionDepGraph()`
+  (`server/src/platform/container.ts:123`) — both existing pipeline call
+  sites (`pipeline/full.ts:216`, `pipeline/incremental.ts:219`) already
+  passed the full multi-language file list and left filtering to the
+  adapter, so nothing upstream had to change. Worth reusing this
+  compose-behind-the-port shape for the next per-language port (e.g. a
+  future language's own regex fallback or depgraph builder) instead of
+  threading a language switch through call sites.
+  (`server/src/adapters/depgraph/union.ts`)
+
 ## Tool & Library Notes
 
 - 2026-08-04 — `server/pnpm-workspace.yaml` is pnpm's own `allowBuilds`
@@ -113,3 +126,10 @@ workflow and quality bar.
   above that way. Phase 3 (import graph without `dependency-cruiser`),
   Phase 4 (de-hardcode system prompts), Phase 5 (`languages[]` DB column)
   remain deferred.
+
+- 2026-08-04 — Phase 3 (Go import graph) also landed same branch/PR:
+  `GoDepGraph` resolves local imports via `go.mod`'s `module` directive +
+  the Phase 1 `parseImports` output, fanning an edge out to every file in
+  the imported package's directory (Go resolves at package granularity,
+  not file granularity — picking a single representative file would have
+  undercounted a package's PageRank fan-in). Phase 4/5 still deferred.

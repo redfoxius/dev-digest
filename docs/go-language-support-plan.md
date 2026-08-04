@@ -165,7 +165,13 @@ language-agnostic.
 
 ## Implementation notes — Phase 0+1+2 (this iteration)
 
-**Status: in progress.** Phases 3-6 remain deferred to a later pass.
+**Status: Phase 0+1+2 done and merged** (fork PR #3, branch
+`docs/go-language-support-plan`) — registry, real Go AST parsing via
+`@ast-grep/lang-go`, regex fallback, and test coverage (unit:
+`astgrep-go.test.ts`/`extract-go.test.ts`/`languages.test.ts`; integration:
+`repo-intel-go.it.test.ts` indexes a real Go fixture end-to-end against
+Postgres). **Phase 3 (import graph) in progress.** Phases 4-6 (remainder)
+remain deferred.
 
 Verified against the actual codebase and the real `@ast-grep/lang-go`
 package before implementing (not trusted from the analysis above as-is):
@@ -217,3 +223,54 @@ dispatcher — the public API and every existing caller are unchanged.
 Full implementation-level plan (files, signatures, exact Go AST shapes)
 lives in the plan-mode session that scoped this iteration; see git history
 for the corresponding commits.
+
+## Implementation notes — Phase 3 (import graph)
+
+**Status: done.** `DepCruiseGraph` (TS/JS) is untouched; a new
+`GoDepGraph` (`server/src/adapters/depgraph/go.ts`) handles Go, and both
+are composed by a new `UnionDepGraph`
+(`server/src/adapters/depgraph/union.ts`) that the container now binds
+instead of `DepCruiseGraph` directly
+(`server/src/platform/container.ts:123`) — the port interface and both
+existing call sites (`pipeline/full.ts:216`, `pipeline/incremental.ts:219`)
+are unchanged, since they already pass the full multi-language file list
+and let the adapter filter internally (the same pattern `DepCruiseGraph`
+already used for TS/JS).
+
+`GoDepGraph.buildEdges`:
+- Filters `files` to `.go` files via `languageIdForFile`. Returns `[]`
+  immediately if there are none — no `go.mod` read attempted.
+- Reads `go.mod` from `root` and extracts the `module <path>` directive via
+  a line-anchored regex. No `go.mod` (or no `module` line) → `[]` for the
+  whole build, since there's no way to tell a local import from a
+  third-party one without it. This is a real v1 limitation, not a bug: a
+  Go file tree with no `go.mod` at the repo root (e.g. `go.mod` in a
+  subdirectory of a monorepo) produces zero edges.
+- For each Go file, parses its imports via the existing
+  `astgrep/index.ts` `parseImports` dispatcher (already built in Phase 1) —
+  no new parsing code needed, Phase 3 is a pure downstream consumer of
+  Phase 1's output.
+- **Resolved the plan's "file vs. directory granularity" question**:
+  edges point at *every* already-walked Go file in the imported package's
+  directory, not one representative file. A single `import` statement
+  pulls in the whole target package, so under-connecting (picking one
+  file) would make PageRank undercount a package's real fan-in.
+- Non-local imports (stdlib, third-party module paths) are silently
+  skipped — mirrors `DepCruiseGraph`'s existing "local files only"
+  contract for TS/JS.
+
+**Polyglot union**: `UnionDepGraph` takes an array of `DepGraph`
+(defaulting to `[DepCruiseGraph, GoDepGraph]`), runs them in parallel over
+the same `(root, files)`, and concatenates results — no cross-language
+edges are possible since each builder only ever emits edges between files
+of its own language. `rank.ts` needed zero changes: it already treats
+`file_edges` as an opaque edge list and lets `graphology`/PageRank handle
+disconnected components.
+
+Tests: `server/test/depgraph-go.test.ts` (hermetic, on-disk fixture) covers
+local-package edge fan-out, stdlib-import exclusion, self-edge exclusion,
+no-Go-files, and missing-`go.mod` cases, plus `UnionDepGraph`'s
+concatenation behavior. `server/test/repo-intel-go.it.test.ts` was
+extended with a second local package (`internal/util`) imported by
+`main.go`, asserting the resulting `file_edges` row lands in Postgres via
+the real `runFullIndex` pipeline.
