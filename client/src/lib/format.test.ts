@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { formatCost } from "./format";
+import { formatCost, formatCostPair } from "./format";
 
 describe("formatCost", () => {
   it("returns the em dash for null/undefined (unknown cost)", () => {
@@ -18,5 +18,24 @@ describe("formatCost", () => {
   it("formats to 3 decimal places otherwise", () => {
     expect(formatCost(0.014)).toBe("$0.014");
     expect(formatCost(1.5)).toBe("$1.500");
+  });
+});
+
+describe("formatCostPair", () => {
+  it("shows the em dash when there are no runs at all", () => {
+    expect(formatCostPair(null, null)).toBe("—");
+    expect(formatCostPair(undefined, undefined)).toBe("—");
+  });
+
+  it("shows only the total when the latest run's cost is unknown", () => {
+    expect(formatCostPair(null, 0.041)).toBe("$0.041");
+  });
+
+  it("collapses to a single value when latest equals total (one run so far)", () => {
+    expect(formatCostPair(0.014, 0.014)).toBe("$0.014");
+  });
+
+  it("shows latest and total together when they differ", () => {
+    expect(formatCostPair(0.014, 0.041)).toBe("$0.014 ($0.041)");
   });
 });

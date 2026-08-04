@@ -129,20 +129,30 @@ export default async function pullsRoutes(appBase: FastifyInstance) {
       }
     }
 
-    // Total cost across ALL agent runs ever executed for each PR. Computed on
-    // read from agent_runs (no FK denorm), same "list is small" IN-query + JS
-    // grouping idiom as the score map above. A PR's total is absent from the
-    // map (→ null) only when NONE of its runs have a known cost (never run,
-    // or every run used an unpriced model / never completed an LLM call).
+    // Total cost across ALL agent runs ever executed for each PR, plus the
+    // cost of just the MOST RECENT run (for the list's "last (total)"
+    // display). Computed on read from agent_runs (no FK denorm), same "list
+    // is small" IN-query + JS grouping idiom as the score map above — one
+    // query, ordered newest-first so the first row seen per PR is also its
+    // latest run. A PR's total is absent from the map (→ null) only when
+    // NONE of its runs have a known cost (never run, or every run used an
+    // unpriced model / never completed an LLM call); latest-run cost is
+    // absent when that specific run's cost is unknown, independent of total.
     const costByPr = new Map<string, number>();
+    const latestRunCostByPr = new Map<string, number | null>();
     if (prIds.length > 0) {
       const costRows = await container.db
-        .select({ prId: t.agentRuns.prId, costUsd: t.agentRuns.costUsd })
+        .select({ prId: t.agentRuns.prId, costUsd: t.agentRuns.costUsd, ranAt: t.agentRuns.ranAt })
         .from(t.agentRuns)
-        .where(inArray(t.agentRuns.prId, prIds));
+        .where(inArray(t.agentRuns.prId, prIds))
+        .orderBy(desc(t.agentRuns.ranAt));
       for (const run of costRows) {
-        if (!run.prId || run.costUsd == null) continue;
-        costByPr.set(run.prId, (costByPr.get(run.prId) ?? 0) + run.costUsd);
+        if (!run.prId) continue;
+        if (run.costUsd != null) {
+          costByPr.set(run.prId, (costByPr.get(run.prId) ?? 0) + run.costUsd);
+        }
+        // Rows are newest-first → first seen per PR is its latest run.
+        if (!latestRunCostByPr.has(run.prId)) latestRunCostByPr.set(run.prId, run.costUsd);
       }
     }
 
@@ -171,6 +181,7 @@ export default async function pullsRoutes(appBase: FastifyInstance) {
         updated_at: r.updatedAt?.toISOString() ?? null,
         score: review ? review.score : null,
         cost_usd: costByPr.get(r.id) ?? null,
+        latest_run_cost_usd: latestRunCostByPr.get(r.id) ?? null,
       };
     });
   });

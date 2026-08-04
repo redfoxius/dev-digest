@@ -219,10 +219,13 @@ d('A2 reviews + agents (Testcontainers pg)', () => {
     expect(run!.costUsd).toBeCloseTo(expectedCost);
     expect(trace.stats.cost_usd).toBeCloseTo(expectedCost);
 
-    // PR-list COST column sums cost across every agent run for the PR.
+    // PR-list COST column sums cost across every agent run for the PR, and
+    // also surfaces the single most recent run's cost separately — with only
+    // one run so far, the two are identical.
     const pulls = (await app.inject({ method: 'GET', url: `/repos/${repo.id}/pulls` })).json();
     const listedPr = pulls.find((p: { id: string }) => p.id === pr.id);
     expect(listedPr.cost_usd).toBeCloseTo(expectedCost);
+    expect(listedPr.latest_run_cost_usd).toBeCloseTo(expectedCost);
 
     await app.close();
   });

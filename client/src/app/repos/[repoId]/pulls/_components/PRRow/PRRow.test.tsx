@@ -29,6 +29,7 @@ function pr(o: Partial<PrMeta>): PrMeta {
     updated_at: "2026-06-11T18:44:34.000Z",
     score: 61,
     cost_usd: 0.014,
+    latest_run_cost_usd: 0.014,
     ...o,
   };
 }
@@ -42,13 +43,20 @@ function renderWithIntl(ui: React.ReactElement) {
 }
 
 describe("PRRow — COST column", () => {
-  it("shows the summed cost across the PR's runs", () => {
-    renderWithIntl(<PRRow pr={pr({ cost_usd: 0.014 })} repoId="repo-1" />);
+  it("collapses to a single value when the PR has just one run", () => {
+    renderWithIntl(<PRRow pr={pr({ cost_usd: 0.014, latest_run_cost_usd: 0.014 })} repoId="repo-1" />);
     expect(screen.getByText("$0.014")).toBeInTheDocument();
   });
 
+  it("shows the latest run's cost with the total in parens when they differ", () => {
+    renderWithIntl(<PRRow pr={pr({ cost_usd: 0.041, latest_run_cost_usd: 0.014 })} repoId="repo-1" />);
+    expect(screen.getByText("$0.014 ($0.041)")).toBeInTheDocument();
+  });
+
   it("shows the em dash for a PR with no runs (no score, no cost)", () => {
-    renderWithIntl(<PRRow pr={pr({ cost_usd: null, score: null })} repoId="repo-1" />);
+    renderWithIntl(
+      <PRRow pr={pr({ cost_usd: null, latest_run_cost_usd: null, score: null })} repoId="repo-1" />,
+    );
     // The score cell AND the cost cell both fall back to the em dash when unset.
     expect(screen.getAllByText("—")).toHaveLength(2);
   });

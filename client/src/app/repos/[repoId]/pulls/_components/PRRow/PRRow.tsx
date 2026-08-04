@@ -9,7 +9,7 @@ import type { PrMeta } from "@/lib/types";
 import { SIZE_COLOR, STATUS_META } from "../../constants";
 import { relativeTime, sizeOf } from "../../helpers";
 import { s } from "../../styles";
-import { formatCost } from "@/lib/format";
+import { formatCostPair } from "@/lib/format";
 
 export function PRRow({ pr, repoId }: { pr: PrMeta; repoId: string }) {
   const t = useTranslations("prReview");
@@ -60,7 +60,7 @@ export function PRRow({ pr, repoId }: { pr: PrMeta; repoId: string }) {
         </Badge>
       </div>
       <div className="mono" style={s.costCell}>
-        {formatCost(pr.cost_usd)}
+        {formatCostPair(pr.latest_run_cost_usd, pr.cost_usd)}
       </div>
       <div style={s.updatedCell}>{relativeTime(pr.updated_at)}</div>
     </div>
