@@ -35,7 +35,15 @@ describe("formatCostPair", () => {
     expect(formatCostPair(0.014, 0.014)).toBe("$0.014");
   });
 
+  it("collapses to 'Free' when every run so far was free (latest === total === 0)", () => {
+    expect(formatCostPair(0, 0)).toBe("Free");
+  });
+
   it("shows latest and total together when they differ", () => {
     expect(formatCostPair(0.014, 0.041)).toBe("$0.014 ($0.041)");
+  });
+
+  it("does NOT collapse 'latest is free, but earlier runs cost something'", () => {
+    expect(formatCostPair(0, 0.02)).toBe("Free ($0.020)");
   });
 });
