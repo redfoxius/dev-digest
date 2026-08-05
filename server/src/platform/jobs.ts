@@ -97,6 +97,16 @@ export class JobRunner {
       }
     }) as Promise<void>;
 
+    // Every current caller (RepoService.add/refresh, runCloneJob's index
+    // follow-up) enqueues fire-and-forget and never touches `done` — the
+    // failure is already recorded on the `jobs` row above. Without this,
+    // `done`'s rejection (e.g. a real "git clone: repository not found")
+    // becomes a genuine unhandled promise rejection with no listener
+    // anywhere, and Node's default behavior is to crash the process.
+    // Attaching a no-op catch here marks the promise handled while leaving
+    // it free for a future caller to still `await`/`.catch()` themselves.
+    done.catch(() => {});
+
     return { id: jobId, done };
   }
 
