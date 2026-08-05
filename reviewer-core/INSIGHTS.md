@@ -19,6 +19,20 @@ workflow and quality bar.
 
 ## Tool & Library Notes
 
+- 2026-08-05 — `OpenRouterProvider`'s constructor passes `timeout: 90_000` to
+  the `openai` SDK client, and the class's own docstring claims "request
+  timeouts" live in this one place — but that constructor-level `timeout`
+  turned out NOT reliably enforced in practice: a real review against a real
+  ~30-file PR hung 8+ minutes with zero error, well past the documented
+  90s×maxRetries(2) worst case (~4.5 min). Root cause unconfirmed (SDK/fetch
+  edge case, not reproduced in a hermetic test — the hang only showed up
+  against the real network). Fix: pass an explicit `{ signal:
+  AbortSignal.timeout(timeoutMs) }` as the 2nd arg to
+  `chat.completions.create()`, per-attempt — a standard, independently
+  enforced abort mechanism, not dependent on whatever the SDK does
+  internally with its own `timeout` option.
+  (`src/llm/openrouter.ts:68-92`)
+
 ## Recurring Errors & Fixes
 
 ## Open Questions

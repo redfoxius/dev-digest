@@ -105,6 +105,10 @@ export class ReviewRunExecutor {
     }
     runLog.info(`Diff ready — ${diff.files.length} changed file(s); starting ${jobs.length} agent run(s)`);
 
+    // Tracks whether ANY agent in this batch actually completed — gates the
+    // single markReviewed() call below.
+    let anySucceeded = false;
+
     for (const { agent, runId } of jobs) {
       const agentStart = Date.now();
       logger?.info(
@@ -113,6 +117,7 @@ export class ReviewRunExecutor {
       );
       try {
         const outcome = await this.runOneAgent(workspaceId, pull, repo, diff, agent, runId, runLog);
+        anySucceeded = true;
         logger?.info(
           {
             runId,
@@ -132,6 +137,14 @@ export class ReviewRunExecutor {
           `review: agent "${agent.name}" ${cancelled ? 'cancelled' : 'failed'}`,
         );
       }
+    }
+
+    // Mark the commit this review ran against ONLY once the WHOLE batch has
+    // settled (not per-agent) — otherwise the PR flips to "reviewed" the
+    // instant the FIRST of N requested agents finishes, while the rest are
+    // still `running`, which reads as "done" when it plainly isn't.
+    if (anySucceeded) {
+      await this.repo.markReviewed(pull.id, pull.headSha);
     }
   }
 
@@ -239,9 +252,9 @@ export class ReviewRunExecutor {
       const findingRows = await this.repo.insertFindings(review.id, keptFindings);
       runLog.result(`Persisted review ${review.id} with ${findingRows.length} finding(s)`);
 
-      // Mark the commit this review ran against so the PR list can tell
-      // reviewed / needs-review (head moved) / stale apart.
-      await this.repo.markReviewed(pull.id, pull.headSha);
+      // markReviewed() (so the PR list can tell reviewed / needs-review /
+      // stale apart) is called once by executeRuns() after the WHOLE batch
+      // settles, not per-agent here — see executeRuns.
 
       const durationMs = Date.now() - start;
 

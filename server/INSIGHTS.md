@@ -140,6 +140,24 @@ workflow and quality bar.
 
 ## Recurring Errors & Fixes
 
+- 2026-08-05 — `ReviewRunExecutor.runOneAgent()` (`run-executor.ts`) called
+  `repo.markReviewed(pull.id, pull.headSha)` per-agent, right after that
+  agent's own review persisted — meaning `deriveReviewStatus()`
+  (`pulls/status.ts`) flips a PR to `reviewed` the instant the FIRST of N
+  requested agents finishes a "Run all" batch, while the other N-1 are still
+  `status: 'running'`. Observed live: 1 of 3 agents done, PR list showing
+  "Reviewed" with 2 agents visibly still running in the timeline. Fix:
+  moved the `markReviewed` call out of `runOneAgent` and into
+  `executeRuns()`, called once after its `for` loop settles ALL jobs (gated
+  on `anySucceeded`, so a fully-failed batch still doesn't mark reviewed).
+  Zero behavior change for the single-agent case (batch of 1 settles at the
+  same moment either way). Regression test: `test/reviews.it.test.ts` — "PR
+  status does not flip to 'reviewed' until every agent in the batch has
+  settled" (uses a `ControllableMockLLM` that blocks one agent on a gate the
+  test releases manually, to deterministically observe mid-batch state
+  without racing real async completion order).
+  (`src/modules/reviews/run-executor.ts:106-149`)
+
 - 2026-08-05 — `JobRunner.enqueue()` (`src/platform/jobs.ts`) returned a
   `done` promise that rejects when the job handler ultimately fails (after
   `withRetry` exhausts retries) — but every real caller

@@ -111,6 +111,66 @@ class PerAgentMockLLM implements LLMProvider {
   }
 }
 
+/**
+ * Like PerAgentMockLLM, but a marker in `blockMarkers` makes that agent's
+ * call hang until the test explicitly `release()`s it — lets a test observe
+ * DB state while one agent in a batch has genuinely finished and another is
+ * still mid-flight, instead of racing real async completion order.
+ */
+class ControllableMockLLM implements LLMProvider {
+  readonly id: 'openai' | 'anthropic' | 'openrouter' = 'openai';
+  private gates = new Map<string, { promise: Promise<void>; release: () => void }>();
+
+  constructor(
+    private fixtureByMarker: Record<string, Review>,
+    private blockMarkers: Set<string>,
+  ) {}
+
+  release(marker: string): void {
+    this.gates.get(marker)?.release();
+  }
+
+  async listModels(): Promise<ModelInfo[]> {
+    return [{ id: 'gpt-4.1', provider: 'openai' }];
+  }
+
+  async complete(req: CompletionRequest): Promise<CompletionResult> {
+    return { text: 'mock completion', model: req.model, tokensIn: 100, tokensOut: 50, costUsd: 0.001 };
+  }
+
+  async completeStructured<T>(req: StructuredRequest<T>): Promise<StructuredResult<T>> {
+    const text = req.messages.map((m) => m.content).join('\n');
+    const marker = Object.keys(this.fixtureByMarker).find((m) => text.includes(m));
+    if (!marker) throw new Error(`ControllableMockLLM: no fixture marker found in prompt: ${text.slice(0, 200)}`);
+
+    if (this.blockMarkers.has(marker)) {
+      if (!this.gates.has(marker)) {
+        let release!: () => void;
+        const promise = new Promise<void>((resolve) => (release = resolve));
+        this.gates.set(marker, { promise, release });
+      }
+      await this.gates.get(marker)!.promise;
+    }
+
+    const fixture = this.fixtureByMarker[marker];
+    const parsed = (req.schema as z.ZodType<T>).safeParse(fixture);
+    if (!parsed.success) throw new Error(`ControllableMockLLM fixture failed schema: ${parsed.error.message}`);
+    return {
+      data: parsed.data,
+      model: req.model,
+      tokensIn: 100,
+      tokensOut: 50,
+      costUsd: 0.001,
+      raw: JSON.stringify(fixture),
+      attempts: 1,
+    };
+  }
+
+  async embed(texts: string[]): Promise<number[][]> {
+    return texts.map(() => new Array(1536).fill(0));
+  }
+}
+
 let repoSeq = 0;
 async function setupRepoAndPr(db: PgFixture['handle']['db'], workspaceId: string) {
   const name = `payments-api-${repoSeq++}`;
@@ -477,6 +537,73 @@ d('A2 reviews + agents (Testcontainers pg)', () => {
     // batch, not just one agent's $0.001.
     expect(listedPr.latest_run_cost_usd).toBeCloseTo(0.003);
     expect(listedPr.cost_usd).toBeCloseTo(0.003);
+
+    await app.close();
+  });
+
+  it('PR status does not flip to "reviewed" until every agent in the batch has settled', async () => {
+    const fastFixture: Review = { verdict: 'approve', summary: 'Fast agent done.', score: 100, findings: [] };
+    const slowFixture: Review = { verdict: 'approve', summary: 'Slow agent done.', score: 100, findings: [] };
+    const llm = new ControllableMockLLM(
+      { AGENT_FAST: fastFixture, AGENT_SLOW: slowFixture },
+      new Set(['AGENT_SLOW']),
+    );
+
+    const app = await buildApp({
+      config: config(),
+      db: pg.handle.db,
+      overrides: {
+        embedder: new MockEmbedder(),
+        git: new MockGitClient({ diff: DIFF }),
+        llm: { openai: llm },
+      },
+    });
+    const { repo, pr } = await setupRepoAndPr(pg.handle.db, workspaceId);
+
+    const existing = (await app.inject({ method: 'GET', url: '/agents' })).json();
+    for (const a of existing) {
+      if (a.enabled) {
+        await app.inject({ method: 'PUT', url: `/agents/${a.id}`, payload: { enabled: false } });
+      }
+    }
+    for (const marker of ['AGENT_FAST', 'AGENT_SLOW']) {
+      await app.inject({
+        method: 'POST',
+        url: '/agents',
+        payload: { name: marker, provider: 'openai', model: 'gpt-4.1', system_prompt: marker },
+      });
+    }
+
+    const body = (
+      await app.inject({ method: 'POST', url: `/pulls/${pr.id}/review`, payload: { all: true } })
+    ).json();
+    expect(body.runs).toHaveLength(2);
+
+    // Poll until AGENT_FAST's own agent_runs row is 'done' — AGENT_SLOW is
+    // still blocked on its ControllableMockLLM gate, so the batch as a whole
+    // has NOT settled yet.
+    const deadline = Date.now() + 10_000;
+    for (;;) {
+      const runs = await pg.handle.db.select().from(t.agentRuns).where(eq(t.agentRuns.prId, pr.id));
+      if (runs.some((r) => r.status === 'done')) break;
+      if (Date.now() > deadline) throw new Error('timed out waiting for AGENT_FAST to finish');
+      await new Promise((r) => setTimeout(r, 25));
+    }
+
+    const midBatch = (await app.inject({ method: 'GET', url: `/repos/${repo.id}/pulls` })).json();
+    const midBatchPr = midBatch.find((p: { id: string }) => p.id === pr.id);
+    // The bug: markReviewed() used to fire per-agent, so the PR flipped to
+    // "reviewed" the instant AGENT_FAST finished — while AGENT_SLOW (part of
+    // the SAME requested batch) is still running. That reads as "the review
+    // is done" when it plainly isn't.
+    expect(midBatchPr.status).not.toBe('reviewed');
+
+    llm.release('AGENT_SLOW');
+    await waitForPrRuns(pg.handle.db, pr.id, { expected: 2 });
+
+    const afterBatch = (await app.inject({ method: 'GET', url: `/repos/${repo.id}/pulls` })).json();
+    const afterBatchPr = afterBatch.find((p: { id: string }) => p.id === pr.id);
+    expect(afterBatchPr.status).toBe('reviewed');
 
     await app.close();
   });
