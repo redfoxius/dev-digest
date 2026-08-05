@@ -158,6 +158,23 @@ workflow and quality bar.
   without racing real async completion order).
   (`src/modules/reviews/run-executor.ts:106-149`)
 
+- 2026-08-05 — `pulls/routes.ts`'s SCORE column had the SAME "pick the
+  literal latest row" bug already fixed for FINDINGS/COST that same day
+  (see the entry above and `docs/findings-by-severity-plan.md`'s two
+  correction addenda) — reported live only after the first two fixes
+  shipped, from a real PR where 3 agents scored 6/52/100 and the list
+  showed "100" (whichever agent finished last). Confirms this class of bug
+  ("pick literally the newest row" for a per-PR aggregate) is easy to
+  reintroduce piecemeal — SCORE was deliberately left alone during the
+  first pass with the reasoning "not meaningfully summable," which was
+  true (sum/average would be wrong) but missed that MIN is the right
+  aggregate for a worst-case gate value, same as everywhere else in this
+  app that already keys off `blockers` rather than an average. Worth
+  auditing for a 4th instance rather than assuming these three were the
+  only per-PR "latest row" reads.
+  (`src/modules/pulls/routes.ts` — `latestReviewScoreByPr`/
+  `latestReviewScoresByPr`)
+
 - 2026-08-05 — `JobRunner.enqueue()` (`src/platform/jobs.ts`) returned a
   `done` promise that rejects when the job handler ultimately fails (after
   `withRetry` exhausts retries) — but every real caller

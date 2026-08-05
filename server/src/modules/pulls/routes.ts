@@ -159,12 +159,16 @@ export default async function pullsRoutes(appBase: FastifyInstance) {
     }
 
     // Latest-review-ACTION SCORE + ids per PR (same batch concept as cost
-    // above). SCORE stays tied to the single most-recent review row (one
-    // number, not meaningfully summable across agents); FINDINGS ids collect
-    // every review from that PR's latest batch, so the severity rollup below
-    // sums across all agents from the last "Run Review" click instead of
-    // picking whichever agent's review happened to be inserted last.
-    const latestReviewScoreByPr = new Map<string, number | null>();
+    // above). SCORE is the MINIMUM (worst) score across every review in the
+    // PR's latest batch — not the literal most-recent row. Picking a single
+    // row let a clean agent that happened to finish last (e.g. score 100)
+    // mask another agent in the SAME batch that actually rejected the PR
+    // (e.g. score 6) — the list would read "100" while a real blocker
+    // exists. FINDINGS ids collect every review from that PR's latest
+    // batch, so the severity rollup below sums across all agents from the
+    // last "Run Review" click instead of picking whichever agent's review
+    // happened to be inserted last.
+    const latestReviewScoresByPr = new Map<string, number[]>();
     const latestReviewBatchKeyByPr = new Map<string, string>();
     const latestReviewIdsByPr = new Map<string, string[]>();
     if (prIds.length > 0) {
@@ -178,20 +182,30 @@ export default async function pullsRoutes(appBase: FastifyInstance) {
         .from(t.reviews)
         .where(and(inArray(t.reviews.prId, prIds), eq(t.reviews.kind, 'review')))
         .orderBy(desc(t.reviews.createdAt));
-      // Rows are newest-first → first seen per PR pins both its score and
-      // its latest-batch key. A review whose run isn't in runBatchKeyById
-      // (or has no runId at all) is its own singleton batch, keyed by its
-      // own id — matches the agent_runs fallback above.
+      // Rows are newest-first → first seen per PR pins its latest-batch key.
+      // A review whose run isn't in runBatchKeyById (or has no runId at
+      // all) is its own singleton batch, keyed by its own id — matches the
+      // agent_runs fallback above.
       for (const rv of reviewRows) {
-        if (!latestReviewScoreByPr.has(rv.prId)) latestReviewScoreByPr.set(rv.prId, rv.score);
         const batchKey = (rv.runId && runBatchKeyById.get(rv.runId)) ?? rv.id;
         if (!latestReviewBatchKeyByPr.has(rv.prId)) latestReviewBatchKeyByPr.set(rv.prId, batchKey);
         if (batchKey === latestReviewBatchKeyByPr.get(rv.prId)) {
-          const arr = latestReviewIdsByPr.get(rv.prId);
-          if (arr) arr.push(rv.id);
+          const idArr = latestReviewIdsByPr.get(rv.prId);
+          if (idArr) idArr.push(rv.id);
           else latestReviewIdsByPr.set(rv.prId, [rv.id]);
+          // A review with an unknown score (null) doesn't drag the batch's
+          // worst-case down — only known scores compete for the minimum.
+          if (rv.score != null) {
+            const scoreArr = latestReviewScoresByPr.get(rv.prId);
+            if (scoreArr) scoreArr.push(rv.score);
+            else latestReviewScoresByPr.set(rv.prId, [rv.score]);
+          }
         }
       }
+    }
+    const latestReviewScoreByPr = new Map<string, number>();
+    for (const [prId, scores] of latestReviewScoresByPr) {
+      latestReviewScoreByPr.set(prId, Math.min(...scores));
     }
 
     // Live per-severity FINDINGS breakdown, summed across every review in

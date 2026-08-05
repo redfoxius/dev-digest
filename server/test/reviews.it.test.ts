@@ -538,6 +538,15 @@ d('A2 reviews + agents (Testcontainers pg)', () => {
     expect(listedPr.latest_run_cost_usd).toBeCloseTo(0.003);
     expect(listedPr.cost_usd).toBeCloseTo(0.003);
 
+    // Same bug, same fix, for score: AGENT_NOTHING_2 finishes last with a
+    // clean 100, but AGENT_HAS_ISSUE (same batch) grounds one CRITICAL
+    // finding — recomputed score 100 − 35 = 65 (grounding recomputes score
+    // from survivors, never trusts the model's self-reported 42; see the
+    // map-reduce test above). The list must show the batch's WORST score
+    // (65), not whichever agent happened to be inserted last, or a real
+    // rejection reads as a clean pass.
+    expect(listedPr.score).toBe(65);
+
     await app.close();
   });
 

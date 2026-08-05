@@ -24,6 +24,18 @@ recent review — not meaningfully summable). See
 `server/test/reviews.it.test.ts` ("PR-list FINDINGS/COST sum every agent
 from the LAST 'run all' action…").
 
+**2026-08-05 second correction:** the "SCORE stays tied to the single most
+recent review" call above was itself wrong — same bug, third symptom.
+Reported live: a PR with 3 agents scoring 6 / 52 / 100 showed "100" on the
+list (whichever agent finished last), reading as a clean pass while one
+agent had actually rejected it. SCORE is now the MINIMUM (worst) score
+across every review in the PR's latest batch, not the literal most-recent
+row — consistent with the app's existing "worst case wins" convention
+elsewhere (`RunHistory`'s outcome coloring keys off `blockers`, not an
+average). See the `latestReviewScoreByPr` block in
+`server/src/modules/pulls/routes.ts` and the "batch's WORST score" assertion
+in `server/test/reviews.it.test.ts`.
+
 ## Context
 
 Neither screen shows a severity breakdown today: `PRRow.tsx` has no
