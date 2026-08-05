@@ -3,7 +3,7 @@
 **Status:** not started.
 
 Copy this into `docs/<language>-language-support-plan.md` (kebab-case
-language name) per this repo's root `CLAUDE.md` "Feature planning"
+language name) per this repo's root `AGENTS.md` "Feature planning"
 convention, and fill in every `<...>` placeholder with verified facts —
 not assumptions. See the `add-language-support` skill for the full
 rationale behind each step, and `docs/go-language-support-plan.md` for a

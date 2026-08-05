@@ -3,7 +3,7 @@
 Practical findings hit while working in this module. Append-only: correct a
 stale entry with a new dated line, never edit or delete history silently.
 
-Before writing here, check [CLAUDE.md](CLAUDE.md) — a finding that should
+Before writing here, check [AGENTS.md](AGENTS.md) — a finding that should
 *always* apply belongs there as a standing rule; this file is for things too
 specific, too contextual, or too unproven for that yet.
 
