@@ -40,6 +40,25 @@ export function PRRow({
         ?.filter((r) => latestReviewIds.includes(r.id))
         .flatMap((r) => r.findings)
     : undefined;
+
+  // The reviews query is cached under ["reviews", pr.id] and shared with
+  // other views (e.g. a prior visit to the PR detail page while a review
+  // was still running) — reopening this popover can serve THAT stale,
+  // incomplete cache entry (TanStack's `isLoading` is false whenever any
+  // cached data exists, even from before the review that just landed). If
+  // the cache doesn't yet contain every review the list says is part of
+  // the latest batch, treat it as loading and force a refetch, rather than
+  // confidently rendering "No findings" from data that predates the review.
+  const fetchedReviewIds = new Set((reviewsQuery.data ?? []).map((r) => r.id));
+  const missingExpectedReviews =
+    !!latestReviewIds && !latestReviewIds.every((id) => fetchedReviewIds.has(id));
+  React.useEffect(() => {
+    if (findingsOpen && missingExpectedReviews && !reviewsQuery.isFetching) {
+      reviewsQuery.refetch();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [findingsOpen, missingExpectedReviews, reviewsQuery.isFetching]);
+
   const hasFindings =
     pr.findings != null &&
     (pr.findings.critical > 0 || pr.findings.warning > 0 || pr.findings.suggestion > 0);
@@ -95,7 +114,7 @@ export function PRRow({
           >
             <FindingsPopoverList
               findings={latestFindings}
-              loading={reviewsQuery.isLoading}
+              loading={reviewsQuery.isLoading || missingExpectedReviews}
               repoFullName={repoFullName}
               headSha={pr.head_sha}
             />

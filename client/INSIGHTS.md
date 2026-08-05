@@ -65,6 +65,30 @@ workflow and quality bar.
   passing is not evidence the popover is visible.
   (`src/app/repos/[repoId]/pulls/styles.ts:91-99`)
 
+- 2026-08-05 — `PRRow`'s findings popover confidently rendered "No findings"
+  for a PR that DID have a fresh finding, reported live by the user with a
+  screenshot (found on `~/Desktop`, not attached to the chat message — see
+  memory). Root cause: `usePrReviews(prId, enabled)` shares its
+  `["reviews", prId]` cache key with every other consumer (notably the PR
+  detail page, which fetches it with `enabled: true` by default) and the
+  global `QueryClient` default is `staleTime: 30_000`
+  (`src/lib/providers.tsx:28`). Visiting the PR detail page (which is how a
+  user actually triggers "Run all agents" — the button lives there, not on
+  the list) caches an EARLY, pre-completion snapshot of that query key. Back
+  on the list, opening the FINDINGS popover within that 30s window reuses
+  the stale cached array — and critically, `reviewsQuery.isLoading` reads
+  `false` the whole time (TanStack's `isLoading` is about "no cached data
+  at all", not "is this data current"), so the popover never shows a
+  loading state, it just confidently renders the stale (findings-less)
+  snapshot. Fix: derive a `missingExpectedReviews` flag by checking whether
+  every id in `pr.latest_review_ids` (from the list fetch, always
+  server-fresh) is actually present in `reviewsQuery.data`; if not, treat
+  it as loading AND explicitly call `reviewsQuery.refetch()` — don't rely
+  on `isLoading`/`enabled`-toggle refetch semantics alone for a resource
+  that changes in the background outside this component's knowledge.
+  (`src/app/repos/[repoId]/pulls/_components/PRRow/PRRow.tsx` — the
+  `missingExpectedReviews`/refetch effect)
+
 ## Open Questions
 
 ## Session Notes
