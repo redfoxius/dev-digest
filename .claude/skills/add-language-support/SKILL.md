@@ -21,7 +21,7 @@ this skill is the condensed, reusable version of the same shape.
 - The user asks to add/plan/scope support for a new language in repo-intel
   (Rust, C++, Python, Java, ...).
 - Starting point for a plan-mode session — this skill's workflow maps
-  directly onto the phased plan doc this repo's `CLAUDE.md` requires
+  directly onto the phased plan doc this repo's `AGENTS.md` requires
   (`docs/<language>-language-support-plan.md`, with a `**Status:**` line).
 
 ## Before starting: two research spikes, not guesses
@@ -183,7 +183,7 @@ this skill is the condensed, reusable version of the same shape.
 
 10. **Docs + insights** — save the plan to
     `docs/<language>-language-support-plan.md` per this repo's root
-    `CLAUDE.md` "Feature planning" convention (a `**Status:**` line,
+    `AGENTS.md` "Feature planning" convention (a `**Status:**` line,
     updated as phases complete). After implementation, run the
     `engineering-insights` skill to capture anything genuinely new this
     language surfaced into `server/INSIGHTS.md` — a new language *reusing*
