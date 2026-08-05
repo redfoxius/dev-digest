@@ -107,6 +107,32 @@ workflow and quality bar.
 
 ## Recurring Errors & Fixes
 
+- 2026-08-05 — `JobRunner.enqueue()` (`src/platform/jobs.ts`) returned a
+  `done` promise that rejects when the job handler ultimately fails (after
+  `withRetry` exhausts retries) — but every real caller
+  (`RepoService.add`/`refresh`, `runCloneJob`'s index follow-up) only
+  `await`s `enqueue()` itself and never touches `done`. Confirmed via
+  `grep -rn "\.done\b" src/` returning zero hits outside `jobs.ts` itself.
+  Result: a real `git clone` failure (e.g. a seeded demo repo like
+  `acme/payments-api` that doesn't exist on GitHub — 404 on both the PR-list
+  API call *and* the clone) became a genuine unhandled promise rejection
+  with no listener anywhere in `src/` (no `process.on('unhandledRejection', ...)`
+  either — only SIGTERM/SIGINT in `server.ts`), and Node's default behavior
+  is to crash the whole process. This killed the entire server for every
+  workspace/repo, not just the one bad clone, whenever a user hit "Refresh"
+  on a repo whose remote is unreachable/nonexistent. The DB-side failure
+  recording (`jobs.status = 'failed'` + `error` message) was already
+  correct — the bug was purely the unhandled rejection layer above it. Fix:
+  `done.catch(() => {})` right after `queue.add()`, before returning
+  `{ id, done }` — marks the promise handled (satisfies Node's
+  unhandledRejection check) while leaving `done` itself unchanged for any
+  future caller that does want to `await`/`.catch()` it. Regression test:
+  `test/jobs.test.ts` — asserts `process.on('unhandledRejection', ...)`
+  never fires for a failing fire-and-forget job (fails without the fix,
+  verified by temporarily reverting it), plus a second test proving `done`
+  still rejects for a caller that does await it.
+  (`src/platform/jobs.ts:98-108`)
+
 - 2026-08-04 — `getUnresolvedReferences`'s (`service.ts`) phantom-API gate
   filtered `parseInvocationHeads` output through a single, JS/TS-only
   `PHANTOM_GLOBALS_ALLOWLIST` — a leftover from before Go existed in this
