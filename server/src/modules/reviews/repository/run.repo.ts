@@ -113,6 +113,23 @@ export async function reapStaleRunningRuns(db: Db): Promise<number> {
 
 // ---- observability: agent_runs + run_traces -------------------------------
 
+/**
+ * Create a `multi_agent_runs` row grouping every agent_run about to be
+ * created by one `POST /pulls/:id/review` call (single agent or "run all").
+ * Lets the PR list sum cost/findings across the whole batch instead of
+ * picking whichever single run happened to finish last.
+ */
+export async function createMultiAgentRun(
+  db: Db,
+  values: { workspaceId: string; prId: string },
+): Promise<string> {
+  const [row] = await db
+    .insert(t.multiAgentRuns)
+    .values({ workspaceId: values.workspaceId, prId: values.prId })
+    .returning({ id: t.multiAgentRuns.id });
+  return row!.id;
+}
+
 /** Create an agent_runs row in `running` state; returns its id (= the runId). */
 export async function createAgentRun(
   db: Db,
@@ -122,6 +139,7 @@ export async function createAgentRun(
     prId: string;
     provider: string | null;
     model: string | null;
+    multiAgentRunId: string | null;
   },
 ): Promise<string> {
   const [row] = await db
@@ -134,6 +152,7 @@ export async function createAgentRun(
       model: values.model,
       status: 'running',
       source: 'local',
+      multiAgentRunId: values.multiAgentRunId,
     })
     .returning({ id: t.agentRuns.id });
   return row!.id;

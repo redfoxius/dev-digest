@@ -173,17 +173,22 @@ export const PrMeta = z.object({
   // Sum of cost_usd across every agent run ever executed against this PR
   // (list endpoint only; null/absent when no run has a known cost).
   cost_usd: z.number().nullish(),
-  // Cost of the single most recent agent run against this PR (by ranAt).
-  // null/absent when that run's cost is unknown or the PR has no runs.
+  // Cost of every agent run belonging to the PR's LAST review action (a
+  // single "Run Review" click may run several agents at once — this is
+  // their combined cost, not just whichever one happened to finish last).
+  // null/absent when every run in that batch has unknown cost, or the PR
+  // has no runs.
   latest_run_cost_usd: z.number().nullish(),
-  // id of the review the `findings` breakdown below belongs to (list
+  // ids of every review belonging to the PR's LAST review action (list
   // endpoint only; null/absent until reviewed) — lets the client lazily
-  // fetch that one review's full findings for the click-popover without a
-  // second round-trip to figure out which review to ask for.
-  latest_review_id: z.string().nullish(),
-  // Live per-severity counts for the PR's latest review (dismissed findings
-  // excluded); null/absent until reviewed. Not summed across every review —
-  // only the latest, so a finding flagged by two agents isn't double-counted.
+  // fetch and merge those reviews' full findings for the click-popover
+  // without a second round-trip to figure out which reviews to ask for.
+  latest_review_ids: z.array(z.string()).nullish(),
+  // Live per-severity counts summed across every review in the PR's LAST
+  // review action (dismissed findings excluded); null/absent until
+  // reviewed. Not summed across every review ever — only the latest batch,
+  // so a finding flagged by two agents in the SAME run isn't double-counted,
+  // but every agent from that run IS counted (see latest_run_cost_usd).
   findings: z
     .object({
       critical: z.number().int(),

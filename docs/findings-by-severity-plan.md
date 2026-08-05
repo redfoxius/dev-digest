@@ -5,6 +5,25 @@ landed, verified via automated tests + a manual browser pass (with the
 `tableCard.overflow: hidden` clipping fix from step 22's manual pass, not
 in the original plan).
 
+**2026-08-05 correction:** the plan's own decision — "PR-list badge = the
+PR's **latest review** only (not summed across agents)" — turned out wrong
+in practice. When "Run all agents" runs N agents in one click, each agent
+gets its own `reviews` row with its own `createdAt`; picking literally the
+single most-recent row means whichever agent happened to finish last
+determines the badge, silently hiding every other agent's findings from
+the SAME action if that last agent found nothing. Same bug, same root
+cause, on `latest_run_cost_usd` (from `docs/review-cost-plan.md`'s later
+addendum, commit `122c07c`) — "the cost of the last run" also picked one
+`agent_runs` row instead of summing every agent from the last batch. Fixed
+by reviving the previously-unused `multi_agent_runs` table: one row per
+`POST /pulls/:id/review` call, every `agent_runs` row it creates stamped
+with `multi_agent_run_id`; the PR list now sums findings/cost across every
+run sharing the PR's latest batch id (SCORE stays tied to the single most
+recent review — not meaningfully summable). See
+`server/src/modules/pulls/routes.ts` and the regression test in
+`server/test/reviews.it.test.ts` ("PR-list FINDINGS/COST sum every agent
+from the LAST 'run all' action…").
+
 ## Context
 
 Neither screen shows a severity breakdown today: `PRRow.tsx` has no
