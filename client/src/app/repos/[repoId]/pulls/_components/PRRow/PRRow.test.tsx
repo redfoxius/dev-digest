@@ -36,7 +36,7 @@ function pr(o: Partial<PrMeta>): PrMeta {
     score: 61,
     cost_usd: 0.014,
     latest_run_cost_usd: 0.014,
-    latest_review_id: null,
+    latest_review_ids: null,
     findings: null,
     ...o,
   };
@@ -76,7 +76,7 @@ describe("PRRow — COST column", () => {
 describe("PRRow — FINDINGS column", () => {
   it("shows an em dash when the PR has never been reviewed", () => {
     usePrReviews.mockReturnValue({ data: undefined, isLoading: false });
-    renderWithIntl(<PRRow pr={pr({ findings: null, latest_review_id: null })} repoId="repo-1" />);
+    renderWithIntl(<PRRow pr={pr({ findings: null, latest_review_ids: null })} repoId="repo-1" />);
     expect(screen.getAllByText("—").length).toBeGreaterThan(0);
   });
 
@@ -84,7 +84,7 @@ describe("PRRow — FINDINGS column", () => {
     usePrReviews.mockReturnValue({ data: undefined, isLoading: false });
     renderWithIntl(
       <PRRow
-        pr={pr({ findings: { critical: 0, warning: 0, suggestion: 0 }, latest_review_id: "rev-1" })}
+        pr={pr({ findings: { critical: 0, warning: 0, suggestion: 0 }, latest_review_ids: ["rev-1"] })}
         repoId="repo-1"
       />,
     );
@@ -127,11 +127,76 @@ describe("PRRow — FINDINGS column", () => {
     usePrReviews.mockReturnValue({ data: [review], isLoading: false });
     renderWithIntl(
       <PRRow
-        pr={pr({ findings: { critical: 1, warning: 0, suggestion: 0 }, latest_review_id: "rev-1" })}
+        pr={pr({ findings: { critical: 1, warning: 0, suggestion: 0 }, latest_review_ids: ["rev-1"] })}
         repoId="repo-1"
       />,
     );
     expect(screen.getByText("1")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("1"));
+    expect(screen.getByText("Hardcoded secret")).toBeInTheDocument();
+  });
+
+  it("merges findings across every review in the last batch — a finding from one agent isn't hidden by two other agents that found nothing", () => {
+    const noFindingsReview = (id: string): ReviewRecord => ({
+      id,
+      pr_id: "pr-1",
+      agent_id: null,
+      run_id: `run-${id}`,
+      agent_name: "Clean Agent",
+      kind: "review",
+      verdict: "approve",
+      summary: null,
+      score: 100,
+      model: "gpt-4.1",
+      cost_usd: null,
+      created_at: "2026-06-11T18:00:00.000Z",
+      findings: [],
+    });
+    const hasFindingReview: ReviewRecord = {
+      id: "rev-issue",
+      pr_id: "pr-1",
+      agent_id: null,
+      run_id: "run-rev-issue",
+      agent_name: "Sec",
+      kind: "review",
+      verdict: "request_changes",
+      summary: null,
+      score: 42,
+      model: "gpt-4.1",
+      cost_usd: null,
+      created_at: "2026-06-11T18:00:01.000Z",
+      findings: [
+        {
+          id: "f-1",
+          review_id: "rev-issue",
+          severity: "CRITICAL",
+          category: "security",
+          title: "Hardcoded secret",
+          file: "src/config.ts",
+          start_line: 11,
+          end_line: 11,
+          rationale: "A live key is committed in source.",
+          suggestion: null,
+          confidence: 0.9,
+          kind: "finding",
+          accepted_at: null,
+          dismissed_at: null,
+        },
+      ],
+    };
+    usePrReviews.mockReturnValue({
+      data: [noFindingsReview("rev-a"), hasFindingReview, noFindingsReview("rev-b")],
+      isLoading: false,
+    });
+    renderWithIntl(
+      <PRRow
+        pr={pr({
+          findings: { critical: 1, warning: 0, suggestion: 0 },
+          latest_review_ids: ["rev-a", "rev-issue", "rev-b"],
+        })}
+        repoId="repo-1"
+      />,
+    );
     fireEvent.click(screen.getByText("1"));
     expect(screen.getByText("Hardcoded secret")).toBeInTheDocument();
   });

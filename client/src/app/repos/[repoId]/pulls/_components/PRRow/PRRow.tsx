@@ -31,9 +31,15 @@ export function PRRow({
   const reviewed = pr.score != null; // null score ⇒ PR has never been reviewed
 
   // Lazy: only fetch the PR's reviews once the findings popover is actually
-  // opened, filtered down to the one review the list's live counts came from.
+  // opened, filtered + merged down to the reviews the list's live counts
+  // came from (every agent from the PR's LAST review action, not just one).
   const reviewsQuery = usePrReviews(pr.id, findingsOpen);
-  const latestReview = reviewsQuery.data?.find((r) => r.id === pr.latest_review_id);
+  const latestReviewIds = pr.latest_review_ids;
+  const latestFindings = latestReviewIds
+    ? reviewsQuery.data
+        ?.filter((r) => latestReviewIds.includes(r.id))
+        .flatMap((r) => r.findings)
+    : undefined;
   const hasFindings =
     pr.findings != null &&
     (pr.findings.critical > 0 || pr.findings.warning > 0 || pr.findings.suggestion > 0);
@@ -88,7 +94,7 @@ export function PRRow({
             trigger={<SeverityCounts counts={pr.findings} />}
           >
             <FindingsPopoverList
-              findings={latestReview?.findings}
+              findings={latestFindings}
               loading={reviewsQuery.isLoading}
               repoFullName={repoFullName}
               headSha={pr.head_sha}
