@@ -1,11 +1,58 @@
 # PR Self Review skill
 
-**Status:** in progress — steps 1 (`.claude/skills/pr-self-review/SKILL.md`,
-including the canonical `Workflow` script), 8 (`AGENTS.md` trigger line), 9
-(`README.md` catalog row), and 10 (`examples.md`, two worked cases) are
-done. Step 11 (open a real throwaway PR and validate end to end) is not
-started — it posts a live GitHub review + label, so it's deliberately left
-for the user to greenlight rather than run unprompted.
+**Status:** in progress — steps 1, 8, 9, 10 done. Step 11 (real-PR
+validation) ran once manually against PR #7
+(https://github.com/redfoxius/dev-digest/pull/7) — Match-only, no matched
+skills, correctly posted nothing. Full end-to-end (a run that actually
+trips the gate and posts a review) still not done — see below.
+
+**2026-08-06 correction, from the first live run:** two real bugs surfaced
+running the skill by hand, both now fixed in `SKILL.md`:
+
+1. **`args` arrives as a raw JSON string, not a parsed object**, in this
+   harness's `Workflow` tool — confirmed with an isolated smoke test
+   (`log(JSON.stringify(args))` printed a *string*, not an object). The
+   script now defensively does
+   `const parsedArgs = typeof args === 'string' ? JSON.parse(args) : args`
+   before reading `.catalog`/`.files`/`.diff` off it. Without this, every
+   invocation throws `undefined is not an object (evaluating 'files.join')`
+   before a single agent runs.
+2. **The catalog-exclusion list didn't actually exclude anything.** Step
+   2's `cat .claude/skills/README.md` dumps the catalog *table* verbatim,
+   which still lists `engineering-insights`/`mermaid-diagram`/`pr-self-review`
+   as rows — omitting their per-skill description blocks (the only filter
+   that existed) left them fully visible and selectable from the table.
+   First real Match run picked `engineering-insights` for four
+   barely-touched `INSIGHTS.md` files (2-line diffs, not the "substantive
+   new dated entries" the matcher's own rationale claimed — a second,
+   smaller finding: the matcher can narrate an overconfident, factually
+   wrong justification for a bad match). Fixed two ways: `grep -Ev` strips
+   those three rows from `README.md`'s table before it's ever shown to the
+   matcher, **and** the Match prompt now names all three by name as a
+   second guard — a stripped row is one bad `grep` away from silently
+   reappearing, so don't rely on the table alone.
+
+With both fixes, re-running Match-only against PR #7's scoped diff (the 35
+files unique to this branch vs. `origin/feat/findings-by-severity` — see
+"Scope note" below) correctly returned zero matches, and the skill posted
+nothing — the correct outcome for a diff that's almost entirely new skill
+documentation with no real application code in it.
+
+**Scope note, not itself a bug:** PR #7 is based on `main`, which doesn't
+have PR #5 (`feat/findings-by-severity`) merged yet — so PR #7's *full*
+diff via `gh pr diff` is 71 files (everything PR #5 already carries, plus
+this branch's own 2 commits). Reviewing that whole thing would have been
+expensive and pointless (re-reviewing already-written, already-reviewed
+work). This run instead scoped to `git diff origin/feat/findings-by-severity...HEAD`
+— the 35 files actually unique to this branch. `SKILL.md`'s own "scope the
+PR" step (step 1) doesn't account for a PR stacked on an unmerged parent;
+worth a follow-up note in `SKILL.md` if this repo keeps stacking PRs this
+way, but not fixed now since it didn't affect this particular run's
+correctness.
+
+Still not started: a full end-to-end run where the gate actually trips
+(posts a real `REQUEST_CHANGES` + `blocked-critical` label) and a
+push-triggered re-check.
 
 ## Context
 

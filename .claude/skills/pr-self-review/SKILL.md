@@ -56,7 +56,12 @@ here too, report "nothing reviewable in this diff," post nothing.
 
 ```bash
 CATALOG=$(
-  cat .claude/skills/README.md
+  # `cat`-ing README.md's catalog table verbatim still lists engineering-insights/
+  # mermaid-diagram/pr-self-review as rows — strip those three before the matcher
+  # ever sees them, don't rely on omitting their description blocks alone (that
+  # alone still leaves them selectable from the table; caught during this skill's
+  # first live run — see docs/pr-self-review-skill-plan.md).
+  grep -Ev '^\| \[(engineering-insights|mermaid-diagram|pr-self-review)\]' .claude/skills/README.md
   echo
   for f in .claude/skills/*/SKILL.md; do
     name=$(basename "$(dirname "$f")")
@@ -71,7 +76,10 @@ CATALOG=$(
 
 `engineering-insights` and `mermaid-diagram` are process/meta skills, not
 code reviewers — excluded from the candidate pool along with this skill
-itself.
+itself, from both the table rows and the description blocks. Repeat the
+exclusion by name in the Match agent's prompt (step 3) too, as a second
+guard — a stripped row is still one bad `grep` away from silently
+reappearing.
 
 ### 3. Match + review, via `Workflow`
 
@@ -91,9 +99,12 @@ export const meta = {
   ],
 }
 
-const catalog = args.catalog
-const files = args.files
-const diff = args.diff
+// `args` has been observed coming through as a raw JSON string rather than a parsed object in this
+// harness (confirmed by a smoke test during this skill's first live run) — parse defensively.
+const parsedArgs = typeof args === 'string' ? JSON.parse(args) : args
+const catalog = parsedArgs.catalog
+const files = parsedArgs.files
+const diff = parsedArgs.diff
 
 const MATCH_SCHEMA = {
   type: 'object',
@@ -149,6 +160,8 @@ const matchResult = await agent(
     'Return only skills genuinely relevant to what these files actually contain — reason about content,',
     "not just directory or the catalog's coarse scope label. Do not blanket-match every \"Full-stack\"-scoped",
     'skill to every file just because it could theoretically apply. Group files under each matched skill.',
+    'Never match engineering-insights, mermaid-diagram, or pr-self-review — they are process/meta skills,',
+    'not code reviewers, excluded from this pool regardless of what the catalog text above still shows.',
   ].join('\n'),
   { schema: MATCH_SCHEMA },
 )
