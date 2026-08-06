@@ -1,6 +1,40 @@
 # Findings by severity — PR list + Agent runs timeline
 
-**Status:** not started — parked for later.
+**Status:** done — implemented on `feat/findings-by-severity`, all 22 steps
+landed, verified via automated tests + a manual browser pass (with the
+`tableCard.overflow: hidden` clipping fix from step 22's manual pass, not
+in the original plan).
+
+**2026-08-05 correction:** the plan's own decision — "PR-list badge = the
+PR's **latest review** only (not summed across agents)" — turned out wrong
+in practice. When "Run all agents" runs N agents in one click, each agent
+gets its own `reviews` row with its own `createdAt`; picking literally the
+single most-recent row means whichever agent happened to finish last
+determines the badge, silently hiding every other agent's findings from
+the SAME action if that last agent found nothing. Same bug, same root
+cause, on `latest_run_cost_usd` (from `docs/review-cost-plan.md`'s later
+addendum, commit `122c07c`) — "the cost of the last run" also picked one
+`agent_runs` row instead of summing every agent from the last batch. Fixed
+by reviving the previously-unused `multi_agent_runs` table: one row per
+`POST /pulls/:id/review` call, every `agent_runs` row it creates stamped
+with `multi_agent_run_id`; the PR list now sums findings/cost across every
+run sharing the PR's latest batch id (SCORE stays tied to the single most
+recent review — not meaningfully summable). See
+`server/src/modules/pulls/routes.ts` and the regression test in
+`server/test/reviews.it.test.ts` ("PR-list FINDINGS/COST sum every agent
+from the LAST 'run all' action…").
+
+**2026-08-05 second correction:** the "SCORE stays tied to the single most
+recent review" call above was itself wrong — same bug, third symptom.
+Reported live: a PR with 3 agents scoring 6 / 52 / 100 showed "100" on the
+list (whichever agent finished last), reading as a clean pass while one
+agent had actually rejected it. SCORE is now the MINIMUM (worst) score
+across every review in the PR's latest batch, not the literal most-recent
+row — consistent with the app's existing "worst case wins" convention
+elsewhere (`RunHistory`'s outcome coloring keys off `blockers`, not an
+average). See the `latestReviewScoreByPr` block in
+`server/src/modules/pulls/routes.ts` and the "batch's WORST score" assertion
+in `server/test/reviews.it.test.ts`.
 
 ## Context
 

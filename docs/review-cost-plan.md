@@ -50,7 +50,7 @@ and from a nonzero-but-sub-$0.001 run (which would otherwise *also* round to
 ### 0. Save this plan into the repo
 Copy this plan document to `docs/review-cost-plan.md` (root `docs/` already
 exists and is the repo's cross-cutting reference-docs location per root
-`CLAUDE.md`) — do this first, before any code change, so the spec is
+`AGENTS.md`) — do this first, before any code change, so the spec is
 committed alongside the feature it describes.
 
 ### 1. DB schema + migration
@@ -67,7 +67,7 @@ committed alongside the feature it describes.
 - Run `cd server && pnpm db:migrate` to apply.
 
 ### 2. Shared contracts (edit BOTH vendor copies — server AND client) + i18n
-Per the root `CLAUDE.md`: `@devdigest/shared` is hand-copied into
+Per the root `AGENTS.md`: `@devdigest/shared` is hand-copied into
 `server/src/vendor/shared` and `client/src/vendor/shared`; every contract
 edit below must land identically in both trees.
 

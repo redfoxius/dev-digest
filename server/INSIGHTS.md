@@ -3,7 +3,7 @@
 Practical findings hit while working in this module. Append-only: correct a
 stale entry with a new dated line, never edit or delete history silently.
 
-Before writing here, check [CLAUDE.md](CLAUDE.md) — a finding that should
+Before writing here, check [AGENTS.md](AGENTS.md) — a finding that should
 *always* apply belongs there as a standing rule; this file is for things too
 specific, too contextual, or too unproven for that yet.
 
@@ -16,6 +16,39 @@ workflow and quality bar.
 ## What Doesn't Work
 
 ## Codebase Patterns
+
+- 2026-08-05 — `multi_agent_runs` (`server/src/db/schema/runs.ts`) sat in the
+  schema with zero inserts/selects anywhere in the codebase (confirmed by
+  repo-wide grep) before this date — its shape (`id, workspaceId, prId,
+  ranAt`, no agent-specific fields) is exactly a "batch" grouping row, but
+  nothing wired it up. Before assuming an empty/unused table like this is a
+  "future lesson" placeholder (per root `CLAUDE.md`'s do-not-touch note) and
+  leaving it alone, confirm with whoever owns the course content — in this
+  case the user explicitly said to use it rather than add a parallel
+  mechanism. Now wired: `ReviewService.runReview()` inserts one row per
+  `POST /pulls/:id/review` call and stamps every `agent_runs` row it creates
+  with `multi_agent_run_id` (migration `0012_lively_molly_hayes.sql`).
+  (`server/src/db/schema/runs.ts:8-20`, `server/src/modules/reviews/service.ts:114-136`)
+
+- 2026-08-05 — Any "PR list shows the latest X" feature that reads from
+  `reviews`/`agent_runs` must account for "Run all agents" creating MULTIPLE
+  independent rows (one per agent) in one user action, each with its own
+  `createdAt`/`ranAt`. Picking a single row via `ORDER BY ... DESC` +
+  first-seen-per-PR (the pattern used for SCORE, and initially copied for
+  FINDINGS/COST) silently drops every sibling agent's data whenever the row
+  with the max timestamp happens to be a "boring" one (e.g. an agent that
+  found nothing). This bit both the FINDINGS column
+  (`docs/findings-by-severity-plan.md`'s 2026-08-05 correction) and
+  `latest_run_cost_usd` (from the review-cost feature, commit `122c07c`) —
+  same root cause, found independently by the user for each. Fixed via the
+  `multi_agent_runs` batch-id grouping above; SCORE was deliberately left as
+  single-latest-row (a score isn't meaningfully summable across agents).
+  Generalizable check for the next "latest N" feature over these two tables:
+  ask "what happens when 3 agents ran together and 2 of them are boring?"
+  before shipping.
+  (`server/src/modules/pulls/routes.ts:114-186`,
+  `server/test/reviews.it.test.ts` — "PR-list FINDINGS/COST sum every agent
+  from the LAST 'run all' action…")
 
 - 2026-07-27 — `@devdigest/shared` is hand-copied into both `server/src/vendor/shared`
   and `client/src/vendor/shared`, not a real linked package — and the copies
@@ -106,6 +139,41 @@ workflow and quality bar.
   (`server/pnpm-workspace.yaml:2`)
 
 ## Recurring Errors & Fixes
+
+- 2026-08-05 — `ReviewRunExecutor.runOneAgent()` (`run-executor.ts`) called
+  `repo.markReviewed(pull.id, pull.headSha)` per-agent, right after that
+  agent's own review persisted — meaning `deriveReviewStatus()`
+  (`pulls/status.ts`) flips a PR to `reviewed` the instant the FIRST of N
+  requested agents finishes a "Run all" batch, while the other N-1 are still
+  `status: 'running'`. Observed live: 1 of 3 agents done, PR list showing
+  "Reviewed" with 2 agents visibly still running in the timeline. Fix:
+  moved the `markReviewed` call out of `runOneAgent` and into
+  `executeRuns()`, called once after its `for` loop settles ALL jobs (gated
+  on `anySucceeded`, so a fully-failed batch still doesn't mark reviewed).
+  Zero behavior change for the single-agent case (batch of 1 settles at the
+  same moment either way). Regression test: `test/reviews.it.test.ts` — "PR
+  status does not flip to 'reviewed' until every agent in the batch has
+  settled" (uses a `ControllableMockLLM` that blocks one agent on a gate the
+  test releases manually, to deterministically observe mid-batch state
+  without racing real async completion order).
+  (`src/modules/reviews/run-executor.ts:106-149`)
+
+- 2026-08-05 — `pulls/routes.ts`'s SCORE column had the SAME "pick the
+  literal latest row" bug already fixed for FINDINGS/COST that same day
+  (see the entry above and `docs/findings-by-severity-plan.md`'s two
+  correction addenda) — reported live only after the first two fixes
+  shipped, from a real PR where 3 agents scored 6/52/100 and the list
+  showed "100" (whichever agent finished last). Confirms this class of bug
+  ("pick literally the newest row" for a per-PR aggregate) is easy to
+  reintroduce piecemeal — SCORE was deliberately left alone during the
+  first pass with the reasoning "not meaningfully summable," which was
+  true (sum/average would be wrong) but missed that MIN is the right
+  aggregate for a worst-case gate value, same as everywhere else in this
+  app that already keys off `blockers` rather than an average. Worth
+  auditing for a 4th instance rather than assuming these three were the
+  only per-PR "latest row" reads.
+  (`src/modules/pulls/routes.ts` — `latestReviewScoreByPr`/
+  `latestReviewScoresByPr`)
 
 - 2026-08-05 — `JobRunner.enqueue()` (`src/platform/jobs.ts`) returned a
   `done` promise that rejects when the job handler ultimately fails (after

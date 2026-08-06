@@ -1,13 +1,13 @@
 import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
-import { and, desc, eq, inArray } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull } from 'drizzle-orm';
 import type { PrMeta, PrDetail, GitHubClient, PrReviewComment } from '@devdigest/shared';
 import { PrCommentInput } from '@devdigest/shared';
 import * as t from '../../db/schema.js';
 import { getContext } from '../_shared/context.js';
 import { IdParams } from '../_shared/schemas.js';
 import { AppError, NotFoundError } from '../../platform/errors.js';
-import { deriveReviewStatus } from './status.js';
+import { deriveReviewStatus, rollupSeverities } from './status.js';
 
 /**
  * F1 — pulls module. PR import via Octokit (list + per-PR detail).
@@ -111,54 +111,128 @@ export default async function pullsRoutes(appBase: FastifyInstance) {
       }
     }
 
-    // Latest-review SCORE per PR for the list's score ring. Computed on read
-    // from reviews (no FK denorm); the list is small, so one IN-query + JS
-    // grouping is cheap. (The per-severity FINDINGS breakdown is intentionally
-    // not surfaced on the list — findings live on the PR detail page.)
+    // Total COST across ALL agent runs ever executed for each PR, plus the
+    // "last (total)" figure — cost of every agent run belonging to the LAST
+    // review ACTION (one `POST /pulls/:id/review` call may run several
+    // agents at once; they all share `multi_agent_run_id`). Picking a single
+    // most-recent `agent_runs` row here would silently drop every sibling
+    // agent's cost whenever one agent happens to finish last — the batch key
+    // (`multiAgentRunId ?? id`) is what makes "the last run" mean "the whole
+    // last action" instead of "whichever row's ranAt sorts highest". Rows
+    // created before the `multi_agent_run_id` column existed have no batch
+    // id and fall back to being their own singleton batch (unchanged legacy
+    // behavior). Computed on read (no FK denorm), one IN-query + JS grouping,
+    // same idiom as the findings aggregation below.
     const prIds = rows.map((r) => r.id);
-    const latestReviewByPr = new Map<string, { score: number | null }>();
-    if (prIds.length > 0) {
-      const reviewRows = await container.db
-        .select({ prId: t.reviews.prId, score: t.reviews.score })
-        .from(t.reviews)
-        .where(and(inArray(t.reviews.prId, prIds), eq(t.reviews.kind, 'review')))
-        .orderBy(desc(t.reviews.createdAt));
-      // Rows are newest-first → first seen per PR is the latest review.
-      for (const rv of reviewRows) {
-        if (!latestReviewByPr.has(rv.prId)) latestReviewByPr.set(rv.prId, { score: rv.score });
-      }
-    }
-
-    // Total cost across ALL agent runs ever executed for each PR, plus the
-    // cost of just the MOST RECENT run (for the list's "last (total)"
-    // display). Computed on read from agent_runs (no FK denorm), same "list
-    // is small" IN-query + JS grouping idiom as the score map above — one
-    // query, ordered newest-first so the first row seen per PR is also its
-    // latest run. A PR's total is absent from the map (→ null) only when
-    // NONE of its runs have a known cost (never run, or every run used an
-    // unpriced model / never completed an LLM call); latest-run cost is
-    // absent when that specific run's cost is unknown, independent of total.
     const costByPr = new Map<string, number>();
-    const latestRunCostByPr = new Map<string, number | null>();
+    const latestRunBatchKeyByPr = new Map<string, string>();
+    const latestRunCostByPr = new Map<string, number>();
+    // agent_runs.id → its batch key, reused below to key each REVIEW's batch
+    // via reviews.runId (a review has no multi_agent_run_id of its own).
+    const runBatchKeyById = new Map<string, string>();
     if (prIds.length > 0) {
       const costRows = await container.db
-        .select({ prId: t.agentRuns.prId, costUsd: t.agentRuns.costUsd, ranAt: t.agentRuns.ranAt })
+        .select({
+          id: t.agentRuns.id,
+          prId: t.agentRuns.prId,
+          costUsd: t.agentRuns.costUsd,
+          multiAgentRunId: t.agentRuns.multiAgentRunId,
+        })
         .from(t.agentRuns)
         .where(inArray(t.agentRuns.prId, prIds))
         .orderBy(desc(t.agentRuns.ranAt));
       for (const run of costRows) {
+        const batchKey = run.multiAgentRunId ?? run.id;
+        runBatchKeyById.set(run.id, batchKey);
         if (!run.prId) continue;
         if (run.costUsd != null) {
           costByPr.set(run.prId, (costByPr.get(run.prId) ?? 0) + run.costUsd);
         }
-        // Rows are newest-first → first seen per PR is its latest run.
-        if (!latestRunCostByPr.has(run.prId)) latestRunCostByPr.set(run.prId, run.costUsd);
+        // Rows are newest-first → the first row seen per PR pins that PR's
+        // latest-batch key (it IS the newest run, so it's part of its own
+        // latest batch by definition).
+        if (!latestRunBatchKeyByPr.has(run.prId)) latestRunBatchKeyByPr.set(run.prId, batchKey);
+        if (batchKey === latestRunBatchKeyByPr.get(run.prId) && run.costUsd != null) {
+          latestRunCostByPr.set(run.prId, (latestRunCostByPr.get(run.prId) ?? 0) + run.costUsd);
+        }
+      }
+    }
+
+    // Latest-review-ACTION SCORE + ids per PR (same batch concept as cost
+    // above). SCORE is the MINIMUM (worst) score across every review in the
+    // PR's latest batch — not the literal most-recent row. Picking a single
+    // row let a clean agent that happened to finish last (e.g. score 100)
+    // mask another agent in the SAME batch that actually rejected the PR
+    // (e.g. score 6) — the list would read "100" while a real blocker
+    // exists. FINDINGS ids collect every review from that PR's latest
+    // batch, so the severity rollup below sums across all agents from the
+    // last "Run Review" click instead of picking whichever agent's review
+    // happened to be inserted last.
+    const latestReviewScoresByPr = new Map<string, number[]>();
+    const latestReviewBatchKeyByPr = new Map<string, string>();
+    const latestReviewIdsByPr = new Map<string, string[]>();
+    if (prIds.length > 0) {
+      const reviewRows = await container.db
+        .select({
+          id: t.reviews.id,
+          prId: t.reviews.prId,
+          runId: t.reviews.runId,
+          score: t.reviews.score,
+        })
+        .from(t.reviews)
+        .where(and(inArray(t.reviews.prId, prIds), eq(t.reviews.kind, 'review')))
+        .orderBy(desc(t.reviews.createdAt));
+      // Rows are newest-first → first seen per PR pins its latest-batch key.
+      // A review whose run isn't in runBatchKeyById (or has no runId at
+      // all) is its own singleton batch, keyed by its own id — matches the
+      // agent_runs fallback above.
+      for (const rv of reviewRows) {
+        const batchKey = (rv.runId && runBatchKeyById.get(rv.runId)) ?? rv.id;
+        if (!latestReviewBatchKeyByPr.has(rv.prId)) latestReviewBatchKeyByPr.set(rv.prId, batchKey);
+        if (batchKey === latestReviewBatchKeyByPr.get(rv.prId)) {
+          const idArr = latestReviewIdsByPr.get(rv.prId);
+          if (idArr) idArr.push(rv.id);
+          else latestReviewIdsByPr.set(rv.prId, [rv.id]);
+          // A review with an unknown score (null) doesn't drag the batch's
+          // worst-case down — only known scores compete for the minimum.
+          if (rv.score != null) {
+            const scoreArr = latestReviewScoresByPr.get(rv.prId);
+            if (scoreArr) scoreArr.push(rv.score);
+            else latestReviewScoresByPr.set(rv.prId, [rv.score]);
+          }
+        }
+      }
+    }
+    const latestReviewScoreByPr = new Map<string, number>();
+    for (const [prId, scores] of latestReviewScoresByPr) {
+      latestReviewScoreByPr.set(prId, Math.min(...scores));
+    }
+
+    // Live per-severity FINDINGS breakdown, summed across every review in
+    // each PR's latest batch (not across ALL history — a finding an agent
+    // already flagged in an older run still isn't double-counted, since only
+    // the latest batch's review ids are in this query). "Live" means
+    // dismissed findings are excluded at read time, not snapshotted, so
+    // accepting/dismissing a finding is reflected on the next list fetch.
+    const allLatestReviewIds = [...latestReviewIdsByPr.values()].flat();
+    const findingsByReview = new Map<string, { severity: string }[]>();
+    if (allLatestReviewIds.length > 0) {
+      const findingRows = await container.db
+        .select({ reviewId: t.findings.reviewId, severity: t.findings.severity })
+        .from(t.findings)
+        .where(
+          and(inArray(t.findings.reviewId, allLatestReviewIds), isNull(t.findings.dismissedAt)),
+        );
+      for (const f of findingRows) {
+        const arr = findingsByReview.get(f.reviewId);
+        if (arr) arr.push(f);
+        else findingsByReview.set(f.reviewId, [f]);
       }
     }
 
     const now = Date.now();
     return rows.map((r) => {
-      const review = latestReviewByPr.get(r.id);
+      const reviewIds = latestReviewIdsByPr.get(r.id);
       return {
         id: r.id,
         number: r.number,
@@ -179,9 +253,13 @@ export default async function pullsRoutes(appBase: FastifyInstance) {
         }),
         opened_at: r.openedAt?.toISOString() ?? null,
         updated_at: r.updatedAt?.toISOString() ?? null,
-        score: review ? review.score : null,
+        score: latestReviewScoreByPr.get(r.id) ?? null,
         cost_usd: costByPr.get(r.id) ?? null,
         latest_run_cost_usd: latestRunCostByPr.get(r.id) ?? null,
+        latest_review_ids: reviewIds ?? null,
+        findings: reviewIds
+          ? rollupSeverities(reviewIds.flatMap((id) => findingsByReview.get(id) ?? []))
+          : null,
       };
     });
   });
