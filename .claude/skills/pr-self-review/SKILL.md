@@ -1,6 +1,6 @@
 ---
 name: pr-self-review
-description: "Post-PR gate for this repo's own development: right after `gh pr create` succeeds (and again after any later `git push` to that PR's branch), matches the PR's changed files against every other skill in the catalog, runs each matched skill as an independent parallel reviewer, and posts the result as a real GitHub PR review — `REQUEST_CHANGES` + a `blocked-critical` label on any CRITICAL finding or incomplete run, `COMMENT` otherwise. Use automatically after opening or updating a PR in this repo; also invoke manually on '/pr-self-review', 'review this PR', 'self review', 'check this PR for critical issues'."
+description: "Post-PR gate for this repo's own development: right after `gh pr create` succeeds (and again after any later `git push` to that PR's branch), matches the PR's changed files against every other skill in the catalog, runs each matched skill as an independent parallel reviewer, and posts the result as a real GitHub PR review (always `COMMENT` — GitHub blocks self-REQUEST_CHANGES too) plus a `blocked-critical` label on any CRITICAL finding or incomplete run. Use automatically after opening or updating a PR in this repo; also invoke manually on '/pr-self-review', 'review this PR', 'self review', 'check this PR for critical issues'."
 allowed-tools: Bash, Read, Grep, Glob, Workflow
 ---
 
@@ -295,25 +295,39 @@ const comments = findings
     body: `**${f.summary}** (\`${f.skill}\`, ${f.severity.toLowerCase()})\n\n${f.rationale}`,
   }))
 
-return { matched: true, gateTripped, criticalCount, errored, event: gateTripped ? 'REQUEST_CHANGES' : 'COMMENT', body, comments }
+return { matched: true, gateTripped, criticalCount, errored, event: 'COMMENT', body, comments }
 ```
+
+**Why `event` is always `'COMMENT'`, never `REQUEST_CHANGES`**: confirmed on
+this skill's first real (non-docs-only) run — GitHub's API rejects
+`REQUEST_CHANGES` on your own PR with a 422 (*"Review Can not request
+changes on your own pull request"*), the exact same rejection as
+self-`APPROVE`. Since the PR author here is always the account `gh` is
+authenticated as (fork-only workflow, [[feedback_fork_workflow]]),
+`REQUEST_CHANGES` can **never** actually post here — don't build the gate
+around it. `gateTripped` still drives the label and the chat-side refusal
+below; the review body's own header text still says "Changes requested" as
+a plain-English status, it's just carried by a `COMMENT`-type review, not
+GitHub's `REQUEST_CHANGES` review state.
 
 ### 4. Post the result (Bash, no agent)
 
-Take the Workflow result (`matched`, `event`, `body`, `comments`, `gateTripped`)
-and act on it directly:
+Take the Workflow result (`matched`, `body`, `comments`, `gateTripped` — `event`
+is always `'COMMENT'`, see above) and act on it directly:
 
 - **`matched: false`** → report in chat that nothing matched, post nothing to
   GitHub.
-- **Otherwise** → write `{ body, event, comments }` to a temp JSON file
-  (`/tmp` or the scratchpad) and post it as one review:
+- **Otherwise** → write `{ body, event: 'COMMENT', comments }` to a temp
+  JSON file (`/tmp` or the scratchpad) and post it as one review:
 
   ```bash
   gh api "repos/$OWNER_REPO/pulls/$PR_NUMBER/reviews" \
     --method POST --input /path/to/review-payload.json
   ```
 
-  Then toggle the visibility label (idempotent — safe to run every time):
+  The **label is the actual enforcement signal on GitHub itself** now that
+  the review event can't be `REQUEST_CHANGES` — toggle it every time
+  (idempotent):
 
   ```bash
   gh label create blocked-critical --color B60205 \
@@ -333,32 +347,39 @@ and act on it directly:
 
 ### 5. Tell the user, and hold the merge gate yourself
 
-- `event: REQUEST_CHANGES`, tripped by a `CRITICAL` →
-  `🚫 Posted "Changes requested" — N critical finding(s) — do not merge
+- `gateTripped: true`, caused by a `CRITICAL` →
+  `🚫 Posted findings (as a comment — GitHub blocks self-Request-changes
+  too) + added blocked-critical — N critical finding(s) — do not merge
   until resolved.` Refuse to run `gh pr merge` on this PR for the rest of
   the session unless the user explicitly overrides.
-- `event: REQUEST_CHANGES`, tripped by an errored review (no criticals
-  found, but a skill didn't finish) →
-  `⚠️ Review incomplete — do not merge, treat as unverified.` Same refusal
-  to run `gh pr merge`.
-- `event: COMMENT` → `✅ No critical findings — posted as a comment,
-  mergeable.` Still list warnings/suggestions as FYI; never block on those.
+- `gateTripped: true`, caused by an errored review (no criticals found,
+  but a skill didn't finish) →
+  `⚠️ Review incomplete — do not merge, treat as unverified.` Same
+  refusal to run `gh pr merge`.
+- `gateTripped: false` → `✅ No critical findings — posted as a comment,
+  label cleared, mergeable.` Still list warnings/suggestions as FYI; never
+  block on those.
 - `matched: false` → say so plainly; this is not a failure.
 
 ## Fail-closed policy
 
 An incomplete run is not evidence of "clean." If any matched skill's review
 subagent errors out, the gate trips exactly like a `CRITICAL` finding would
-— `REQUEST_CHANGES`, `blocked-critical` label, refuse `gh pr merge` — just
-with "review incomplete" wording instead of a finding list. Never post
-`COMMENT`/clean on a run that didn't finish.
+— posted comment + `blocked-critical` label + refuse `gh pr merge` — just
+with "review incomplete" wording instead of a finding list. Never post a
+clean comment / clear the label on a run that didn't finish.
 
 ## Anti-patterns
 
-- **Approving your own PR.** Never post `event: APPROVE` — GitHub rejects
-  self-approval, and the PR author here is the same account `gh` is
-  authenticated as (see [[feedback_fork_workflow]]). The clean path posts
-  `COMMENT`, not `APPROVE`.
+- **Trying to `APPROVE` or `REQUEST_CHANGES` your own PR.** GitHub rejects
+  **both** — not just self-`APPROVE` — with a 422 when the reviewer and PR
+  author are the same account, which they always are here (fork-only
+  workflow, [[feedback_fork_workflow]]). `event` is always `'COMMENT'`;
+  the `blocked-critical` label plus this session's own refusal to run
+  `gh pr merge` are the real enforcement, not the review's GitHub-side
+  state. (Discovered on this skill's first non-docs-only run, which
+  originally tried `REQUEST_CHANGES` and got the same 422 self-approval
+  blocks — see `docs/pr-self-review-skill-plan.md`.)
 - **Blanket-matching by scope label.** A skill's `Scope: Full-stack` in
   `README.md`'s catalog table is a hint, not a rule — the Match step must
   reason about actual file content (e.g. `zod` only if a file has a

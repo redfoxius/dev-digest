@@ -1,10 +1,12 @@
 # PR Self Review skill
 
 **Status:** in progress — steps 1, 8, 9, 10 done. Step 11 (real-PR
-validation) ran once manually against PR #7
-(https://github.com/redfoxius/dev-digest/pull/7) — Match-only, no matched
-skills, correctly posted nothing. Full end-to-end (a run that actually
-trips the gate and posts a review) still not done — see below.
+validation) has now run twice: once against PR #7 (Match-only, no matched
+skills, posted nothing — see the 2026-08-06 correction below) and once
+against PR #8 (a real feature PR, 4 skills reviewed, gate tripped on 7
+CRITICAL findings, posted + labeled — see the 2026-08-06 second correction
+below, which found a real design flaw in the enforcement mechanism itself).
+A push-triggered re-check is still not exercised.
 
 **2026-08-06 correction, from the first live run:** two real bugs surfaced
 running the skill by hand, both now fixed in `SKILL.md`:
@@ -50,9 +52,43 @@ worth a follow-up note in `SKILL.md` if this repo keeps stacking PRs this
 way, but not fixed now since it didn't affect this particular run's
 correctness.
 
-Still not started: a full end-to-end run where the gate actually trips
-(posts a real `REQUEST_CHANGES` + `blocked-critical` label) and a
-push-triggered re-check.
+**2026-08-06 second correction, from the first gate-tripping run (PR #8):**
+a real design flaw in the "post GitHub `REQUEST_CHANGES`" enforcement
+mechanism itself — the core premise of the whole "block merging" story:
+
+`gh api .../reviews` with `event: REQUEST_CHANGES` came back
+**`422 Unprocessable Entity — "Review Can not request changes on your own
+pull request"`** — GitHub blocks self-`REQUEST_CHANGES` with the exact same
+rule as self-`APPROVE`, which the skill had only ever guarded against for
+`APPROVE`. Since this skill's entire use case is a single account (the
+fork-only workflow, [[feedback_fork_workflow]]) opening AND reviewing its
+own PRs, `REQUEST_CHANGES` can **never** actually post here — the plan's
+original mental model ("post `REQUEST_CHANGES`, that's the real GitHub-side
+block") was wrong from the start; that specific mechanism doesn't apply to
+self-authored PRs at all, on any repo, regardless of branch protection.
+
+Fixed: `event` is now unconditionally `'COMMENT'` in `SKILL.md`'s
+`Workflow` script; `gateTripped` still drives the `blocked-critical` label
+and this session's own refusal to run `gh pr merge` — those two are now
+the *actual* enforcement, not a side note. The review body's header text
+still reads "Changes requested" as plain-English status copy, it's just
+carried by a `COMMENT`-type review now. Confirmed working end-to-end on PR
+#8: 4 skills reviewed (cost-scoped, not the full 9-match catalog — that
+scoping choice itself was also asked and confirmed, not a fallback), 7
+CRITICAL findings (an SSRF via unrestricted server-side `fetch` on a
+user-supplied URL, a decompression-bomb via uncapped in-memory archive
+extraction, three non-transactional multi-step DB writes, a raw-`fetch`
+onion-architecture port violation, a zod validation-boundary gap), review
+posted as `COMMENT`, `blocked-critical` label attached, merge refused in
+chat.
+
+Still not started/exercised: a push-triggered re-check (posting a second,
+correcting review after a fix lands), and the full 9-skill match on a real
+feature PR (PR #8 deliberately ran only 4 of its 9 matches to control
+cost — a real, recurring tension worth watching: this repo's PRs are
+getting large enough that even the narrowed-scope-diff-per-subagent fix
+from the PR #7 correction isn't enough on its own; matching may need its
+own cost cap eventually, not just diff-scoping).
 
 ## Context
 
