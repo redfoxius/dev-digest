@@ -157,11 +157,9 @@ export const CreateSkillBody = z.object({
 });
 export type CreateSkillBody = z.infer<typeof CreateSkillBody>;
 
-export const UpdateSkillBody = z.object({
-  name: z.string().min(1).optional(),
-  description: z.string().optional(),
-  type: SkillType.optional(),
-  body: z.string().min(1).optional(),
+// `.partial()` on `CreateSkillBody` rather than hand-duplicating its fields
+// with individual `.optional()` calls — the two would otherwise drift.
+export const UpdateSkillBody = CreateSkillBody.partial().extend({
   enabled: z.boolean().optional(),
   /** One-line note for the `skill_versions` snapshot this update creates. */
   summary: z.string().optional(),
@@ -170,12 +168,16 @@ export type UpdateSkillBody = z.infer<typeof UpdateSkillBody>;
 
 // What a file/URL/community import extracts BEFORE it's persisted — shown in
 // the drawer's preview step, editable there, then POSTed to a *`/confirm`
-// endpoint (which re-validates it as CreateSkillBody + source).
+// endpoint (which re-validates it as CreateSkillBody + source). `name`/`body`
+// require at least 1 char, same as `CreateSkillBody` — the direct-create and
+// import-confirm paths create the same entity and must share a validation
+// floor (an import-confirm previously accepted an empty name/body that
+// direct-create would reject).
 export const ImportCandidate = z.object({
-  name: z.string(),
+  name: z.string().min(1),
   description: z.string().default(''),
   type: SkillType.default('custom'),
-  body: z.string(),
+  body: z.string().min(1),
   /** Non-markdown archive entries — read, never executed, listed for transparency. */
   ignored_files: z.array(z.string()).default([]),
 });

@@ -1,4 +1,4 @@
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
 import * as t from '../../db/schema.js';
 import type { SkillSource, SkillType } from '@devdigest/shared';
@@ -55,8 +55,8 @@ export class SkillsRepository {
       .where(and(...conditions));
   }
 
-  async getById(workspaceId: string, id: string): Promise<SkillRow | undefined> {
-    const [row] = await this.db
+  async getById(workspaceId: string, id: string, dbOrTx: Db = this.db): Promise<SkillRow | undefined> {
+    const [row] = await dbOrTx
       .select()
       .from(t.skills)
       .where(and(eq(t.skills.workspaceId, workspaceId), eq(t.skills.id, id)));
@@ -73,24 +73,28 @@ export class SkillsRepository {
     return rows.length > 0;
   }
 
-  /** Insert a skill AND record version 1 in skill_versions (immutable snapshot). */
+  /** Insert a skill AND record version 1 in skill_versions (immutable snapshot).
+   *  Both writes run in ONE transaction — if the snapshot insert fails, the
+   *  skill row is rolled back too, rather than existing with no v1 snapshot. */
   async insert(values: InsertSkill): Promise<SkillRow> {
-    const [row] = await this.db
-      .insert(t.skills)
-      .values({
-        workspaceId: values.workspaceId,
-        name: values.name,
-        description: values.description ?? DEFAULT_SKILL_DESCRIPTION,
-        type: values.type,
-        source: values.source,
-        body: values.body,
-        enabled: values.enabled ?? true,
-        version: INITIAL_SKILL_VERSION,
-        ...(values.evidenceFiles !== undefined ? { evidenceFiles: values.evidenceFiles } : {}),
-      })
-      .returning();
-    await this.snapshotVersion(row!, INITIAL_SKILL_VERSION, 'Initial version');
-    return row!;
+    return this.db.transaction(async (tx) => {
+      const [row] = await tx
+        .insert(t.skills)
+        .values({
+          workspaceId: values.workspaceId,
+          name: values.name,
+          description: values.description ?? DEFAULT_SKILL_DESCRIPTION,
+          type: values.type,
+          source: values.source,
+          body: values.body,
+          enabled: values.enabled ?? true,
+          version: INITIAL_SKILL_VERSION,
+          ...(values.evidenceFiles !== undefined ? { evidenceFiles: values.evidenceFiles } : {}),
+        })
+        .returning();
+      await this.snapshotVersion(row!, INITIAL_SKILL_VERSION, 'Initial version', tx);
+      return row!;
+    });
   }
 
   /**
@@ -100,40 +104,56 @@ export class SkillsRepository {
    * `summary` is an optional one-line note for that snapshot; defaults to
    * `"Updated {field(s)}"` when the caller omits it.
    */
+  /**
+   * Both the skills-row update and its `skill_versions` snapshot run in ONE
+   * transaction (a failed snapshot insert rolls the row update back too,
+   * instead of leaving a skill with no matching version snapshot). The
+   * version bump itself is an atomic `sql`${t.skills.version} + 1`` at the
+   * database, not read-then-written in JS — two concurrent updates to the
+   * same skill each get a distinct, correctly-serialized version via
+   * Postgres' row locking, mirroring the same fix in
+   * `agents/repository.ts`'s `bumpVersionAfterSkillChange`.
+   */
   async update(
     workspaceId: string,
     id: string,
     patch: UpdateSkillPatch,
     summary?: string,
   ): Promise<SkillRow | undefined> {
-    const existing = await this.getById(workspaceId, id);
-    if (!existing) return undefined;
+    return this.db.transaction(async (tx) => {
+      const existing = await this.getById(workspaceId, id, tx);
+      if (!existing) return undefined;
 
-    const configChanged = isSkillConfigChange(existing, patch);
-    const nextVersion = configChanged ? existing.version + 1 : existing.version;
+      const configChanged = isSkillConfigChange(existing, patch);
 
-    const [row] = await this.db
-      .update(t.skills)
-      .set({
-        ...(patch.name !== undefined ? { name: patch.name } : {}),
-        ...(patch.description !== undefined ? { description: patch.description } : {}),
-        ...(patch.type !== undefined ? { type: patch.type } : {}),
-        ...(patch.body !== undefined ? { body: patch.body } : {}),
-        ...(patch.enabled !== undefined ? { enabled: patch.enabled } : {}),
-        ...(patch.evidenceFiles !== undefined ? { evidenceFiles: patch.evidenceFiles } : {}),
-        ...(configChanged ? { version: nextVersion } : {}),
-      })
-      .where(and(eq(t.skills.workspaceId, workspaceId), eq(t.skills.id, id)))
-      .returning();
+      const [row] = await tx
+        .update(t.skills)
+        .set({
+          ...(patch.name !== undefined ? { name: patch.name } : {}),
+          ...(patch.description !== undefined ? { description: patch.description } : {}),
+          ...(patch.type !== undefined ? { type: patch.type } : {}),
+          ...(patch.body !== undefined ? { body: patch.body } : {}),
+          ...(patch.enabled !== undefined ? { enabled: patch.enabled } : {}),
+          ...(patch.evidenceFiles !== undefined ? { evidenceFiles: patch.evidenceFiles } : {}),
+          ...(configChanged ? { version: sql`${t.skills.version} + 1` } : {}),
+        })
+        .where(and(eq(t.skills.workspaceId, workspaceId), eq(t.skills.id, id)))
+        .returning();
 
-    if (configChanged && row) {
-      await this.snapshotVersion(row, nextVersion, summary ?? defaultUpdateSummary(existing, patch));
-    }
-    return row;
+      if (configChanged && row) {
+        await this.snapshotVersion(row, row.version, summary ?? defaultUpdateSummary(existing, patch), tx);
+      }
+      return row;
+    });
   }
 
-  private async snapshotVersion(row: SkillRow, version: number, summary?: string): Promise<void> {
-    await this.db
+  private async snapshotVersion(
+    row: SkillRow,
+    version: number,
+    summary: string | undefined,
+    dbOrTx: Db = this.db,
+  ): Promise<void> {
+    await dbOrTx
       .insert(t.skillVersions)
       .values({
         skillId: row.id,

@@ -146,9 +146,9 @@ export class AgentsRepository {
     return row;
   }
 
-  private async snapshotVersion(row: AgentRow, version: number): Promise<void> {
-    const skills = await this.skillIdsForAgent(row.id);
-    await this.db
+  private async snapshotVersion(row: AgentRow, version: number, dbOrTx: Db = this.db): Promise<void> {
+    const skills = await this.skillIdsForAgent(row.id, dbOrTx);
+    await dbOrTx
       .insert(t.agentVersions)
       .values({
         agentId: row.id,
@@ -189,9 +189,11 @@ export class AgentsRepository {
 
   // ---- agent_skills link table (A2 owns the agent side) -------------------
 
-  /** Skills linked to an agent, in `order` ascending, with each link's `enabled`. */
-  async linkedSkills(agentId: string): Promise<LinkedSkillRow[]> {
-    const rows = await this.db
+  /** Skills linked to an agent, in `order` ascending, with each link's `enabled`.
+   *  Accepts a transaction handle so callers can read consistent state
+   *  mid-transaction (e.g. `setSkills`' preserve-enabled read). */
+  async linkedSkills(agentId: string, dbOrTx: Db = this.db): Promise<LinkedSkillRow[]> {
+    const rows = await dbOrTx
       .select({ skill: t.skills, order: t.agentSkills.order, enabled: t.agentSkills.enabled })
       .from(t.agentSkills)
       .innerJoin(t.skills, eq(t.agentSkills.skillId, t.skills.id))
@@ -200,8 +202,8 @@ export class AgentsRepository {
     return rows.map((r) => ({ skill: r.skill, order: r.order, enabled: r.enabled }));
   }
 
-  async skillIdsForAgent(agentId: string): Promise<string[]> {
-    const links = await this.linkedSkills(agentId);
+  async skillIdsForAgent(agentId: string, dbOrTx: Db = this.db): Promise<string[]> {
+    const links = await this.linkedSkills(agentId, dbOrTx);
     return links.map((l) => l.skill.id);
   }
 
@@ -230,23 +232,28 @@ export class AgentsRepository {
     return counts;
   }
 
-  /** Link a skill to an agent at a given order (idempotent: upserts order). */
+  /** Link a skill to an agent at a given order (idempotent: upserts order).
+   *  Wrapped in a transaction with the version bump so both commit or neither does. */
   async linkSkill(agentId: string, skillId: string, order: number): Promise<void> {
-    await this.db
-      .insert(t.agentSkills)
-      .values({ agentId, skillId, order })
-      .onConflictDoUpdate({
-        target: [t.agentSkills.agentId, t.agentSkills.skillId],
-        set: { order },
-      });
-    await this.bumpVersionAfterSkillChange(agentId);
+    await this.db.transaction(async (tx) => {
+      await tx
+        .insert(t.agentSkills)
+        .values({ agentId, skillId, order })
+        .onConflictDoUpdate({
+          target: [t.agentSkills.agentId, t.agentSkills.skillId],
+          set: { order },
+        });
+      await this.bumpVersionAfterSkillChange(agentId, tx);
+    });
   }
 
   async unlinkSkill(agentId: string, skillId: string): Promise<void> {
-    await this.db
-      .delete(t.agentSkills)
-      .where(and(eq(t.agentSkills.agentId, agentId), eq(t.agentSkills.skillId, skillId)));
-    await this.bumpVersionAfterSkillChange(agentId);
+    await this.db.transaction(async (tx) => {
+      await tx
+        .delete(t.agentSkills)
+        .where(and(eq(t.agentSkills.agentId, agentId), eq(t.agentSkills.skillId, skillId)));
+      await this.bumpVersionAfterSkillChange(agentId, tx);
+    });
   }
 
   /**
@@ -259,23 +266,29 @@ export class AgentsRepository {
    * preserved across the replace — a pure reorder must never silently flip an
    * unrelated, currently-unchecked skill to `enabled: true` just because it
    * appears in the reordered array. Ids with no prior row default to `false`.
+   *
+   * The delete + re-insert + version bump all run in ONE transaction — if the
+   * insert fails (a duplicate id, a stale FK, a dropped connection) the delete
+   * rolls back too, instead of leaving the agent with zero linked skills.
    */
   async setSkills(agentId: string, skillIds: string[]): Promise<void> {
-    const existing = await this.linkedSkills(agentId);
-    const enabledById = new Map(existing.map((l) => [l.skill.id, l.enabled]));
+    await this.db.transaction(async (tx) => {
+      const existing = await this.linkedSkills(agentId, tx);
+      const enabledById = new Map(existing.map((l) => [l.skill.id, l.enabled]));
 
-    await this.db.delete(t.agentSkills).where(eq(t.agentSkills.agentId, agentId));
-    if (skillIds.length > 0) {
-      await this.db.insert(t.agentSkills).values(
-        skillIds.map((skillId, i) => ({
-          agentId,
-          skillId,
-          order: i,
-          enabled: enabledById.get(skillId) ?? false,
-        })),
-      );
-    }
-    await this.bumpVersionAfterSkillChange(agentId);
+      await tx.delete(t.agentSkills).where(eq(t.agentSkills.agentId, agentId));
+      if (skillIds.length > 0) {
+        await tx.insert(t.agentSkills).values(
+          skillIds.map((skillId, i) => ({
+            agentId,
+            skillId,
+            order: i,
+            enabled: enabledById.get(skillId) ?? false,
+          })),
+        );
+      }
+      await this.bumpVersionAfterSkillChange(agentId, tx);
+    });
   }
 
   /**
@@ -286,15 +299,17 @@ export class AgentsRepository {
    * touching its `order` (never deletes on uncheck).
    */
   async setSkillEnabled(agentId: string, skillId: string, enabled: boolean): Promise<void> {
-    const existing = await this.linkedSkills(agentId);
-    await this.db
-      .insert(t.agentSkills)
-      .values({ agentId, skillId, order: existing.length, enabled })
-      .onConflictDoUpdate({
-        target: [t.agentSkills.agentId, t.agentSkills.skillId],
-        set: { enabled },
-      });
-    await this.bumpVersionAfterSkillChange(agentId);
+    await this.db.transaction(async (tx) => {
+      const existing = await this.linkedSkills(agentId, tx);
+      await tx
+        .insert(t.agentSkills)
+        .values({ agentId, skillId, order: existing.length, enabled })
+        .onConflictDoUpdate({
+          target: [t.agentSkills.agentId, t.agentSkills.skillId],
+          set: { enabled },
+        });
+      await this.bumpVersionAfterSkillChange(agentId, tx);
+    });
   }
 
   /**
@@ -304,16 +319,23 @@ export class AgentsRepository {
    * version-worthy (the linked-skills list is part of `AgentVersionConfig`,
    * needed for eval reproducibility). No-op if the agent id doesn't exist
    * (defensive; callers already validate existence before reaching here).
+   *
+   * The increment itself is done AT THE DATABASE, not read-then-written in
+   * JS (`sql`${t.agents.version} + 1``) — two concurrent callers each get a
+   * distinct, correctly-serialized version number from Postgres' own row
+   * locking, instead of racing to read the same starting value and both
+   * writing the same "next" version (which silently dropped one snapshot via
+   * `onConflictDoNothing` on the `(agentId, version)` PK). Always call this
+   * inside the same transaction as the triggering `agent_skills` write (see
+   * `linkSkill`/`unlinkSkill`/`setSkills`/`setSkillEnabled` above) so a
+   * failure on either side rolls back both.
    */
-  private async bumpVersionAfterSkillChange(agentId: string): Promise<void> {
-    const [existing] = await this.db.select().from(t.agents).where(eq(t.agents.id, agentId));
-    if (!existing) return;
-    const nextVersion = existing.version + 1;
-    const [row] = await this.db
+  private async bumpVersionAfterSkillChange(agentId: string, tx: Db): Promise<void> {
+    const [row] = await tx
       .update(t.agents)
-      .set({ version: nextVersion })
+      .set({ version: sql`${t.agents.version} + 1` })
       .where(eq(t.agents.id, agentId))
       .returning();
-    if (row) await this.snapshotVersion(row, nextVersion);
+    if (row) await this.snapshotVersion(row, row.version, tx);
   }
 }

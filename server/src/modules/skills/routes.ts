@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import multipart from '@fastify/multipart';
-import { ImportCandidate, SkillSource, SkillType } from '@devdigest/shared';
+import { CreateSkillBody, ImportCandidate, SkillSource, SkillType, UpdateSkillBody } from '@devdigest/shared';
 import { getContext } from '../_shared/context.js';
 import { IdParams } from '../_shared/schemas.js';
 import { NotFoundError, ValidationError } from '../../platform/errors.js';
@@ -40,22 +40,6 @@ const ListSkillsQuery = z.object({
   type: SkillType.optional(),
   source: SkillSource.optional(),
   enabled: z.coerce.boolean().optional(),
-});
-
-const CreateSkillBodyLocal = z.object({
-  name: z.string().min(1),
-  description: z.string().optional(),
-  type: SkillType,
-  body: z.string().min(1),
-});
-
-const UpdateSkillBodyLocal = z.object({
-  name: z.string().min(1).optional(),
-  description: z.string().optional(),
-  type: SkillType.optional(),
-  body: z.string().min(1).optional(),
-  enabled: z.boolean().optional(),
-  summary: z.string().optional(),
 });
 
 // `.nullish()` + transform (rather than `.default({})`) because an empty
@@ -112,6 +96,7 @@ export default async function skillsRoutes(appBase: FastifyInstance) {
   app.post(
     '/skills/import/file/preview',
     async (req) => {
+      await getContext(app.container, req);
       const data = await req.file();
       if (!data) throw new ValidationError('Expected a multipart file field');
       const buffer = await data.toBuffer();
@@ -133,7 +118,10 @@ export default async function skillsRoutes(appBase: FastifyInstance) {
   app.post(
     '/skills/import/url/preview',
     { schema: { body: UrlImportBody } },
-    async (req) => service.previewUrlImport(req.body.url),
+    async (req) => {
+      await getContext(app.container, req);
+      return service.previewUrlImport(req.body.url);
+    },
   );
 
   app.post(
@@ -154,7 +142,7 @@ export default async function skillsRoutes(appBase: FastifyInstance) {
     return skill;
   });
 
-  app.post('/skills', { schema: { body: CreateSkillBodyLocal } }, async (req, reply) => {
+  app.post('/skills', { schema: { body: CreateSkillBody } }, async (req, reply) => {
     const { workspaceId } = await getContext(app.container, req);
     const skill = await service.create(workspaceId, req.body);
     reply.status(201);
@@ -163,7 +151,7 @@ export default async function skillsRoutes(appBase: FastifyInstance) {
 
   app.put(
     '/skills/:id',
-    { schema: { params: IdParams, body: UpdateSkillBodyLocal } },
+    { schema: { params: IdParams, body: UpdateSkillBody } },
     async (req) => {
       const { workspaceId } = await getContext(app.container, req);
       const skill = await service.update(workspaceId, req.params.id, req.body);

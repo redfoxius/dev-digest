@@ -87,6 +87,18 @@ export interface LLMProvider {
   embed(texts: string[]): Promise<number[][]>;
 }
 
+// ---------- URL fetcher (server-side fetch of a caller-supplied URL) ----------
+/**
+ * Fetches a caller-supplied URL from the server. The concrete adapter MUST
+ * reject non-http(s) schemes and private/loopback/link-local targets (SSRF
+ * guard) — this port exists specifically so that guard lives in exactly one
+ * place, not re-implemented per call site. Currently used by the skills
+ * import-from-URL flow.
+ */
+export interface UrlFetcher {
+  fetch(url: string): Promise<Response>;
+}
+
 // ---------- Embedder ----------
 export interface Embedder {
   /** OpenAI text-embedding-3-small → 1536 dims. */

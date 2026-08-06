@@ -12,7 +12,7 @@ import type {
   SkillType,
   SkillVersion,
 } from '@devdigest/shared';
-import { ExternalServiceError, NotFoundError, ValidationError } from '../../platform/errors.js';
+import { AppError, ExternalServiceError, NotFoundError, ValidationError } from '../../platform/errors.js';
 import { SkillsRepository } from './repository.js';
 import {
   detectArchiveKind,
@@ -25,7 +25,7 @@ import {
   toSkillVersionDto,
   type ArchiveFileEntry,
 } from './helpers.js';
-import { COMMUNITY_SKILLS_SEED, MAX_ARCHIVE_BYTES } from './constants.js';
+import { COMMUNITY_SKILLS_SEED, MAX_ARCHIVE_BYTES, MAX_DECOMPRESSED_BYTES } from './constants.js';
 
 /**
  * A1 — skills service. Business logic for the standalone Skills page +
@@ -76,12 +76,7 @@ export type ImportPreview = ImportCandidate & { evidence_files: string[] };
 export class SkillsService {
   private repo: SkillsRepository;
 
-  /** `fetchImpl` is a testability seam for `previewUrlImport` — defaults to
-   *  the global `fetch` (Node ≥18); tests inject a fake. */
-  constructor(
-    private container: Container,
-    private fetchImpl: typeof fetch = fetch,
-  ) {
+  constructor(private container: Container) {
     this.repo = new SkillsRepository(container.db);
   }
 
@@ -241,13 +236,19 @@ export class SkillsService {
 
   // ---- import: URL --------------------------------------------------------
 
-  /** Fetch a URL server-side and extract it the same way as a file upload
-   *  (by its path's extension), returning an `ImportCandidate` preview. */
+  /** Fetch a URL server-side (via the `urlFetcher` port — SSRF guard lives
+   *  there, not here) and extract it the same way as a file upload (by its
+   *  path's extension), returning an `ImportCandidate` preview. */
   async previewUrlImport(url: string): Promise<ImportPreview> {
     let res: Response;
     try {
-      res = await this.fetchImpl(url);
+      res = await this.container.urlFetcher.fetch(url);
     } catch (err) {
+      // The urlFetcher port already throws a correctly-typed AppError (422)
+      // for a disallowed scheme/SSRF target/unresolvable host — pass those
+      // through as-is; only a genuine network-level failure (timeout,
+      // connection refused, ...) becomes a 502 "external service" error.
+      if (err instanceof AppError) throw err;
       throw new ExternalServiceError(`Failed to fetch ${url}: ${(err as Error).message}`);
     }
     if (!res.ok) {
@@ -353,6 +354,11 @@ export class SkillsService {
 }
 
 // ---- archive reading (in-memory only; no disk writes, no exec) -------------
+//
+// `MAX_ARCHIVE_BYTES` only bounds the COMPRESSED input; both readers below
+// separately cap the DECOMPRESSED output at `MAX_DECOMPRESSED_BYTES` — a
+// small crafted archive can otherwise expand to gigabytes in memory (a
+// decompression bomb) before any markdown-extraction logic ever runs.
 
 function readZipEntries(buffer: Buffer): ArchiveFileEntry[] {
   let zip: AdmZip;
@@ -361,17 +367,47 @@ function readZipEntries(buffer: Buffer): ArchiveFileEntry[] {
   } catch (err) {
     throw new ValidationError(`Could not read zip archive: ${(err as Error).message}`);
   }
-  return zip
-    .getEntries()
-    .filter((e) => !e.isDirectory)
-    .map((e) => ({ name: e.entryName, content: e.getData() }));
+  const fileEntries = zip.getEntries().filter((e) => !e.isDirectory);
+
+  // Check declared uncompressed sizes BEFORE materializing any entry's bytes,
+  // so a bomb is rejected without ever calling the expensive `getData()`.
+  const declaredTotal = fileEntries.reduce((sum, e) => sum + e.header.size, 0);
+  if (declaredTotal > MAX_DECOMPRESSED_BYTES) {
+    throw new ValidationError(
+      `Archive's uncompressed size (${declaredTotal} bytes) exceeds the ${MAX_DECOMPRESSED_BYTES}-byte limit`,
+    );
+  }
+
+  let actualTotal = 0;
+  return fileEntries.map((e) => {
+    const content = e.getData();
+    actualTotal += content.length;
+    // Zip entry headers are attacker-controlled and can lie — re-check the
+    // running total against what was ACTUALLY produced, not just declared.
+    if (actualTotal > MAX_DECOMPRESSED_BYTES) {
+      throw new ValidationError(
+        `Archive's actual uncompressed size exceeds the ${MAX_DECOMPRESSED_BYTES}-byte limit`,
+      );
+    }
+    return { name: e.entryName, content };
+  });
 }
 
-/** gzip-decompress a buffer if it starts with the gzip magic bytes (0x1f 0x8b);
- *  otherwise return it unchanged (a plain, non-gzipped `.tar`). */
+/**
+ * gzip-decompress a buffer if it starts with the gzip magic bytes (0x1f 0x8b);
+ * otherwise return it unchanged (a plain, non-gzipped `.tar`). `maxOutputLength`
+ * makes `gunzipSync` itself throw (`ERR_BUFFER_TOO_LARGE`) once decompressed
+ * output would exceed the cap, instead of fully materializing a bomb first.
+ */
 function maybeGunzip(buffer: Buffer): Buffer {
   if (buffer.length > 2 && buffer[0] === 0x1f && buffer[1] === 0x8b) {
-    return zlib.gunzipSync(buffer);
+    try {
+      return zlib.gunzipSync(buffer, { maxOutputLength: MAX_DECOMPRESSED_BYTES });
+    } catch (err) {
+      throw new ValidationError(
+        `Archive's uncompressed size exceeds the ${MAX_DECOMPRESSED_BYTES}-byte limit: ${(err as Error).message}`,
+      );
+    }
   }
   return buffer;
 }
@@ -385,6 +421,10 @@ function maybeGunzip(buffer: Buffer): Buffer {
 async function readTarEntries(buffer: Buffer): Promise<ArchiveFileEntry[]> {
   const entries: ArchiveFileEntry[] = [];
   const collectors: Promise<void>[] = [];
+  // Defense in depth alongside `maybeGunzip`'s `maxOutputLength` (which
+  // already bounds a gzipped tar's decompressed size before it ever reaches
+  // here) — also caps a plain, non-gzipped `.tar`'s total entry bytes.
+  let total = 0;
 
   await new Promise<void>((resolve, reject) => {
     const parser = tarList({
@@ -396,8 +436,15 @@ async function readTarEntries(buffer: Buffer): Promise<ArchiveFileEntry[]> {
         }
         const chunks: Buffer[] = [];
         collectors.push(
-          new Promise<void>((res) => {
-            entry.on('data', (chunk: Buffer) => chunks.push(chunk));
+          new Promise<void>((res, rej) => {
+            entry.on('data', (chunk: Buffer) => {
+              total += chunk.length;
+              if (total > MAX_DECOMPRESSED_BYTES) {
+                rej(new Error(`tar entries exceed the ${MAX_DECOMPRESSED_BYTES}-byte limit`));
+                return;
+              }
+              chunks.push(chunk);
+            });
             entry.on('end', () => {
               entries.push({ name: entry.path, content: Buffer.concat(chunks) });
               res();
@@ -414,7 +461,9 @@ async function readTarEntries(buffer: Buffer): Promise<ArchiveFileEntry[]> {
     throw new ValidationError(`Could not read tar archive: ${(err as Error).message}`);
   });
 
-  await Promise.all(collectors);
+  await Promise.all(collectors).catch((err) => {
+    throw new ValidationError(`Could not read tar archive: ${(err as Error).message}`);
+  });
   return entries;
 }
 
