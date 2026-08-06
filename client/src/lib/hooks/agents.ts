@@ -3,7 +3,7 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
-import type { Agent, ModelInfo, Provider, ReviewStrategy } from "@devdigest/shared";
+import type { Agent, AgentSkillLink, ModelInfo, Provider, ReviewStrategy } from "@devdigest/shared";
 
 export function useAgents() {
   return useQuery({
@@ -87,5 +87,51 @@ export function useProviderModels(provider: Provider | null | undefined) {
     queryFn: () => api.get<ModelInfo[]>(`/providers/${provider}/models`),
     enabled: !!provider,
     staleTime: 5 * 60_000,
+  });
+}
+
+// ---- Agent Editor · Skills tab (unified catalog list, checkbox-attach + drag-reorder) ----
+
+/** This agent's current skill links, ordered ascending by `order` — the
+   Skills-tab merges this with `useSkills()`'s full workspace catalog
+   (linked first in their order, unlinked appended after). */
+export function useAgentSkills(agentId: string | null | undefined) {
+  return useQuery({
+    queryKey: ["agent-skills", agentId],
+    queryFn: () => api.get<AgentSkillLink[]>(`/agents/${agentId}/skills`),
+    enabled: !!agentId,
+  });
+}
+
+/** Full-replace reorder: POST the WHOLE catalog's ids (linked + unlinked) in
+   the desired order — lets a drag reposition an unchecked row too. Also
+   affects `Agent.skills_count`, so the agents list is invalidated alongside
+   this agent's own link list. */
+export function useSetAgentSkills(agentId: string | null | undefined) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (skillIds: string[]) =>
+      api.post<AgentSkillLink[]>(`/agents/${agentId}/skills`, { skill_ids: skillIds }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["agent-skills", agentId] });
+      qc.invalidateQueries({ queryKey: ["agents"] });
+    },
+  });
+}
+
+/** The Skills-tab row checkbox: checking a not-yet-linked skill both creates
+   the link AND sets `enabled: true` in one call (server-side upsert);
+   unchecking a linked one flips `enabled: false` without dropping its
+   `order`. Changes `skills_count` too, so the agents list is invalidated
+   alongside this agent's own link list. */
+export function useSetAgentSkillEnabled(agentId: string | null | undefined) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ skillId, enabled }: { skillId: string; enabled: boolean }) =>
+      api.patch<AgentSkillLink[]>(`/agents/${agentId}/skills/${skillId}`, { enabled }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["agent-skills", agentId] });
+      qc.invalidateQueries({ queryKey: ["agents"] });
+    },
   });
 }

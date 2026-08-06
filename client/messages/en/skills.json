@@ -87,6 +87,21 @@
       "imported_url": "Imported"
     }
   },
+  "create": {
+    "button": "New skill",
+    "crumb": "New skill",
+    "title": "New skill",
+    "subtitle": "Starts blank — saved as a manual skill, enabled immediately.",
+    "descriptionLabel": "Description",
+    "descriptionPlaceholder": "One line describing what this skill checks.",
+    "typeLabel": "Type",
+    "save": "Create skill",
+    "saving": "Creating…",
+    "success": "Created \"{name}\".",
+    "cancel": "Cancel",
+    "nameRequired": "Name is required.",
+    "bodyRequired": "Body is required."
+  },
   "preview": {
     "untrustedBadge": "untrusted source",
     "enabled": "Enabled",

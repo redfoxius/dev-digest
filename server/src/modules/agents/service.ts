@@ -57,12 +57,15 @@ export class AgentsService {
 
   async list(workspaceId: string): Promise<Agent[]> {
     const rows = await this.repo.list(workspaceId);
-    return rows.map(toAgentDto);
+    const counts = await this.repo.skillsCountByAgentIds(rows.map((r) => r.id));
+    return rows.map((row) => toAgentDto(row, counts.get(row.id) ?? 0));
   }
 
   async get(workspaceId: string, id: string): Promise<Agent | undefined> {
     const row = await this.repo.getById(workspaceId, id);
-    return row ? toAgentDto(row) : undefined;
+    if (!row) return undefined;
+    const counts = await this.repo.skillsCountByAgentIds([row.id]);
+    return toAgentDto(row, counts.get(row.id) ?? 0);
   }
 
   /** Delete an agent (and its versions/skill-links, via cascade). */
@@ -105,7 +108,9 @@ export class AgentsService {
       ...(patch.repo_intel !== undefined ? { repoIntel: patch.repo_intel } : {}),
       ...(patch.enabled !== undefined ? { enabled: patch.enabled } : {}),
     });
-    return row ? toAgentDto(row) : undefined;
+    if (!row) return undefined;
+    const counts = await this.repo.skillsCountByAgentIds([row.id]);
+    return toAgentDto(row, counts.get(row.id) ?? 0);
   }
 
   /**
@@ -138,7 +143,12 @@ export class AgentsService {
   /** Linked skills for an agent as AgentSkillLink[] (ordered). */
   async skillLinks(agentId: string): Promise<AgentSkillLink[]> {
     const links = await this.repo.linkedSkills(agentId);
-    return links.map((l) => ({ agent_id: agentId, skill_id: l.skill.id, order: l.order }));
+    return links.map((l) => ({
+      agent_id: agentId,
+      skill_id: l.skill.id,
+      order: l.order,
+      enabled: l.enabled,
+    }));
   }
 
   /**
@@ -168,6 +178,25 @@ export class AgentsService {
     const existing = await this.repo.linkedSkills(agentId);
     const resolvedOrder = order ?? existing.length;
     await this.repo.linkSkill(agentId, skillId, resolvedOrder);
+    return this.skillLinks(agentId);
+  }
+
+  /**
+   * The Agent Editor's unified Skills-tab checkbox: checking a not-yet-linked
+   * skill both attaches it (appended at the end of the current order) AND
+   * enables it in one call; unchecking a linked skill flips `enabled` off
+   * without unlinking it. Returns the resulting ordered links, or undefined
+   * if the agent isn't in this workspace (route → 404).
+   */
+  async setSkillEnabled(
+    workspaceId: string,
+    agentId: string,
+    skillId: string,
+    enabled: boolean,
+  ): Promise<AgentSkillLink[] | undefined> {
+    const agent = await this.repo.getById(workspaceId, agentId);
+    if (!agent) return undefined;
+    await this.repo.setSkillEnabled(agentId, skillId, enabled);
     return this.skillLinks(agentId);
   }
 
