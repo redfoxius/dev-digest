@@ -82,10 +82,16 @@ export function UrlTab({ onImported }: { onImported: () => void }) {
   return (
     <div>
       <FormField label={t("url.label")} hint={t("url.hint")}>
-        <TextInput value={url} onChange={setUrl} placeholder={t("url.placeholder")} />
+        <TextInput
+          value={url}
+          onChange={setUrl}
+          placeholder={t("url.placeholder")}
+          aria-invalid={urlPreview.isError}
+          aria-describedby={urlPreview.isError ? "url-import-error" : undefined}
+        />
       </FormField>
       {urlPreview.isError && (
-        <div style={s.error}>
+        <div id="url-import-error" style={s.error}>
           {t("drawer.importFailed")}
           {urlPreview.error instanceof ApiError ? `: ${urlPreview.error.message}` : ""}
         </div>

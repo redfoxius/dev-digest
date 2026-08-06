@@ -21,7 +21,7 @@ import {
 } from '../src/modules/skills/helpers.js';
 import { SkillsRepository, type SkillRow, type SkillVersionRow } from '../src/modules/skills/repository.js';
 import { SkillsService } from '../src/modules/skills/service.js';
-import { COMMUNITY_SKILLS_SEED, MAX_ARCHIVE_BYTES } from '../src/modules/skills/constants.js';
+import { COMMUNITY_SKILLS_SEED, MAX_ARCHIVE_BYTES, MAX_DECOMPRESSED_BYTES } from '../src/modules/skills/constants.js';
 import { NotFoundError, ValidationError } from '../src/platform/errors.js';
 
 /**
@@ -574,6 +574,59 @@ describe('SkillsService.previewFileUpload', () => {
 
     const service = fakeService();
     await expect(service.previewFileUpload(gzipped, 'bomb.tar.gz')).rejects.toThrow(ValidationError);
+  });
+
+  /** Patches a zip's LOCAL and CENTRAL-DIRECTORY "uncompressed size" fields
+   *  (4-byte LE, present at both locations per APPNOTE.TXT) from `realSize`
+   *  to `lieSize` in place — simulates an attacker hand-editing a zip's
+   *  declared size independently of its actual compressed payload. */
+  function patchDeclaredSize(buf: Buffer, realSize: number, lieSize: number): { patched: Buffer; count: number } {
+    const patched = Buffer.from(buf);
+    const real = Buffer.alloc(4);
+    real.writeUInt32LE(realSize, 0);
+    const lie = Buffer.alloc(4);
+    lie.writeUInt32LE(lieSize, 0);
+    let count = 0;
+    let idx = patched.indexOf(real);
+    while (idx !== -1) {
+      lie.copy(patched, idx);
+      count++;
+      idx = patched.indexOf(real, idx + 4);
+    }
+    return { patched, count };
+  }
+
+  it('rejects a zip whose header LIES about a small declared size but actually decompresses past the limit', async () => {
+    // Regression test for a gap where `entry.getData()` trusted the zip's own
+    // (attacker-controlled) declared size for its internal decompression cap —
+    // a mismatched real-vs-declared size threw a raw, uncaught `RangeError`
+    // instead of a clean `ValidationError`. The fix decompresses against OUR
+    // OWN remaining budget instead, regardless of what the header claims.
+    const zip = new AdmZip();
+    const actual = Buffer.alloc(21 * 1024 * 1024, 65); // 21MB, actually OVER MAX_DECOMPRESSED_BYTES (20MB)
+    zip.addFile('bomb.md', actual);
+    const { patched, count } = patchDeclaredSize(zip.toBuffer(), actual.length, 100);
+    expect(count).toBe(2); // local header + central directory record
+
+    const service = fakeService();
+    await expect(service.previewFileUpload(patched, 'evil.zip')).rejects.toThrow(ValidationError);
+  });
+
+  it('accepts a zip whose declared size lies SMALL when the actual content is legitimately within budget', async () => {
+    // The declared-size lie alone isn't disqualifying — only the ACTUAL
+    // decompressed byte count against the shared budget is. A lying header
+    // whose real payload is well within `MAX_DECOMPRESSED_BYTES` must still
+    // extract successfully.
+    const zip = new AdmZip();
+    const actual = Buffer.alloc(5 * 1024 * 1024, 65); // 5MB, well within budget
+    zip.addFile('bomb.md', actual);
+    const { patched, count } = patchDeclaredSize(zip.toBuffer(), actual.length, 100);
+    expect(count).toBe(2);
+    expect(actual.length).toBeLessThan(MAX_DECOMPRESSED_BYTES);
+
+    const service = fakeService();
+    const result = await service.previewFileUpload(patched, 'evil.zip');
+    expect(result.body.length).toBe(actual.length);
   });
 });
 

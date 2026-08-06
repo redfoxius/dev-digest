@@ -6,20 +6,27 @@ import messages from "../../../../../../../../messages/en/agents.json";
 
 // Mocks are read inside the vi.mock factories below (which Vitest hoists
 // above these imports), so the spies themselves must be created via
-// vi.hoisted rather than a plain module-level const.
-const { setSkillsMutate, setEnabledMutate } = vi.hoisted(() => ({
-  setSkillsMutate: vi.fn(),
-  setEnabledMutate: vi.fn(),
-}));
+// vi.hoisted rather than a plain module-level const. `useSkillsMock`/
+// `useAgentSkillsMock` are functions (not static objects) so individual
+// tests can override their return value (e.g. to simulate a query error).
+const { setSkillsMutate, setEnabledMutate, useSkillsMock, useAgentSkillsMock, refetchSkillsMock, refetchLinksMock } =
+  vi.hoisted(() => ({
+    setSkillsMutate: vi.fn(),
+    setEnabledMutate: vi.fn(),
+    refetchSkillsMock: vi.fn(),
+    refetchLinksMock: vi.fn(),
+    useSkillsMock: vi.fn(),
+    useAgentSkillsMock: vi.fn(),
+  }));
 
 vi.mock("../../../../../../../lib/hooks/agents", () => ({
-  useAgentSkills: () => ({ data: LINKS, isLoading: false }),
+  useAgentSkills: useAgentSkillsMock,
   useSetAgentSkills: () => ({ mutate: setSkillsMutate }),
   useSetAgentSkillEnabled: () => ({ mutate: setEnabledMutate }),
 }));
 
 vi.mock("../../../../../../../lib/hooks/skills", () => ({
-  useSkills: () => ({ data: SKILLS, isLoading: false }),
+  useSkills: useSkillsMock,
 }));
 
 import { SkillsTab } from "./SkillsTab";
@@ -28,7 +35,22 @@ afterEach(() => {
   cleanup();
   setSkillsMutate.mockClear();
   setEnabledMutate.mockClear();
+  refetchSkillsMock.mockClear();
+  refetchLinksMock.mockClear();
 });
+
+useSkillsMock.mockImplementation(() => ({
+  data: SKILLS,
+  isLoading: false,
+  isError: false,
+  refetch: refetchSkillsMock,
+}));
+useAgentSkillsMock.mockImplementation(() => ({
+  data: LINKS,
+  isLoading: false,
+  isError: false,
+  refetch: refetchLinksMock,
+}));
 
 const AGENT: Agent = {
   id: "ag1",
@@ -142,5 +164,31 @@ describe("SkillsTab", () => {
       ["s3", "s1", "s2"],
       expect.objectContaining({ onSettled: expect.any(Function) }),
     );
+  });
+
+  it("shows an error state with retry when the skills query fails, instead of a misleading empty-filter message", () => {
+    useSkillsMock.mockReturnValueOnce({
+      data: undefined,
+      isLoading: false,
+      isError: true,
+      refetch: refetchSkillsMock,
+    });
+    renderTab();
+    expect(screen.getByText("Couldn't load skills for this agent.")).toBeInTheDocument();
+    expect(screen.queryByText("No skills match this filter.")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /retry/i }));
+    expect(refetchSkillsMock).toHaveBeenCalled();
+  });
+
+  it("shows an error state when the agent-skills links query fails", () => {
+    useAgentSkillsMock.mockReturnValueOnce({
+      data: undefined,
+      isLoading: false,
+      isError: true,
+      refetch: refetchLinksMock,
+    });
+    renderTab();
+    expect(screen.getByText("Couldn't load skills for this agent.")).toBeInTheDocument();
   });
 });

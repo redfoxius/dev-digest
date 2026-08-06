@@ -361,6 +361,12 @@ export class SkillsService {
 // small crafted archive can otherwise expand to gigabytes in memory (a
 // decompression bomb) before any markdown-extraction logic ever runs.
 
+/** ZIP local/central-directory compression-method codes (APPNOTE.TXT §4.4.5) —
+ *  the only two `adm-zip` itself decompresses; any other method already
+ *  fails at `new AdmZip(buffer)`/`zip.getEntries()`. */
+const ZIP_METHOD_STORED = 0;
+const ZIP_METHOD_DEFLATED = 8;
+
 function readZipEntries(buffer: Buffer): ArchiveFileEntry[] {
   let zip: AdmZip;
   try {
@@ -370,8 +376,8 @@ function readZipEntries(buffer: Buffer): ArchiveFileEntry[] {
   }
   const fileEntries = zip.getEntries().filter((e) => !e.isDirectory);
 
-  // Check declared uncompressed sizes BEFORE materializing any entry's bytes,
-  // so a bomb is rejected without ever calling the expensive `getData()`.
+  // Check declared uncompressed sizes BEFORE decompressing anything, so an
+  // obviously-oversized archive is rejected up front.
   const declaredTotal = fileEntries.reduce((sum, e) => sum + e.header.size, 0);
   if (declaredTotal > MAX_DECOMPRESSED_BYTES) {
     throw new ValidationError(
@@ -379,17 +385,42 @@ function readZipEntries(buffer: Buffer): ArchiveFileEntry[] {
     );
   }
 
-  let actualTotal = 0;
+  // Zip entry headers are attacker-controlled and can lie about the declared
+  // size — decompress each entry OURSELVES against the REMAINING global
+  // budget, via `zlib.inflateRawSync`'s own `maxOutputLength` (which makes
+  // zlib itself abort mid-inflation once output would exceed the cap,
+  // instead of fully materializing an oversized buffer first). Deliberately
+  // NOT using `entry.getData()` — that trusts the entry's own (attacker-
+  // controlled) declared size for its internal cap rather than our shared
+  // remaining budget, so a small declared-size lie on one entry couldn't be
+  // caught against how much budget every EARLIER entry in the same archive
+  // already spent.
+  let remaining = MAX_DECOMPRESSED_BYTES;
   return fileEntries.map((e) => {
-    const content = e.getData();
-    actualTotal += content.length;
-    // Zip entry headers are attacker-controlled and can lie — re-check the
-    // running total against what was ACTUALLY produced, not just declared.
-    if (actualTotal > MAX_DECOMPRESSED_BYTES) {
+    const compressed = e.getCompressedData();
+    let content: Buffer;
+    if (e.header.method === ZIP_METHOD_STORED) {
+      content = compressed;
+    } else if (e.header.method === ZIP_METHOD_DEFLATED) {
+      try {
+        content = zlib.inflateRawSync(compressed, { maxOutputLength: remaining });
+      } catch (err) {
+        throw new ValidationError(
+          `Archive's actual uncompressed size exceeds the ${MAX_DECOMPRESSED_BYTES}-byte limit: ${(err as Error).message}`,
+        );
+      }
+    } else {
+      throw new ValidationError(`Unsupported zip compression method for "${e.entryName}"`);
+    }
+    if (zlib.crc32(content) !== e.header.crc) {
+      throw new ValidationError(`Zip entry "${e.entryName}" failed CRC-32 validation (corrupt archive)`);
+    }
+    if (content.length > remaining) {
       throw new ValidationError(
         `Archive's actual uncompressed size exceeds the ${MAX_DECOMPRESSED_BYTES}-byte limit`,
       );
     }
+    remaining -= content.length;
     return { name: e.entryName, content };
   });
 }

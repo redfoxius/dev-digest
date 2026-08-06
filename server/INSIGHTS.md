@@ -130,6 +130,33 @@ workflow and quality bar.
 
 ## Tool & Library Notes
 
+- 2026-08-06 — `adm-zip@0.6.0`'s own `entry.getData()` ALREADY caps
+  decompression output via `zlib.inflateRawSync(compressed, {
+  maxOutputLength: <entry's own declared header.size> })` — verified
+  directly by calling its internal `Inflater` (`node_modules/adm-zip/methods/inflater.js`)
+  with a mismatched declared-vs-actual payload: it throws a `RangeError`
+  rather than fully materializing an oversized buffer. This is that
+  version's fix for a real CVE (referenced in its own source as
+  CVE-2026-39244) — so "adm-zip lets a lying zip header cause a
+  decompression bomb" is a STALE assumption for this pinned version; the
+  actual residual bug was narrower: the RangeError wasn't caught anywhere in
+  `readZipEntries`, so a size-mismatched entry surfaced as an uncaught
+  exception → generic 500, not a clean `ValidationError` (422). Rewrote to
+  decompress via `entry.getCompressedData()` + our own
+  `zlib.inflateRawSync(compressed, { maxOutputLength: remaining })` against
+  a shared cross-entry budget (not the entry's own declared/attacker-
+  controlled size) — makes the safety property independent of adm-zip's
+  internal implementation, adds proper CRC-32 verification via Node's
+  built-in `zlib.crc32()` (Node ≥22, no dependency needed), and converts the
+  failure into a clean `ValidationError`. Verified against a HAND-CRAFTED
+  zip with a patched declared-size header (both local + central-directory
+  4-byte LE fields overwritten post-hoc, matching how a real attacker would
+  do it) — see `test/skills.test.ts`'s `patchDeclaredSize` helper. Before
+  "fixing" a reviewer-flagged vulnerability in a vendored dependency, verify
+  it's still reproducible against the ACTUAL installed version — reading 2-3
+  levels into `node_modules` source directly settled this in minutes.
+  (`server/src/modules/skills/service.ts` — `readZipEntries`)
+
 - 2026-08-06 — Node's GLOBAL `fetch()` (built on Node's own internal, bundled
   undici) rejects a `dispatcher` built from the userland `undici` NPM
   package — fails at runtime with `InvalidArgumentError: invalid onError
@@ -154,6 +181,17 @@ workflow and quality bar.
   called correctly — verified by direct reproduction before shipping the
   fix. A custom `lookup` must branch on `options?.all` and support both
   shapes. (`server/src/adapters/url-fetcher/http.ts:129-134`)
+
+- 2026-08-06 — `@fastify/multipart`'s `limits` object has 7 independent
+  fields (`fieldNameSize`, `fieldSize`, `fields`, `fileSize`, `files`,
+  `headerPairs`, `parts`) — setting only `fileSize`/`files` (the two that
+  bound the actual uploaded file) leaves `fields`/`parts` at effectively
+  Infinity, letting a client flood a file-upload-only route with unbounded
+  non-file form parts before `request.file()` ever gets a chance to reject
+  anything. For a route that only ever expects ONE file and ZERO other
+  fields (`/skills/import/file/preview`), the tightest correct config sets
+  `fields: 0` outright, not just a large-but-finite number.
+  (`server/src/modules/skills/routes.ts:75-90`)
 
 - 2026-08-06 — `@fastify/multipart`'s `limits.fileSize` truncates the upload
   stream SILENTLY by default when exceeded — `throwFileSizeLimit: true` is

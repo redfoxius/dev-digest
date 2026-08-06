@@ -72,8 +72,23 @@ export default async function skillsRoutes(appBase: FastifyInstance) {
 
   // Scoped to THIS module's encapsulation context — other modules never see
   // `request.file()`/`isMultipart()` (Fastify plugin encapsulation).
+  // Every limit set explicitly, not just `fileSize`/`files` — the only
+  // route on this plugin (`/skills/import/file/preview`) reads exactly one
+  // file part via `req.file()` and never any non-file field, so `fields`/
+  // `parts` are capped tight rather than left at @fastify/multipart's
+  // effectively-unbounded defaults, which would otherwise let a client
+  // flood the request with junk form parts before `req.file()` gets a
+  // chance to reject anything.
   await app.register(multipart, {
-    limits: { fileSize: MAX_ARCHIVE_BYTES, files: 1 },
+    limits: {
+      fieldNameSize: 100,
+      fieldSize: 1024,
+      fields: 0,
+      fileSize: MAX_ARCHIVE_BYTES,
+      files: 1,
+      headerPairs: 100,
+      parts: 4,
+    },
     throwFileSizeLimit: true,
   });
 

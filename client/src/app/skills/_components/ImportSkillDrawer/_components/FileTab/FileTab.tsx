@@ -119,6 +119,12 @@ export function FileTab({ onImported }: { onImported: () => void }) {
           role="button"
           tabIndex={0}
           onClick={() => inputRef.current?.click()}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              inputRef.current?.click();
+            }
+          }}
           onDragOver={(e) => {
             e.preventDefault();
             setDragOver(true);
@@ -130,6 +136,8 @@ export function FileTab({ onImported }: { onImported: () => void }) {
             pickFile(e.dataTransfer.files[0]);
           }}
           style={s.dropzone(dragOver)}
+          aria-invalid={filePreview.isError}
+          aria-describedby={filePreview.isError ? "file-import-error" : undefined}
         >
           <Icon.Upload size={22} style={{ color: "var(--text-muted)" }} />
           <div style={{ fontSize: 13.5, fontWeight: 600 }}>Drop a file, or click to browse</div>
@@ -144,7 +152,7 @@ export function FileTab({ onImported }: { onImported: () => void }) {
         </div>
         {filePreview.isPending && <div style={s.dropzoneHint}>{t("file.importing")}</div>}
         {filePreview.isError && (
-          <div style={s.error}>
+          <div id="file-import-error" style={s.error}>
             {t("drawer.importFailed")}
             {filePreview.error instanceof ApiError ? `: ${filePreview.error.message}` : ""}
           </div>

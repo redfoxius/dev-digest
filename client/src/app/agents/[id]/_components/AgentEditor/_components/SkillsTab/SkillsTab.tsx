@@ -7,7 +7,7 @@
 
 import React from "react";
 import { useTranslations } from "next-intl";
-import { Checkbox, Icon, Badge, Skeleton } from "@devdigest/ui";
+import { Checkbox, ErrorState, Icon, Badge, Skeleton } from "@devdigest/ui";
 import type { Agent } from "@devdigest/shared";
 import {
   useAgentSkills,
@@ -22,8 +22,18 @@ import { s } from "./styles";
 
 export function SkillsTab({ agent }: { agent: Agent }) {
   const t = useTranslations("agents");
-  const { data: skills, isLoading: skillsLoading } = useSkills();
-  const { data: links, isLoading: linksLoading } = useAgentSkills(agent.id);
+  const {
+    data: skills,
+    isLoading: skillsLoading,
+    isError: skillsError,
+    refetch: refetchSkills,
+  } = useSkills();
+  const {
+    data: links,
+    isLoading: linksLoading,
+    isError: linksError,
+    refetch: refetchLinks,
+  } = useAgentSkills(agent.id);
   const setSkills = useSetAgentSkills(agent.id);
   const setEnabled = useSetAgentSkillEnabled(agent.id);
 
@@ -42,6 +52,7 @@ export function SkillsTab({ agent }: { agent: Agent }) {
   const rows = optimisticRows ?? merged;
 
   const loading = skillsLoading || linksLoading;
+  const isError = skillsError || linksError;
   const total = rows.length;
   const linkedEnabled = rows.filter((r) => r.link?.enabled).length;
   const visible = rows.filter((r) => matchesSkillFilter(r.skill, filter));
@@ -79,7 +90,20 @@ export function SkillsTab({ agent }: { agent: Agent }) {
       </div>
       <div style={s.hint}>{t("skills.orderHint")}</div>
 
-      {loading ? (
+      {!isError && !loading && (
+        <div role="status" aria-live="polite" style={s.srOnly}>
+          {t("skills.resultCount", { count: visible.length })}
+        </div>
+      )}
+      {isError ? (
+        <ErrorState
+          body={t("skills.loadError")}
+          onRetry={() => {
+            void refetchSkills();
+            void refetchLinks();
+          }}
+        />
+      ) : loading ? (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           <Skeleton height={40} />
           <Skeleton height={40} />
