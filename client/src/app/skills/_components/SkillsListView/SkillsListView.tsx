@@ -8,10 +8,11 @@ import React from "react";
 import { useTranslations } from "next-intl";
 import { Button, Dropdown, EmptyState, ErrorState, Skeleton, Icon, Badge, Toggle } from "@devdigest/ui";
 import { useSkills, useUpdateSkill } from "../../../../lib/hooks/skills";
+import { needsVetting } from "../../../../lib/skills";
 import { ImportSkillDrawer } from "../ImportSkillDrawer";
 import { CommunitySkillsDrawer } from "../CommunitySkillsDrawer";
 import { SOURCE_ICON, TYPE_META } from "./constants";
-import { filterSkills, needsVetting } from "./helpers";
+import { filterSkills } from "./helpers";
 import { s } from "./styles";
 
 export function SkillsListView({

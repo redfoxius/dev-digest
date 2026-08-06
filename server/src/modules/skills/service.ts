@@ -25,7 +25,12 @@ import {
   toSkillVersionDto,
   type ArchiveFileEntry,
 } from './helpers.js';
-import { COMMUNITY_SKILLS_SEED, MAX_ARCHIVE_BYTES, MAX_DECOMPRESSED_BYTES } from './constants.js';
+import {
+  COMMUNITY_SKILLS_SEED,
+  MAX_ARCHIVE_BYTES,
+  MAX_DECOMPRESSED_BYTES,
+  URL_IMPORT_BODY_TIMEOUT_MS,
+} from './constants.js';
 
 /**
  * A1 — skills service. Business logic for the standalone Skills page +
@@ -255,11 +260,7 @@ export class SkillsService {
       throw new ExternalServiceError(`Failed to fetch ${url}: HTTP ${res.status}`);
     }
 
-    const arrayBuffer = await res.arrayBuffer();
-    if (arrayBuffer.byteLength > MAX_ARCHIVE_BYTES) {
-      throw new ValidationError(`Fetched content exceeds the ${MAX_ARCHIVE_BYTES}-byte limit`);
-    }
-    const buffer = Buffer.from(arrayBuffer);
+    const buffer = await readBodyWithLimit(res, url);
 
     const pathname = safeUrlPathname(url);
     const filename = pathname.split('/').filter(Boolean).pop() || 'skill.md';
@@ -465,6 +466,49 @@ async function readTarEntries(buffer: Buffer): Promise<ArchiveFileEntry[]> {
     throw new ValidationError(`Could not read tar archive: ${(err as Error).message}`);
   });
   return entries;
+}
+
+/**
+ * Reads a fetch `Response` body as a `Buffer`, enforcing BOTH a size cap and
+ * a read-duration timeout DURING the read — not after the fact. Streams
+ * chunk-by-chunk via the body's own reader and aborts (cancels the
+ * underlying stream) the moment either limit is crossed, so an
+ * attacker-controlled URL can't force this process to buffer an unbounded
+ * or slow-drip response in memory (`HttpUrlFetcher`'s own timeout only
+ * covers the connect/headers phase, not this one).
+ */
+async function readBodyWithLimit(res: Response, url: string): Promise<Buffer> {
+  const reader = res.body?.getReader();
+  if (!reader) throw new ExternalServiceError(`Failed to fetch ${url}: empty response body`);
+
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  let timedOut = false;
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    void reader.cancel('body read timed out').catch(() => {});
+  }, URL_IMPORT_BODY_TIMEOUT_MS);
+
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > MAX_ARCHIVE_BYTES) {
+        await reader.cancel('exceeds max size').catch(() => {});
+        throw new ValidationError(`Fetched content exceeds the ${MAX_ARCHIVE_BYTES}-byte limit`);
+      }
+      chunks.push(value);
+    }
+  } catch (err) {
+    if (timedOut) {
+      throw new ExternalServiceError(`Failed to fetch ${url}: response body took too long to arrive`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeout);
+  }
+  return Buffer.concat(chunks.map((c) => Buffer.from(c)));
 }
 
 function safeUrlPathname(url: string): string {

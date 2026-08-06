@@ -6,7 +6,7 @@
 import { useTranslations } from "next-intl";
 import { Badge, Markdown } from "@devdigest/ui";
 import type { Skill } from "@devdigest/shared";
-import { needsVetting } from "../../../SkillsListView/helpers";
+import { needsVetting } from "../../../../../../lib/skills";
 import { s } from "./styles";
 
 export function PreviewTab({ skill }: { skill: Skill }) {

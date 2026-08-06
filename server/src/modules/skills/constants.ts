@@ -17,6 +17,14 @@ export const DEFAULT_SKILL_DESCRIPTION = '';
 export const MAX_ARCHIVE_BYTES = 5 * 1024 * 1024; // 5 MB
 
 /**
+ * Hard cap on how long a URL-import's response BODY may take to fully
+ * arrive, enforced separately from the fetch's own connect/headers timeout
+ * (`HttpUrlFetcher`'s `FETCH_TIMEOUT_MS`) — that one is cleared once headers
+ * arrive, so without this a slow-drip body could otherwise stream forever.
+ */
+export const URL_IMPORT_BODY_TIMEOUT_MS = 10_000;
+
+/**
  * Hard cap on an archive's total DECOMPRESSED size — `MAX_ARCHIVE_BYTES`
  * only bounds the compressed upload; without this a small crafted zip/gzip
  * (a decompression bomb) can expand to gigabytes in memory. Generous for a

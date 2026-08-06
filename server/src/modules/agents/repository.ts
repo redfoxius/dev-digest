@@ -63,8 +63,8 @@ export class AgentsRepository {
       .where(and(eq(t.agents.workspaceId, workspaceId), eq(t.agents.enabled, true)));
   }
 
-  async getById(workspaceId: string, id: string): Promise<AgentRow | undefined> {
-    const [row] = await this.db
+  async getById(workspaceId: string, id: string, dbOrTx: Db = this.db): Promise<AgentRow | undefined> {
+    const [row] = await dbOrTx
       .select()
       .from(t.agents)
       .where(and(eq(t.agents.workspaceId, workspaceId), eq(t.agents.id, id)));
@@ -82,68 +82,81 @@ export class AgentsRepository {
     return rows.length > 0;
   }
 
-  /** Insert an agent AND record version 1 in agent_versions (immutable snapshot). */
+  /** Insert an agent AND record version 1 in agent_versions (immutable snapshot).
+   *  Both writes run in ONE transaction — if the snapshot insert fails, the
+   *  agent row is rolled back too, rather than existing with no v1 snapshot. */
   async insert(values: InsertAgent): Promise<AgentRow> {
-    const [row] = await this.db
-      .insert(t.agents)
-      .values({
-        workspaceId: values.workspaceId,
-        name: values.name,
-        description: values.description ?? DEFAULT_AGENT_DESCRIPTION,
-        provider: values.provider,
-        model: values.model,
-        systemPrompt: values.systemPrompt,
-        outputSchema: (values.outputSchema as object | undefined) ?? null,
-        ...(values.strategy !== undefined ? { strategy: values.strategy } : {}),
-        ...(values.ciFailOn !== undefined ? { ciFailOn: values.ciFailOn } : {}),
-        ...(values.repoIntel !== undefined ? { repoIntel: values.repoIntel } : {}),
-        enabled: values.enabled ?? true,
-        version: INITIAL_AGENT_VERSION,
-        createdBy: values.createdBy ?? null,
-      })
-      .returning();
-    await this.snapshotVersion(row!, INITIAL_AGENT_VERSION);
-    return row!;
+    return this.db.transaction(async (tx) => {
+      const [row] = await tx
+        .insert(t.agents)
+        .values({
+          workspaceId: values.workspaceId,
+          name: values.name,
+          description: values.description ?? DEFAULT_AGENT_DESCRIPTION,
+          provider: values.provider,
+          model: values.model,
+          systemPrompt: values.systemPrompt,
+          outputSchema: (values.outputSchema as object | undefined) ?? null,
+          ...(values.strategy !== undefined ? { strategy: values.strategy } : {}),
+          ...(values.ciFailOn !== undefined ? { ciFailOn: values.ciFailOn } : {}),
+          ...(values.repoIntel !== undefined ? { repoIntel: values.repoIntel } : {}),
+          enabled: values.enabled ?? true,
+          version: INITIAL_AGENT_VERSION,
+          createdBy: values.createdBy ?? null,
+        })
+        .returning();
+      await this.snapshotVersion(row!, INITIAL_AGENT_VERSION, tx);
+      return row!;
+    });
   }
 
   /**
    * Update an agent. Any config change bumps the version and snapshots the new
    * config into agent_versions (reproducibility for eval).
+   *
+   * Both the agents-row update and its `agent_versions` snapshot run in ONE
+   * transaction (a failed snapshot insert rolls the row update back too,
+   * instead of leaving an agent with no matching version snapshot). The
+   * version bump itself is an atomic `sql`${t.agents.version} + 1`` at the
+   * database, not read-then-written in JS — two concurrent updates to the
+   * same agent each get a distinct, correctly-serialized version via
+   * Postgres' row locking, mirroring `bumpVersionAfterSkillChange` below.
    */
   async update(
     workspaceId: string,
     id: string,
     patch: UpdateAgent,
   ): Promise<AgentRow | undefined> {
-    const existing = await this.getById(workspaceId, id);
-    if (!existing) return undefined;
+    return this.db.transaction(async (tx) => {
+      const existing = await this.getById(workspaceId, id, tx);
+      if (!existing) return undefined;
 
-    // A config-affecting change (anything except just toggling enabled) bumps version.
-    const configChanged = isConfigChange(existing, patch);
-    const nextVersion = configChanged ? existing.version + 1 : existing.version;
+      // A config-affecting change (anything except just toggling enabled) bumps version.
+      const configChanged = isConfigChange(existing, patch);
 
-    const [row] = await this.db
-      .update(t.agents)
-      .set({
-        ...(patch.name !== undefined ? { name: patch.name } : {}),
-        ...(patch.description !== undefined ? { description: patch.description } : {}),
-        ...(patch.provider !== undefined ? { provider: patch.provider } : {}),
-        ...(patch.model !== undefined ? { model: patch.model } : {}),
-        ...(patch.systemPrompt !== undefined ? { systemPrompt: patch.systemPrompt } : {}),
-        ...(patch.outputSchema !== undefined
-          ? { outputSchema: patch.outputSchema as object }
-          : {}),
-        ...(patch.strategy !== undefined ? { strategy: patch.strategy } : {}),
-        ...(patch.ciFailOn !== undefined ? { ciFailOn: patch.ciFailOn } : {}),
-        ...(patch.repoIntel !== undefined ? { repoIntel: patch.repoIntel } : {}),
-        ...(patch.enabled !== undefined ? { enabled: patch.enabled } : {}),
-        ...(configChanged ? { version: nextVersion } : {}),
-      })
-      .where(and(eq(t.agents.workspaceId, workspaceId), eq(t.agents.id, id)))
-      .returning();
+      const [row] = await tx
+        .update(t.agents)
+        .set({
+          ...(patch.name !== undefined ? { name: patch.name } : {}),
+          ...(patch.description !== undefined ? { description: patch.description } : {}),
+          ...(patch.provider !== undefined ? { provider: patch.provider } : {}),
+          ...(patch.model !== undefined ? { model: patch.model } : {}),
+          ...(patch.systemPrompt !== undefined ? { systemPrompt: patch.systemPrompt } : {}),
+          ...(patch.outputSchema !== undefined
+            ? { outputSchema: patch.outputSchema as object }
+            : {}),
+          ...(patch.strategy !== undefined ? { strategy: patch.strategy } : {}),
+          ...(patch.ciFailOn !== undefined ? { ciFailOn: patch.ciFailOn } : {}),
+          ...(patch.repoIntel !== undefined ? { repoIntel: patch.repoIntel } : {}),
+          ...(patch.enabled !== undefined ? { enabled: patch.enabled } : {}),
+          ...(configChanged ? { version: sql`${t.agents.version} + 1` } : {}),
+        })
+        .where(and(eq(t.agents.workspaceId, workspaceId), eq(t.agents.id, id)))
+        .returning();
 
-    if (configChanged && row) await this.snapshotVersion(row, nextVersion);
-    return row;
+      if (configChanged && row) await this.snapshotVersion(row, row.version, tx);
+      return row;
+    });
   }
 
   private async snapshotVersion(row: AgentRow, version: number, dbOrTx: Db = this.db): Promise<void> {

@@ -6,6 +6,17 @@ import { loadConfig } from '../src/platform/config.js';
 import { seed } from '../src/db/seed.js';
 import { MockGitClient, MockGitHubClient } from '../src/adapters/mocks.js';
 
+// `HttpUrlFetcher` (the real adapter, used here — not `MockUrlFetcher`) calls
+// undici's own `fetch`, not `globalThis.fetch` (Node's global fetch rejects a
+// dispatcher built from the `undici` package). Mocked via `vi.mock` (not
+// `vi.spyOn`) because Node's ESM/CJS interop exposes `undici`'s named exports
+// as non-writable getters.
+const undiciFetchMock = vi.hoisted(() => vi.fn());
+vi.mock('undici', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('undici')>();
+  return { ...actual, fetch: undiciFetchMock };
+});
+
 const hasDocker = await dockerAvailable();
 const d = hasDocker ? describe : describe.skip;
 
@@ -51,6 +62,7 @@ d('/skills', () => {
   });
   afterEach(() => {
     vi.restoreAllMocks();
+    undiciFetchMock.mockReset();
   });
 
   function makeApp() {
@@ -219,12 +231,8 @@ d('/skills', () => {
   });
 
   it('import: URL preview+confirm lands source: imported_url, enabled: false (needs vetting)', async () => {
-    // Spy BEFORE building the app: `SkillsService`'s `fetchImpl` default
-    // parameter captures the `fetch` reference once, at construction time
-    // (inside `skillsRoutes()`, when the app is built) — spying afterward
-    // would leave that already-bound reference pointing at the real fetch.
     const remoteBody = '# Remote convention\n\nAlways use named exports.';
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(remoteBody, { status: 200 }));
+    undiciFetchMock.mockResolvedValue(new Response(remoteBody, { status: 200 }));
     const app = await makeApp();
 
     const preview = await app.inject({

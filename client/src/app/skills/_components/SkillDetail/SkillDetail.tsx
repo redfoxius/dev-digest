@@ -42,7 +42,7 @@ export function SkillDetail({
         <Tabs tabs={[...TABS]} value={activeTab} onChange={onTab ?? (() => {})} pad="0 28px" />
       </div>
       <div style={s.body}>
-        {activeTab === "config" && <ConfigTab skill={skill} />}
+        {activeTab === "config" && <ConfigTab key={skill.id} skill={skill} />}
         {activeTab === "preview" && <PreviewTab skill={skill} />}
         {activeTab === "evals" && (
           <EmptyState

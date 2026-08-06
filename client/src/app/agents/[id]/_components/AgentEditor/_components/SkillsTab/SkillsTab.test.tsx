@@ -138,6 +138,9 @@ describe("SkillsTab", () => {
     fireEvent.dragStart(handles[2]!, { dataTransfer: { setData: vi.fn() } });
     fireEvent.dragOver(handles[0]!);
     fireEvent.drop(handles[0]!);
-    expect(setSkillsMutate).toHaveBeenCalledWith(["s3", "s1", "s2"]);
+    expect(setSkillsMutate).toHaveBeenCalledWith(
+      ["s3", "s1", "s2"],
+      expect.objectContaining({ onSettled: expect.any(Function) }),
+    );
   });
 });

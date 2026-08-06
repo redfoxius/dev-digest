@@ -14,7 +14,7 @@ import type { Skill, SkillType } from "@devdigest/shared";
 import { useCreateSkill, useUpdateSkill } from "../../../../../../lib/hooks/skills";
 import { useToast } from "../../../../../../lib/toast";
 import { useTheme } from "../../../../../../lib/theme";
-import { needsVetting } from "../../../SkillsListView/helpers";
+import { needsVetting } from "../../../../../../lib/skills";
 import { SKILL_TYPE_VALUES } from "./constants";
 import { bodyFilename, estimateTokens } from "./helpers";
 import { s } from "./styles";
@@ -26,21 +26,18 @@ export function ConfigTab({ skill, onCreated }: { skill: Skill | null; onCreated
   const create = useCreateSkill();
   const update = useUpdateSkill();
 
+  // Initial values only — the parent remounts this component via
+  // `key={skill.id}` whenever the underlying skill identity changes
+  // (switching selection in the list, or a create → edit hand-off), so no
+  // effect-based resync is needed (or correct: an effect keyed on `skill?.id`
+  // would leave stale field values in place if the cached `skill` object's
+  // CONTENT changes without its `id` changing — e.g. a concurrent edit
+  // refetched elsewhere).
   const [name, setName] = React.useState(skill?.name ?? "");
   const [description, setDescription] = React.useState(skill?.description ?? "");
   const [type, setType] = React.useState<SkillType>(skill?.type ?? "custom");
   const [body, setBody] = React.useState(skill?.body ?? "");
   const [enabled, setEnabled] = React.useState(skill?.enabled ?? true);
-
-  // Reset the local form whenever the underlying skill identity changes
-  // (switching selection in the list, or a create → edit hand-off).
-  React.useEffect(() => {
-    setName(skill?.name ?? "");
-    setDescription(skill?.description ?? "");
-    setType(skill?.type ?? "custom");
-    setBody(skill?.body ?? "");
-    setEnabled(skill?.enabled ?? true);
-  }, [skill?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const configChanged = skill
     ? name !== skill.name || description !== skill.description || type !== skill.type || body !== skill.body
