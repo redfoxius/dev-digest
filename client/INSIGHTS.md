@@ -3,7 +3,7 @@
 Practical findings hit while working in this module. Append-only: correct a
 stale entry with a new dated line, never edit or delete history silently.
 
-Before writing here, check [CLAUDE.md](CLAUDE.md) — a finding that should
+Before writing here, check [AGENTS.md](AGENTS.md) — a finding that should
 *always* apply belongs there as a standing rule; this file is for things too
 specific, too contextual, or too unproven for that yet.
 
@@ -16,6 +16,17 @@ workflow and quality bar.
 ## What Doesn't Work
 
 ## Codebase Patterns
+
+- 2026-08-05 — `Dropdown` (`src/vendor/ui/kit/Dropdown.tsx`) now supports two
+  mutually-exclusive content modes behind one component: the original
+  `items: DropdownItemDef[]` list, or a free-form `children` render (used by
+  the findings click-popover). `items` became optional and `children ?? items?.map(...)`
+  picks whichever was passed; a new `onOpenChange` callback exposes open state
+  without changing the 6 existing `items`-only call sites. Worth reusing this
+  "optional items + optional children" shape for the next shared `kit`
+  component that needs one consumer to render arbitrary rich content while
+  every other consumer keeps using the simple declarative list.
+  (`src/vendor/ui/kit/Dropdown.tsx:62-100`)
 
 - 2026-07-27 — `src/vendor/shared` here is a **trimmed subset** of the
   server's `@devdigest/shared`, hand-copied — not just a mirror. It's missing
@@ -38,9 +49,58 @@ workflow and quality bar.
 
 ## Recurring Errors & Fixes
 
+- 2026-08-05 — The PR list's `tableCard` container had `overflow: "hidden"`
+  (for its rounded corners), which silently clipped the FINDINGS column's
+  new click-popover — an absolutely-positioned `Dropdown` child — whenever it
+  opened on a row near the bottom of the table. `pnpm typecheck` and the full
+  Vitest/RTL suite (53 tests) stayed green through this the whole time:
+  JSDOM has no real layout engine, so `overflow: hidden` clipping is
+  invisible to RTL assertions — it only surfaces as a real, rendered
+  screenshot. Only caught during the manual browser verification pass, not
+  by any automated check. Fix: `tableCard.overflow: "visible"` (safe here
+  because rows' default background is transparent, so no square corners
+  show through the parent's rounded ones). Generalizable lesson: any
+  absolutely-positioned popover added inside an existing `overflow: hidden`
+  card needs a manual screenshot check near the container's edges — tests
+  passing is not evidence the popover is visible.
+  (`src/app/repos/[repoId]/pulls/styles.ts:91-99`)
+
+- 2026-08-05 — `PRRow`'s findings popover confidently rendered "No findings"
+  for a PR that DID have a fresh finding, reported live by the user with a
+  screenshot (found on `~/Desktop`, not attached to the chat message — see
+  memory). Root cause: `usePrReviews(prId, enabled)` shares its
+  `["reviews", prId]` cache key with every other consumer (notably the PR
+  detail page, which fetches it with `enabled: true` by default) and the
+  global `QueryClient` default is `staleTime: 30_000`
+  (`src/lib/providers.tsx:28`). Visiting the PR detail page (which is how a
+  user actually triggers "Run all agents" — the button lives there, not on
+  the list) caches an EARLY, pre-completion snapshot of that query key. Back
+  on the list, opening the FINDINGS popover within that 30s window reuses
+  the stale cached array — and critically, `reviewsQuery.isLoading` reads
+  `false` the whole time (TanStack's `isLoading` is about "no cached data
+  at all", not "is this data current"), so the popover never shows a
+  loading state, it just confidently renders the stale (findings-less)
+  snapshot. Fix: derive a `missingExpectedReviews` flag by checking whether
+  every id in `pr.latest_review_ids` (from the list fetch, always
+  server-fresh) is actually present in `reviewsQuery.data`; if not, treat
+  it as loading AND explicitly call `reviewsQuery.refetch()` — don't rely
+  on `isLoading`/`enabled`-toggle refetch semantics alone for a resource
+  that changes in the background outside this component's knowledge.
+  (`src/app/repos/[repoId]/pulls/_components/PRRow/PRRow.tsx` — the
+  `missingExpectedReviews`/refetch effect)
+
 ## Open Questions
 
 ## Session Notes
+
+- 2026-08-05 — Implemented `docs/findings-by-severity-plan.md` end-to-end
+  (all 22 steps): server-side live per-severity findings aggregation on the
+  PR list, click-popovers on both the PR list and the Agent-runs timeline,
+  and the `Dropdown`/`SeverityCounts`/`FindingsPopoverList` primitives behind
+  them. Verified via `pnpm typecheck` + full test suites (server unit +
+  integration, client) in both packages, then a manual browser pass against
+  seeded data — which is what caught the `overflow: hidden` clipping bug
+  above; the plan itself didn't anticipate it.
 
 - 2026-08-04 — `engineering-insights` did not auto-invoke during the whole
   `feat/review-cost` session (a multi-file feature with real findings — see

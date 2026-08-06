@@ -8,8 +8,8 @@ allowed-tools: Read, Write, Edit, Grep, Glob, Bash
 
 Turns a finished coding session into a durable, file-scoped memory: what worked,
 what didn't, what surprised you — written where the *next* session in that
-module will actually see it. Not a chat transcript, not documentation, not a
-CLAUDE.md replacement — a running lab notebook per package.
+module will actually see it. Not a chat transcript, not documentation, not an
+AGENTS.md replacement — a running lab notebook per package.
 
 ## When to use
 
@@ -58,7 +58,7 @@ Before writing any line: **"Would this surprise someone who just read the
 code?"**
 
 - No → don't write it. If a linter, the type-checker, or the module's own
-  `README.md`/`CLAUDE.md` already covers it, it doesn't belong here either.
+  `README.md`/`AGENTS.md` already covers it, it doesn't belong here either.
 - Yes → write it as a terse, actionable instruction for a future session, not
   a narrative of what you did.
 
@@ -87,9 +87,9 @@ pulled from this repo.
   entry is worse than a missing one — if you're not confident, say so in the
   entry or leave it out.
 - **Never duplicate** what's already in `<module>/README.md`,
-  `<module>/CLAUDE.md`, or what a linter/type-checker already enforces. If a
+  `<module>/AGENTS.md`, or what a linter/type-checker already enforces. If a
   finding is really a standing rule the agent must always follow, it belongs
-  in that module's `CLAUDE.md`, not here — this file is for things too
+  in that module's `AGENTS.md`, not here — this file is for things too
   specific, too contextual, or too unproven for a standing rule yet.
 
 ## Reading it back
@@ -100,9 +100,11 @@ confidence guidance — but verify a cited `file:line` still says what the
 entry claims; code moves, and a stale citation means the finding may be stale
 too.
 
-## Wiring into CLAUDE.md (optional, do once per module)
+## Wiring into AGENTS.md (optional, do once per module)
 
-Once a module has a `CLAUDE.md` (see the repo-wide CLAUDE.md structure), add:
+Once a module has an `AGENTS.md` (see the repo-wide AGENTS.md structure; a
+symlinked `CLAUDE.md` next to it is how Claude Code auto-discovers the same
+file), add:
 
 ```markdown
 ## Session protocol

@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import type { z } from 'zod';
 import { startPg, dockerAvailable, type PgFixture } from './helpers/pg.js';
 import { waitForPrRuns } from './helpers/runs.js';
 import { buildApp } from '../src/app.js';
@@ -7,7 +8,15 @@ import { seed } from '../src/db/seed.js';
 import { MockLLMProvider, MockEmbedder, MockGitClient } from '../src/adapters/mocks.js';
 import * as t from '../src/db/schema.js';
 import { eq } from 'drizzle-orm';
-import type { Review } from '@devdigest/shared';
+import type {
+  Review,
+  LLMProvider,
+  ModelInfo,
+  CompletionRequest,
+  CompletionResult,
+  StructuredRequest,
+  StructuredResult,
+} from '@devdigest/shared';
 
 const hasDocker = await dockerAvailable();
 const d = hasDocker ? describe : describe.skip;
@@ -59,6 +68,108 @@ const REVIEW_FIXTURE: Review = {
     },
   ],
 };
+
+/**
+ * Returns a different Review fixture per agent, keyed by a marker string
+ * baked into that agent's `system_prompt` — lets a "run all" test simulate
+ * agents disagreeing (some find nothing, one finds something) regardless of
+ * which order they happen to run/finish in (single-pass runs sequentially,
+ * but nothing in this test should depend on that).
+ */
+class PerAgentMockLLM implements LLMProvider {
+  readonly id: 'openai' | 'anthropic' | 'openrouter' = 'openai';
+  constructor(private fixtureByMarker: Record<string, Review>) {}
+
+  async listModels(): Promise<ModelInfo[]> {
+    return [{ id: 'gpt-4.1', provider: 'openai' }];
+  }
+
+  async complete(req: CompletionRequest): Promise<CompletionResult> {
+    return { text: 'mock completion', model: req.model, tokensIn: 100, tokensOut: 50, costUsd: 0.001 };
+  }
+
+  async completeStructured<T>(req: StructuredRequest<T>): Promise<StructuredResult<T>> {
+    const text = req.messages.map((m) => m.content).join('\n');
+    const marker = Object.keys(this.fixtureByMarker).find((m) => text.includes(m));
+    if (!marker) throw new Error(`PerAgentMockLLM: no fixture marker found in prompt: ${text.slice(0, 200)}`);
+    const fixture = this.fixtureByMarker[marker];
+    const parsed = (req.schema as z.ZodType<T>).safeParse(fixture);
+    if (!parsed.success) throw new Error(`PerAgentMockLLM fixture failed schema: ${parsed.error.message}`);
+    return {
+      data: parsed.data,
+      model: req.model,
+      tokensIn: 100,
+      tokensOut: 50,
+      costUsd: 0.001,
+      raw: JSON.stringify(fixture),
+      attempts: 1,
+    };
+  }
+
+  async embed(texts: string[]): Promise<number[][]> {
+    return texts.map(() => new Array(1536).fill(0));
+  }
+}
+
+/**
+ * Like PerAgentMockLLM, but a marker in `blockMarkers` makes that agent's
+ * call hang until the test explicitly `release()`s it — lets a test observe
+ * DB state while one agent in a batch has genuinely finished and another is
+ * still mid-flight, instead of racing real async completion order.
+ */
+class ControllableMockLLM implements LLMProvider {
+  readonly id: 'openai' | 'anthropic' | 'openrouter' = 'openai';
+  private gates = new Map<string, { promise: Promise<void>; release: () => void }>();
+
+  constructor(
+    private fixtureByMarker: Record<string, Review>,
+    private blockMarkers: Set<string>,
+  ) {}
+
+  release(marker: string): void {
+    this.gates.get(marker)?.release();
+  }
+
+  async listModels(): Promise<ModelInfo[]> {
+    return [{ id: 'gpt-4.1', provider: 'openai' }];
+  }
+
+  async complete(req: CompletionRequest): Promise<CompletionResult> {
+    return { text: 'mock completion', model: req.model, tokensIn: 100, tokensOut: 50, costUsd: 0.001 };
+  }
+
+  async completeStructured<T>(req: StructuredRequest<T>): Promise<StructuredResult<T>> {
+    const text = req.messages.map((m) => m.content).join('\n');
+    const marker = Object.keys(this.fixtureByMarker).find((m) => text.includes(m));
+    if (!marker) throw new Error(`ControllableMockLLM: no fixture marker found in prompt: ${text.slice(0, 200)}`);
+
+    if (this.blockMarkers.has(marker)) {
+      if (!this.gates.has(marker)) {
+        let release!: () => void;
+        const promise = new Promise<void>((resolve) => (release = resolve));
+        this.gates.set(marker, { promise, release });
+      }
+      await this.gates.get(marker)!.promise;
+    }
+
+    const fixture = this.fixtureByMarker[marker];
+    const parsed = (req.schema as z.ZodType<T>).safeParse(fixture);
+    if (!parsed.success) throw new Error(`ControllableMockLLM fixture failed schema: ${parsed.error.message}`);
+    return {
+      data: parsed.data,
+      model: req.model,
+      tokensIn: 100,
+      tokensOut: 50,
+      costUsd: 0.001,
+      raw: JSON.stringify(fixture),
+      attempts: 1,
+    };
+  }
+
+  async embed(texts: string[]): Promise<number[][]> {
+    return texts.map(() => new Array(1536).fill(0));
+  }
+}
 
 let repoSeq = 0;
 async function setupRepoAndPr(db: PgFixture['handle']['db'], workspaceId: string) {
@@ -227,6 +338,12 @@ d('A2 reviews + agents (Testcontainers pg)', () => {
     expect(listedPr.cost_usd).toBeCloseTo(expectedCost);
     expect(listedPr.latest_run_cost_usd).toBeCloseTo(expectedCost);
 
+    // FINDINGS column: the ids of this PR's latest review batch (just the
+    // one review here), plus its live per-severity breakdown (grounding
+    // kept exactly one CRITICAL finding).
+    expect(listedPr.latest_review_ids).toEqual([review.id]);
+    expect(listedPr.findings).toEqual({ critical: 1, warning: 0, suggestion: 0 });
+
     await app.close();
   });
 
@@ -252,7 +369,7 @@ d('A2 reviews + agents (Testcontainers pg)', () => {
 
   it('finding actions: accept, dismiss', async () => {
     const app = await appWith(REVIEW_FIXTURE);
-    const { pr } = await setupRepoAndPr(pg.handle.db, workspaceId);
+    const { repo, pr } = await setupRepoAndPr(pg.handle.db, workspaceId);
     const agent = (
       await app.inject({
         method: 'POST',
@@ -267,6 +384,14 @@ d('A2 reviews + agents (Testcontainers pg)', () => {
     ).json();
     const findingId = reviews[0].findings[0].id;
 
+    // Before dismissing, the PR-list FINDINGS column counts the one CRITICAL finding.
+    const before = (await app.inject({ method: 'GET', url: `/repos/${repo.id}/pulls` })).json();
+    expect(before.find((p: { id: string }) => p.id === pr.id).findings).toEqual({
+      critical: 1,
+      warning: 0,
+      suggestion: 0,
+    });
+
     const accepted = (
       await app.inject({ method: 'POST', url: `/findings/${findingId}/accept` })
     ).json();
@@ -277,6 +402,15 @@ d('A2 reviews + agents (Testcontainers pg)', () => {
     ).json();
     expect(dismissed.finding.dismissed_at).not.toBeNull();
     expect(dismissed.finding.accepted_at).toBeNull();
+
+    // FINDINGS counts are LIVE, not a snapshot: dismissing drops the count on
+    // the very next list fetch, with no other state change.
+    const after = (await app.inject({ method: 'GET', url: `/repos/${repo.id}/pulls` })).json();
+    expect(after.find((p: { id: string }) => p.id === pr.id).findings).toEqual({
+      critical: 0,
+      warning: 0,
+      suggestion: 0,
+    });
 
     await app.close();
   });
@@ -315,6 +449,171 @@ d('A2 reviews + agents (Testcontainers pg)', () => {
     ).json();
     // seed has 2 enabled agents; we may have created more above in this PR's ws.
     expect(body.runs.length).toBeGreaterThanOrEqual(2);
+    await app.close();
+  });
+
+  it('PR-list FINDINGS/COST sum every agent from the LAST "run all" action, not just whichever one finished last', async () => {
+    const noFindings: Review = { verdict: 'approve', summary: 'Looks fine.', score: 100, findings: [] };
+    const oneFinding: Review = {
+      verdict: 'request_changes',
+      summary: 'Hardcoded Stripe secret introduced.',
+      score: 42,
+      findings: [
+        {
+          id: 'f-valid',
+          severity: 'CRITICAL',
+          category: 'security',
+          title: 'Hardcoded Stripe secret key',
+          file: 'src/config.ts',
+          start_line: 11,
+          end_line: 11,
+          rationale: 'A live Stripe key is committed in source.',
+          suggestion: 'Move the key to an environment variable.',
+          confidence: 0.95,
+          kind: 'finding',
+        },
+      ],
+    };
+
+    const app = await buildApp({
+      config: config(),
+      db: pg.handle.db,
+      overrides: {
+        embedder: new MockEmbedder(),
+        git: new MockGitClient({ diff: DIFF }),
+        llm: {
+          openai: new PerAgentMockLLM({
+            AGENT_NOTHING_1: noFindings,
+            AGENT_HAS_ISSUE: oneFinding,
+            AGENT_NOTHING_2: noFindings,
+          }),
+        },
+      },
+    });
+    const { repo, pr } = await setupRepoAndPr(pg.handle.db, workspaceId);
+
+    // Isolate this test from every other enabled agent in the shared
+    // workspace (seed agents + agents created by earlier tests in this
+    // file) — `all:true` runs every enabled agent, and this test needs to
+    // control the exact set.
+    const existing = (await app.inject({ method: 'GET', url: '/agents' })).json();
+    for (const a of existing) {
+      if (a.enabled) {
+        await app.inject({ method: 'PUT', url: `/agents/${a.id}`, payload: { enabled: false } });
+      }
+    }
+
+    for (const marker of ['AGENT_NOTHING_1', 'AGENT_HAS_ISSUE', 'AGENT_NOTHING_2']) {
+      await app.inject({
+        method: 'POST',
+        url: '/agents',
+        payload: { name: marker, provider: 'openai', model: 'gpt-4.1', system_prompt: marker },
+      });
+    }
+
+    const body = (
+      await app.inject({ method: 'POST', url: `/pulls/${pr.id}/review`, payload: { all: true } })
+    ).json();
+    expect(body.runs).toHaveLength(3);
+    await waitForPrRuns(pg.handle.db, pr.id, { expected: 3 });
+
+    const reviews = (
+      await app.inject({ method: 'GET', url: `/pulls/${pr.id}/reviews` })
+    ).json();
+    expect(reviews).toHaveLength(3);
+
+    const pulls = (await app.inject({ method: 'GET', url: `/repos/${repo.id}/pulls` })).json();
+    const listedPr = pulls.find((p: { id: string }) => p.id === pr.id);
+
+    // The bug: picking a single "latest review" row by createdAt would show
+    // whichever no-findings agent happened to be inserted last — hiding the
+    // one agent that actually found something. Batch-grouping by
+    // multi_agent_run_id must sum across all 3.
+    expect(listedPr.findings).toEqual({ critical: 1, warning: 0, suggestion: 0 });
+    expect(listedPr.latest_review_ids).toHaveLength(3);
+    expect(new Set(listedPr.latest_review_ids)).toEqual(new Set(reviews.map((r: { id: string }) => r.id)));
+
+    // Same bug, same fix, for cost: 3 agents × $0.001/call = $0.003 for the
+    // batch, not just one agent's $0.001.
+    expect(listedPr.latest_run_cost_usd).toBeCloseTo(0.003);
+    expect(listedPr.cost_usd).toBeCloseTo(0.003);
+
+    // Same bug, same fix, for score: AGENT_NOTHING_2 finishes last with a
+    // clean 100, but AGENT_HAS_ISSUE (same batch) grounds one CRITICAL
+    // finding — recomputed score 100 − 35 = 65 (grounding recomputes score
+    // from survivors, never trusts the model's self-reported 42; see the
+    // map-reduce test above). The list must show the batch's WORST score
+    // (65), not whichever agent happened to be inserted last, or a real
+    // rejection reads as a clean pass.
+    expect(listedPr.score).toBe(65);
+
+    await app.close();
+  });
+
+  it('PR status does not flip to "reviewed" until every agent in the batch has settled', async () => {
+    const fastFixture: Review = { verdict: 'approve', summary: 'Fast agent done.', score: 100, findings: [] };
+    const slowFixture: Review = { verdict: 'approve', summary: 'Slow agent done.', score: 100, findings: [] };
+    const llm = new ControllableMockLLM(
+      { AGENT_FAST: fastFixture, AGENT_SLOW: slowFixture },
+      new Set(['AGENT_SLOW']),
+    );
+
+    const app = await buildApp({
+      config: config(),
+      db: pg.handle.db,
+      overrides: {
+        embedder: new MockEmbedder(),
+        git: new MockGitClient({ diff: DIFF }),
+        llm: { openai: llm },
+      },
+    });
+    const { repo, pr } = await setupRepoAndPr(pg.handle.db, workspaceId);
+
+    const existing = (await app.inject({ method: 'GET', url: '/agents' })).json();
+    for (const a of existing) {
+      if (a.enabled) {
+        await app.inject({ method: 'PUT', url: `/agents/${a.id}`, payload: { enabled: false } });
+      }
+    }
+    for (const marker of ['AGENT_FAST', 'AGENT_SLOW']) {
+      await app.inject({
+        method: 'POST',
+        url: '/agents',
+        payload: { name: marker, provider: 'openai', model: 'gpt-4.1', system_prompt: marker },
+      });
+    }
+
+    const body = (
+      await app.inject({ method: 'POST', url: `/pulls/${pr.id}/review`, payload: { all: true } })
+    ).json();
+    expect(body.runs).toHaveLength(2);
+
+    // Poll until AGENT_FAST's own agent_runs row is 'done' — AGENT_SLOW is
+    // still blocked on its ControllableMockLLM gate, so the batch as a whole
+    // has NOT settled yet.
+    const deadline = Date.now() + 10_000;
+    for (;;) {
+      const runs = await pg.handle.db.select().from(t.agentRuns).where(eq(t.agentRuns.prId, pr.id));
+      if (runs.some((r) => r.status === 'done')) break;
+      if (Date.now() > deadline) throw new Error('timed out waiting for AGENT_FAST to finish');
+      await new Promise((r) => setTimeout(r, 25));
+    }
+
+    const midBatch = (await app.inject({ method: 'GET', url: `/repos/${repo.id}/pulls` })).json();
+    const midBatchPr = midBatch.find((p: { id: string }) => p.id === pr.id);
+    // The bug: markReviewed() used to fire per-agent, so the PR flipped to
+    // "reviewed" the instant AGENT_FAST finished — while AGENT_SLOW (part of
+    // the SAME requested batch) is still running. That reads as "the review
+    // is done" when it plainly isn't.
+    expect(midBatchPr.status).not.toBe('reviewed');
+
+    llm.release('AGENT_SLOW');
+    await waitForPrRuns(pg.handle.db, pr.id, { expected: 2 });
+
+    const afterBatch = (await app.inject({ method: 'GET', url: `/repos/${repo.id}/pulls` })).json();
+    const afterBatchPr = afterBatch.find((p: { id: string }) => p.id === pr.id);
+    expect(afterBatchPr.status).toBe('reviewed');
+
     await app.close();
   });
 });

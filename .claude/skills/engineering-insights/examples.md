@@ -52,7 +52,7 @@ An entry earns its place only if it would change what a future session does.
 > Migrations don't run on boot — run `pnpm db:migrate` manually.
 
 This one is already documented in `server/README.md` under Troubleshooting
-(and belongs in `server/CLAUDE.md`'s Gotchas as a standing rule) — writing it
+(and belongs in `server/AGENTS.md`'s Gotchas as a standing rule) — writing it
 again in `INSIGHTS.md` is noise, not signal. The anti-vague test isn't just
 about vagueness; "already written elsewhere" fails it too.
 

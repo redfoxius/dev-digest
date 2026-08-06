@@ -9,15 +9,18 @@ Reusable AI skills that provide specialized knowledge and workflows. Canonical l
 | [fastify-best-practices](fastify-best-practices/SKILL.md) | Backend | Fastify routes, plugins, JSON-schema validation, error handling |
 | [drizzle-orm-patterns](drizzle-orm-patterns/SKILL.md) | Backend | Drizzle schema, queries, relations, transactions, migrations |
 | [postgresql-table-design](postgresql-table-design/SKILL.md) | Backend | Postgres schema design, data types, indexing, constraints |
+| [onion-architecture](onion-architecture/SKILL.md) | Backend | Onion/Ports-and-Adapters dependency rule for `server/`+`reviewer-core`: routes→service→repository layering, ports/adapters, the DI container as composition root (not Fastify/Drizzle mechanics — see those skills) |
 | [add-language-support](add-language-support/SKILL.md) | Backend | Adding a new language to repo-intel's indexer (registry, ast-grep parser, regex fallback, import graph) — distilled from the Go implementation |
 | [next-best-practices](next-best-practices/SKILL.md) | Frontend | Next.js App Router, RSC boundaries, data fetching, optimization |
 | [react-best-practices](react-best-practices/SKILL.md) | Frontend | React anti-patterns, state management, hooks rules |
+| [frontend-ui-architecture](frontend-ui-architecture/SKILL.md) | Frontend | Folder/feature structure, component-folder anatomy, constants/utils/services placement, business-logic layering, Next.js architecture (not routing mechanics/perf) |
 | [react-testing-library](react-testing-library/SKILL.md) | Frontend | General-purpose React Testing Library guide with Vitest |
 | [zod](zod/SKILL.md) | Full-stack | Zod schema validation, parsing, error handling, type inference |
 | [typescript-expert](typescript-expert/SKILL.md) | Full-stack | Type-level programming, performance, tooling, migrations |
 | [security](security/SKILL.md) | Full-stack | OWASP Top 10:2025, auth, injection, uploads, secrets |
 | [mermaid-diagram](mermaid-diagram/SKILL.md) | Shared | Mermaid diagrams in markdown (flowcharts, sequence, ERD, …) |
 | [engineering-insights](engineering-insights/SKILL.md) | Shared | End-of-task capture of dated, file:line-cited findings into each module's INSIGHTS.md |
+| [pr-self-review](pr-self-review/SKILL.md) | Meta | Post-PR gate — matches a newly opened/updated PR's diff against every other skill, runs matched skills as parallel reviewers, posts inline `Changes requested` + a `blocked-critical` label on any `CRITICAL` finding or incomplete run |
 
 ## What Are Skills?
 
