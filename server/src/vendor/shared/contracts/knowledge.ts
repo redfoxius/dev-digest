@@ -140,6 +140,47 @@ export const CommunitySkill = z.object({
 });
 export type CommunitySkill = z.infer<typeof CommunitySkill>;
 
+export const SkillVersion = z.object({
+  skill_id: z.string(),
+  version: z.number().int(),
+  body: z.string(),
+  summary: z.string().nullish(),
+  created_at: z.string(),
+});
+export type SkillVersion = z.infer<typeof SkillVersion>;
+
+export const CreateSkillBody = z.object({
+  name: z.string().min(1),
+  description: z.string().optional(),
+  type: SkillType,
+  body: z.string().min(1),
+});
+export type CreateSkillBody = z.infer<typeof CreateSkillBody>;
+
+export const UpdateSkillBody = z.object({
+  name: z.string().min(1).optional(),
+  description: z.string().optional(),
+  type: SkillType.optional(),
+  body: z.string().min(1).optional(),
+  enabled: z.boolean().optional(),
+  /** One-line note for the `skill_versions` snapshot this update creates. */
+  summary: z.string().optional(),
+});
+export type UpdateSkillBody = z.infer<typeof UpdateSkillBody>;
+
+// What a file/URL/community import extracts BEFORE it's persisted — shown in
+// the drawer's preview step, editable there, then POSTed to a *`/confirm`
+// endpoint (which re-validates it as CreateSkillBody + source).
+export const ImportCandidate = z.object({
+  name: z.string(),
+  description: z.string().default(''),
+  type: SkillType.default('custom'),
+  body: z.string(),
+  /** Non-markdown archive entries — read, never executed, listed for transparency. */
+  ignored_files: z.array(z.string()).default([]),
+});
+export type ImportCandidate = z.infer<typeof ImportCandidate>;
+
 // ---- Conventions ----
 export const ConventionCandidate = z.object({
   id: z.string(),
@@ -188,6 +229,10 @@ export const Agent = z.object({
   // Inject repo-intel context (repo skeleton + callers + rank note) into this
   // agent's review prompt. Default on; gated again by the global flag.
   repo_intel: z.boolean().default(true),
+  // Count of linked skills with BOTH the link and the skill itself enabled —
+  // i.e. skills that would actually be injected into this agent's next
+  // review prompt. Computed at read time (one grouped query, not per-row).
+  skills_count: z.number().int().default(0),
 });
 export type Agent = z.infer<typeof Agent>;
 
@@ -195,6 +240,8 @@ export const AgentSkillLink = z.object({
   agent_id: z.string(),
   skill_id: z.string(),
   order: z.number().int(),
+  // Per-agent override, independent of the skill's own global `enabled`.
+  enabled: z.boolean(),
 });
 export type AgentSkillLink = z.infer<typeof AgentSkillLink>;
 

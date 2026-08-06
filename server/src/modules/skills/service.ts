@@ -1,0 +1,427 @@
+import { Readable } from 'node:stream';
+import zlib from 'node:zlib';
+import AdmZip from 'adm-zip';
+import { list as tarList } from 'tar';
+import type { ReadEntry } from 'tar';
+import type { Container } from '../../platform/container.js';
+import type {
+  CommunitySkill,
+  ImportCandidate,
+  Skill,
+  SkillSource,
+  SkillType,
+  SkillVersion,
+} from '@devdigest/shared';
+import { ExternalServiceError, NotFoundError, ValidationError } from '../../platform/errors.js';
+import { SkillsRepository } from './repository.js';
+import {
+  detectArchiveKind,
+  deriveSkillNameFromBody,
+  extractMarkdownFromEntries,
+  fileStem,
+  isMarkdownFilename,
+  restoreSummary,
+  toSkillDto,
+  toSkillVersionDto,
+  type ArchiveFileEntry,
+} from './helpers.js';
+import { COMMUNITY_SKILLS_SEED, MAX_ARCHIVE_BYTES } from './constants.js';
+
+/**
+ * A1 — skills service. Business logic for the standalone Skills page +
+ * the import pipeline (paste / file+archive upload / URL / community).
+ *
+ * A Skill = name + description + type + body (pure text/config, never
+ * executable) + enabled + source. Config changes (name/description/type/
+ * body) are versioned via `skill_versions` (repository).
+ *
+ * Trust model (see docs/skills-feature-plan.md, Decision 3): a human
+ * providing content directly to the app — typed, pasted, OR uploaded as a
+ * file/archive — is `source: 'manual'`, created `enabled: true`. Content
+ * fetched without a human in the loop (`imported_url`, `community`) is
+ * created `enabled: false` ("needs vetting") until a human flips it on.
+ * `assemblePrompt()` (reviewer-core) separately wraps EVERY skill body as
+ * untrusted regardless of source — that gate is orthogonal to this one.
+ */
+
+export interface CreateSkillInput {
+  name: string;
+  description?: string;
+  type: SkillType;
+  body: string;
+}
+
+export interface UpdateSkillInput {
+  name?: string;
+  description?: string;
+  type?: SkillType;
+  body?: string;
+  enabled?: boolean;
+  /** One-line note for the `skill_versions` snapshot this update creates. */
+  summary?: string;
+}
+
+export interface ListSkillsFilters {
+  type?: SkillType;
+  source?: SkillSource;
+  enabled?: boolean;
+}
+
+/** An `ImportCandidate` plus the extraction-only `evidence_files` list (other
+ *  markdown files found alongside the main one). Not part of the shared
+ *  `ImportCandidate` contract (no route validates a response schema against
+ *  it), but threaded through so a confirm can persist them. */
+export type ImportPreview = ImportCandidate & { evidence_files: string[] };
+
+export class SkillsService {
+  private repo: SkillsRepository;
+
+  /** `fetchImpl` is a testability seam for `previewUrlImport` — defaults to
+   *  the global `fetch` (Node ≥18); tests inject a fake. */
+  constructor(
+    private container: Container,
+    private fetchImpl: typeof fetch = fetch,
+  ) {
+    this.repo = new SkillsRepository(container.db);
+  }
+
+  // ---- CRUD -----------------------------------------------------------
+
+  async list(workspaceId: string, filters: ListSkillsFilters = {}): Promise<Skill[]> {
+    const rows = await this.repo.list(workspaceId, filters);
+    return rows.map(toSkillDto);
+  }
+
+  async get(workspaceId: string, id: string): Promise<Skill | undefined> {
+    const row = await this.repo.getById(workspaceId, id);
+    return row ? toSkillDto(row) : undefined;
+  }
+
+  async delete(workspaceId: string, id: string): Promise<boolean> {
+    return this.repo.deleteById(workspaceId, id);
+  }
+
+  /** Direct create (`source: 'manual'`, `enabled: true`) — the "+ New skill"
+   *  blank-create button AND the paste sub-form in the "From file" tab both
+   *  call this; the paste form's name+body IS the final content. */
+  async create(workspaceId: string, input: CreateSkillInput): Promise<Skill> {
+    const row = await this.repo.insert({
+      workspaceId,
+      name: input.name,
+      description: input.description,
+      type: input.type,
+      body: input.body,
+      source: 'manual',
+      enabled: true,
+    });
+    return toSkillDto(row);
+  }
+
+  async update(
+    workspaceId: string,
+    id: string,
+    patch: UpdateSkillInput,
+  ): Promise<Skill | undefined> {
+    const row = await this.repo.update(
+      workspaceId,
+      id,
+      {
+        ...(patch.name !== undefined ? { name: patch.name } : {}),
+        ...(patch.description !== undefined ? { description: patch.description } : {}),
+        ...(patch.type !== undefined ? { type: patch.type } : {}),
+        ...(patch.body !== undefined ? { body: patch.body } : {}),
+        ...(patch.enabled !== undefined ? { enabled: patch.enabled } : {}),
+      },
+      patch.summary,
+    );
+    return row ? toSkillDto(row) : undefined;
+  }
+
+  // ---- versions ---------------------------------------------------------
+
+  /** Version history for a skill, newest first. Workspace-scoped: undefined
+   *  when the skill isn't in this workspace (route → 404). */
+  async listVersions(workspaceId: string, skillId: string): Promise<SkillVersion[] | undefined> {
+    const skill = await this.repo.getById(workspaceId, skillId);
+    if (!skill) return undefined;
+    const rows = await this.repo.listVersions(skillId);
+    return rows.map(toSkillVersionDto);
+  }
+
+  async getVersion(
+    workspaceId: string,
+    skillId: string,
+    version: number,
+  ): Promise<SkillVersion | undefined> {
+    const skill = await this.repo.getById(workspaceId, skillId);
+    if (!skill) return undefined;
+    const row = await this.repo.getVersion(skillId, version);
+    return row ? toSkillVersionDto(row) : undefined;
+  }
+
+  /**
+   * Restore an old version: fetch its body, then call `update()` with it —
+   * this creates a NEW version whose body matches the old one; history is
+   * never rewritten in place. Summary defaults to `"Restored from v{n}"`.
+   */
+  async restoreVersion(
+    workspaceId: string,
+    skillId: string,
+    version: number,
+    summary?: string,
+  ): Promise<Skill | undefined> {
+    const skill = await this.repo.getById(workspaceId, skillId);
+    if (!skill) return undefined;
+    const versionRow = await this.repo.getVersion(skillId, version);
+    if (!versionRow) return undefined;
+
+    const row = await this.repo.update(
+      workspaceId,
+      skillId,
+      { body: versionRow.body },
+      summary ?? restoreSummary(version),
+    );
+    return row ? toSkillDto(row) : undefined;
+  }
+
+  // ---- import: file upload / archive (in-memory only) --------------------
+
+  /**
+   * Extract an uploaded file into an `ImportCandidate` preview. `.md`/
+   * `.markdown` → the whole buffer is the body. `.zip`/`.tar`/`.tar.gz`/
+   * `.tgz` → extracted IN MEMORY (adm-zip / tar, never written to disk):
+   * the main markdown file becomes the body, other `.md` files become
+   * `evidence_files`, every non-markdown entry's name goes into
+   * `ignored_files`. Nothing in an archive is ever executed, required, or
+   * eval'd — only markdown entries' text content is read.
+   */
+  async previewFileUpload(buffer: Buffer, filename: string): Promise<ImportPreview> {
+    if (buffer.length > MAX_ARCHIVE_BYTES) {
+      throw new ValidationError(`File exceeds the ${MAX_ARCHIVE_BYTES}-byte limit`);
+    }
+
+    if (isMarkdownFilename(filename)) {
+      const body = buffer.toString('utf8');
+      const name = deriveSkillNameFromBody(body) ?? fileStem(filename);
+      return { name, description: '', type: 'custom', body, ignored_files: [], evidence_files: [] };
+    }
+
+    const kind = detectArchiveKind(filename);
+    if (!kind) {
+      throw new ValidationError(
+        `Unsupported file type: ${filename} (expected .md, .markdown, .zip, .tar, or .tar.gz)`,
+      );
+    }
+
+    const entries = kind === 'zip' ? readZipEntries(buffer) : await readTarEntries(maybeGunzip(buffer));
+    const extracted = extractMarkdownFromEntries(entries, fileStem(filename));
+    if (!extracted.mainFile) {
+      throw new ValidationError('Archive has no markdown file to use as the skill body');
+    }
+
+    const name = deriveSkillNameFromBody(extracted.body) ?? fileStem(filename);
+    return {
+      name,
+      description: '',
+      type: 'custom',
+      body: extracted.body,
+      ignored_files: extracted.ignored_files,
+      evidence_files: extracted.evidence_files,
+    };
+  }
+
+  /** Persist a file/archive-upload candidate — `source: 'manual'` (a human
+   *  provided it to the app directly), `enabled: true`. */
+  async confirmFileImport(
+    workspaceId: string,
+    candidate: ImportCandidate & { evidence_files?: string[] },
+  ): Promise<Skill> {
+    return this.persist(workspaceId, candidate, 'manual', true);
+  }
+
+  // ---- import: URL --------------------------------------------------------
+
+  /** Fetch a URL server-side and extract it the same way as a file upload
+   *  (by its path's extension), returning an `ImportCandidate` preview. */
+  async previewUrlImport(url: string): Promise<ImportPreview> {
+    let res: Response;
+    try {
+      res = await this.fetchImpl(url);
+    } catch (err) {
+      throw new ExternalServiceError(`Failed to fetch ${url}: ${(err as Error).message}`);
+    }
+    if (!res.ok) {
+      throw new ExternalServiceError(`Failed to fetch ${url}: HTTP ${res.status}`);
+    }
+
+    const arrayBuffer = await res.arrayBuffer();
+    if (arrayBuffer.byteLength > MAX_ARCHIVE_BYTES) {
+      throw new ValidationError(`Fetched content exceeds the ${MAX_ARCHIVE_BYTES}-byte limit`);
+    }
+    const buffer = Buffer.from(arrayBuffer);
+
+    const pathname = safeUrlPathname(url);
+    const filename = pathname.split('/').filter(Boolean).pop() || 'skill.md';
+
+    const kind = detectArchiveKind(filename);
+    if (!kind) {
+      // No recognized archive extension → treat the whole response as markdown
+      // text (covers `.md` URLs and plain-text pages alike).
+      const body = buffer.toString('utf8');
+      const name = deriveSkillNameFromBody(body) ?? (fileStem(filename) || 'Imported skill');
+      return { name, description: '', type: 'custom', body, ignored_files: [], evidence_files: [] };
+    }
+
+    const entries = kind === 'zip' ? readZipEntries(buffer) : await readTarEntries(maybeGunzip(buffer));
+    const extracted = extractMarkdownFromEntries(entries, fileStem(filename));
+    if (!extracted.mainFile) {
+      throw new ValidationError('Archive has no markdown file to use as the skill body');
+    }
+    const name = deriveSkillNameFromBody(extracted.body) ?? fileStem(filename);
+    return {
+      name,
+      description: '',
+      type: 'custom',
+      body: extracted.body,
+      ignored_files: extracted.ignored_files,
+      evidence_files: extracted.evidence_files,
+    };
+  }
+
+  /** Persist a URL-import candidate — `source: 'imported_url'`, `enabled:
+   *  false` (fetched without a human in the loop; needs vetting). */
+  async confirmUrlImport(
+    workspaceId: string,
+    candidate: ImportCandidate & { evidence_files?: string[] },
+  ): Promise<Skill> {
+    return this.persist(workspaceId, candidate, 'imported_url', false);
+  }
+
+  // ---- import: community ---------------------------------------------------
+
+  /** Static curated seed — course-scope demo, not a live registry fetch. */
+  listCommunitySkills(): CommunitySkill[] {
+    return COMMUNITY_SKILLS_SEED;
+  }
+
+  /** Persist a community-catalog entry — `source: 'community'`, `enabled:
+   *  false` (fetched without a human in the loop; needs vetting). Body is a
+   *  short synthesized markdown doc from the seed's own description (this is
+   *  a course-scope demo seed, not a real fetch from `repo`). */
+  async importCommunitySkill(workspaceId: string, name: string): Promise<Skill> {
+    const entry = COMMUNITY_SKILLS_SEED.find((s) => s.name === name);
+    if (!entry) throw new NotFoundError(`Unknown community skill: ${name}`);
+
+    const body = [
+      `# ${entry.name}`,
+      '',
+      entry.desc,
+      '',
+      `Source: [${entry.repo}](https://github.com/${entry.repo}) — ★${entry.stars}, ${entry.lang}.`,
+      '',
+      '_Community-imported skill — review before enabling._',
+    ].join('\n');
+
+    return this.persist(
+      workspaceId,
+      { name: entry.name, description: entry.desc, type: 'custom', body },
+      'community',
+      false,
+    );
+  }
+
+  // ---- shared persist helper -----------------------------------------------
+
+  private async persist(
+    workspaceId: string,
+    candidate: { name: string; description?: string; type: SkillType; body: string; evidence_files?: string[] },
+    source: SkillSource,
+    enabled: boolean,
+  ): Promise<Skill> {
+    const row = await this.repo.insert({
+      workspaceId,
+      name: candidate.name,
+      description: candidate.description,
+      type: candidate.type,
+      body: candidate.body,
+      source,
+      enabled,
+      ...(candidate.evidence_files?.length ? { evidenceFiles: candidate.evidence_files } : {}),
+    });
+    return toSkillDto(row);
+  }
+}
+
+// ---- archive reading (in-memory only; no disk writes, no exec) -------------
+
+function readZipEntries(buffer: Buffer): ArchiveFileEntry[] {
+  let zip: AdmZip;
+  try {
+    zip = new AdmZip(buffer);
+  } catch (err) {
+    throw new ValidationError(`Could not read zip archive: ${(err as Error).message}`);
+  }
+  return zip
+    .getEntries()
+    .filter((e) => !e.isDirectory)
+    .map((e) => ({ name: e.entryName, content: e.getData() }));
+}
+
+/** gzip-decompress a buffer if it starts with the gzip magic bytes (0x1f 0x8b);
+ *  otherwise return it unchanged (a plain, non-gzipped `.tar`). */
+function maybeGunzip(buffer: Buffer): Buffer {
+  if (buffer.length > 2 && buffer[0] === 0x1f && buffer[1] === 0x8b) {
+    return zlib.gunzipSync(buffer);
+  }
+  return buffer;
+}
+
+/**
+ * Read a (non-gzipped) tar buffer's file entries into memory via `tar.list`'s
+ * streaming parser — no `cwd`/`file` option is ever passed, so nothing is
+ * written to disk. Each entry's bytes are collected from its own readable
+ * stream; nothing is executed or required.
+ */
+async function readTarEntries(buffer: Buffer): Promise<ArchiveFileEntry[]> {
+  const entries: ArchiveFileEntry[] = [];
+  const collectors: Promise<void>[] = [];
+
+  await new Promise<void>((resolve, reject) => {
+    const parser = tarList({
+      noResume: true,
+      onentry: (entry: ReadEntry) => {
+        if (entry.type !== 'File') {
+          entry.resume();
+          return;
+        }
+        const chunks: Buffer[] = [];
+        collectors.push(
+          new Promise<void>((res) => {
+            entry.on('data', (chunk: Buffer) => chunks.push(chunk));
+            entry.on('end', () => {
+              entries.push({ name: entry.path, content: Buffer.concat(chunks) });
+              res();
+            });
+          }),
+        );
+      },
+    }) as unknown as NodeJS.WritableStream & { on: (event: string, cb: (arg?: unknown) => void) => void };
+
+    parser.on('error', (err: unknown) => reject(err instanceof Error ? err : new Error(String(err))));
+    parser.on('end', () => resolve());
+    Readable.from(buffer).pipe(parser as unknown as NodeJS.WritableStream);
+  }).catch((err) => {
+    throw new ValidationError(`Could not read tar archive: ${(err as Error).message}`);
+  });
+
+  await Promise.all(collectors);
+  return entries;
+}
+
+function safeUrlPathname(url: string): string {
+  try {
+    return new URL(url).pathname;
+  } catch {
+    return '';
+  }
+}
