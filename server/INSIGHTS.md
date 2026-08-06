@@ -130,6 +130,40 @@ workflow and quality bar.
 
 ## Tool & Library Notes
 
+- 2026-08-06 — Node's GLOBAL `fetch()` (built on Node's own internal, bundled
+  undici) rejects a `dispatcher` built from the userland `undici` NPM
+  package — fails at runtime with `InvalidArgumentError: invalid onError
+  method`, not a type error, so it only surfaces when actually called.
+  Verified directly: an `Agent` from `import { Agent } from 'undici'` works
+  fine as a `dispatcher` for `undici`'s OWN `fetch` (`import { fetch } from
+  'undici'`), but throws when passed to `globalThis.fetch`. To pin a
+  connection's DNS resolution (e.g. for an SSRF DNS-rebinding fix), import
+  BOTH `fetch` and `Agent` from `undici` together — never mix Node's global
+  fetch with an externally-constructed `undici` `Agent`.
+  (`server/src/adapters/url-fetcher/http.ts:1,116-140` — `undiciFetch`)
+
+- 2026-08-06 — A custom `lookup` function passed via `undici`'s `Agent({
+  connect: { lookup } })` (or Node's `net.connect`/`tls.connect` `lookup`
+  option generally) gets invoked with TWO different callback contracts
+  depending on `options.all`: the classic `dns.lookup` single-address form
+  `(err, address, family)` when `options.all` is falsy, but an ARRAY form
+  `(err, [{address, family}])` when `options.all` is true — which recent
+  Node versions request by default (Happy Eyeballs / `autoSelectFamily`).
+  Implementing only the single-address form fails with `ERR_INVALID_IP_ADDRESS:
+  Invalid IP address: undefined` even though the lookup function itself was
+  called correctly — verified by direct reproduction before shipping the
+  fix. A custom `lookup` must branch on `options?.all` and support both
+  shapes. (`server/src/adapters/url-fetcher/http.ts:129-134`)
+
+- 2026-08-06 — `@fastify/multipart`'s `limits.fileSize` truncates the upload
+  stream SILENTLY by default when exceeded — `throwFileSizeLimit: true` is
+  required to make it throw a (413) `RequestFileTooLargeError` instead. Without
+  it, `data.toBuffer()` returns a buffer whose length is capped at (never
+  exceeds) the configured limit, so any downstream `buffer.length >
+  MAX_ARCHIVE_BYTES` guard can never fire for an actually-oversized upload —
+  it silently accepts a truncated/corrupted file instead of rejecting it.
+  (`server/src/modules/skills/routes.ts:70-73`)
+
 - 2026-08-04 — `server/pnpm-workspace.yaml` is pnpm's own `allowBuilds`
   build-script-approval file, not a stray tooling artifact (previously
   assumed so and excluded from commits — it's real and meant to be
@@ -243,7 +277,32 @@ workflow and quality bar.
   Worth trying `od -c` early if an `Edit` inexplicably can't find text that
   `Read` clearly shows.
 
+- 2026-08-06 — `agents/repository.ts`'s `insert()`/`update()` were still
+  using the OLD unsafe pattern (JS-computed `existing.version + 1`, no
+  transaction wrapping the row write + `agent_versions` snapshot) on the
+  same day `skills/repository.ts`'s equivalent methods were already fixed to
+  the atomic-`sql`-increment-in-a-transaction pattern in the SAME PR —
+  `skills/repository.ts`'s own docstring even says the fix "mirror[s] the
+  same fix in `agents/repository.ts`'s `bumpVersionAfterSkillChange`," but
+  nobody had actually mirrored it back into `insert()`/`update()` there.
+  `bumpVersionAfterSkillChange` (a THIRD write path in the same file, for
+  skill-link changes) already had the atomic/transactional fix. Lesson: when
+  fixing a race/consistency bug in one repository file, `grep` sibling
+  repository files (and OTHER write paths in the SAME file) for the same
+  shape before considering the fix complete — a correct pattern existing
+  once in a file is not evidence every write path in that file uses it.
+  (`server/src/modules/agents/repository.ts:86-172` vs
+  `server/src/modules/skills/repository.ts:79-148`)
+
 ## Open Questions
+
+- 2026-08-06 — `z.coerce.boolean()` on a query param (`?enabled=false` being
+  read as `true` — any non-empty string coerces truthy) was found and fixed
+  in exactly one place (`server/src/modules/skills/routes.ts:39-46`, now
+  `z.enum(['true','false']).transform(...)`). Not audited: whether the same
+  `z.coerce.boolean()` footgun exists on any OTHER boolean query/body field
+  elsewhere in `src/modules/**/routes.ts` — worth a repo-wide grep for
+  `z.coerce.boolean()` before assuming this was the only instance.
 
 - 2026-07-27 — No sync/codegen step keeps `src/vendor/shared` in step with
   the client's copy — is a checked-in diff script or a build-time copy step

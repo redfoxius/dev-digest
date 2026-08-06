@@ -39,7 +39,12 @@ const CommunityNameParams = z.object({ name: z.string().min(1) });
 const ListSkillsQuery = z.object({
   type: SkillType.optional(),
   source: SkillSource.optional(),
-  enabled: z.coerce.boolean().optional(),
+  // NOT z.coerce.boolean() — that treats any non-empty string (including
+  // "false") as truthy, silently inverting `?enabled=false`.
+  enabled: z
+    .enum(['true', 'false'])
+    .transform((v) => v === 'true')
+    .optional(),
 });
 
 // `.nullish()` + transform (rather than `.default({})`) because an empty
@@ -69,6 +74,7 @@ export default async function skillsRoutes(appBase: FastifyInstance) {
   // `request.file()`/`isMultipart()` (Fastify plugin encapsulation).
   await app.register(multipart, {
     limits: { fileSize: MAX_ARCHIVE_BYTES, files: 1 },
+    throwFileSizeLimit: true,
   });
 
   app.get('/skills', { schema: { querystring: ListSkillsQuery } }, async (req) => {

@@ -43,14 +43,6 @@ export function matchesSkillFilter(skill: Skill, filter: string): boolean {
   return skill.name.toLowerCase().includes(needle);
 }
 
-/** A skill is "unvetted" when it's globally disabled AND wasn't provided
-   directly by a human (source !== 'manual') — matches the spec's
-   `imported_url`/`community` vetting gate. Attaching/enabling it on an
-   agent is still allowed; this only flags the row. */
-export function needsVetting(skill: Skill): boolean {
-  return !skill.enabled && skill.source !== "manual";
-}
-
 /** Moves the row identified by `dragId` to sit at the position currently
    occupied by `targetId`, preserving every other row's relative order.
    Returns `rows` unchanged if either id can't be found or they're equal. */

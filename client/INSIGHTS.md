@@ -17,6 +17,33 @@ workflow and quality bar.
 
 ## Codebase Patterns
 
+- 2026-08-06 — `client/src/lib/skills.ts` is now the canonical home for
+  skill-domain logic shared across route trees — created after `needsVetting()`
+  (untrusted-source-skill check) was found duplicated byte-for-byte in TWO
+  unrelated component folders (`skills/_components/SkillsListView/helpers.ts`
+  and `agents/[id]/_components/AgentEditor/_components/SkillsTab/helpers.ts`),
+  both independently documenting it as "the spec's vetting gate" without
+  either referencing the other. `frontend-ui-architecture`'s rule ("logic
+  reused by 2+ components → promote to `lib/`") already covered this; the
+  gap was that a `<route>/_components/**/helpers.ts` file LOOKS
+  component-scoped even when its logic isn't. Check `lib/skills.ts` first
+  before adding a skill-domain helper to a component-local `helpers.ts`.
+  (`client/src/lib/skills.ts`)
+
+- 2026-08-06 — Local optimistic UI state for a drag-reorder (or any
+  local-edit-during-an-in-flight-mutation scenario) over TanStack Query data
+  should be scoped to THAT mutation's lifecycle (set right before `.mutate()`,
+  cleared in its own `onSettled`), not kept permanently in sync with the
+  upstream `useMemo`-derived list via a `useEffect`. The effect-sync version
+  re-applies the (possibly stale, pending-mutation-unaware) upstream value on
+  EVERY unrelated recompute of that `useMemo` — including one triggered by a
+  totally different mutation invalidating the same query keys — snapping an
+  in-progress drag back to a stale order until the effect fires again. The
+  fix pattern: `const [optimisticRows, setOptimisticRows] = useState<Row[] |
+  null>(null); const rows = optimisticRows ?? merged;`, set only on the
+  action, cleared only by that action's own `onSettled`.
+  (`client/src/app/agents/[id]/_components/AgentEditor/_components/SkillsTab/SkillsTab.tsx:33-40,51-60`)
+
 - 2026-08-06 — Relative-import depth for a `_components/<Tab>/<Name>.tsx` file
   two levels under `AgentEditor/` (e.g. `SkillsTab.tsx`) to `src/lib/hooks/*`
   is **7** `../` (up to `src`, then down into `lib/hooks`) — matches
@@ -127,6 +154,23 @@ workflow and quality bar.
   `missingExpectedReviews`/refetch effect)
 
 ## Open Questions
+
+- 2026-08-06 — `ConfigTab`'s stale-local-form bug (typed edits computed from
+  `useState` copies of `skill`, resynced only on `skill?.id` change via a
+  now-removed `useEffect`) was fixed by remounting the whole component on
+  `key={skill.id}` at the call site instead. This satisfies the CRITICAL
+  react-best-practices rule ("never `useState`+`useEffect` to sync a computed
+  value") but does NOT fully close the specific race the finding described —
+  the underlying `skill` object's CONTENT changing while its `id` stays the
+  SAME (e.g. a background refetch from another tab's edit) still leaves
+  whatever the user has already typed unreconciled against the newer server
+  data; keying only resets state on an `id` change, same as the removed
+  effect did. A real fix needs optimistic-concurrency (e.g. compare the
+  `version` the form was opened with against the current one at save time,
+  and warn/block on mismatch) — not attempted here; scope was the react rule
+  violation, not the underlying conflict-resolution gap.
+  (`client/src/app/skills/_components/SkillDetail/_components/ConfigTab/ConfigTab.tsx:29-33`,
+  `client/src/app/skills/_components/SkillDetail/SkillDetail.tsx:45`)
 
 ## Session Notes
 

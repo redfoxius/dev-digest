@@ -5,7 +5,7 @@
    lives in ?tab=, mirroring /agents/:id. */
 "use client";
 
-import React from "react";
+import React, { Suspense } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { ErrorState, Skeleton } from "@devdigest/ui";
@@ -17,6 +17,14 @@ import { useSkill } from "../../../lib/hooks/skills";
 import { ApiError } from "../../../lib/api";
 
 export default function SkillDetailPage() {
+  return (
+    <Suspense fallback={<Skeleton height={24} width={240} />}>
+      <SkillDetailPageInner />
+    </Suspense>
+  );
+}
+
+function SkillDetailPageInner() {
   const params = useParams<{ id: string }>();
   const search = useSearchParams();
   const router = useRouter();

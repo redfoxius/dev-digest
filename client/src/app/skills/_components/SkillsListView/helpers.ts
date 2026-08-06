@@ -6,10 +6,3 @@ export function filterSkills(skills: Skill[], search: string): Skill[] {
   if (!q) return skills;
   return skills.filter((s) => `${s.name} ${s.description}`.toLowerCase().includes(q));
 }
-
-/** Untrusted-source skills (`imported_url`/`community`) start disabled until
-   a human vets them — distinct from a skill someone simply chose to turn
-   off. `manual` (typed, pasted, or directly uploaded) never needs vetting. */
-export function needsVetting(skill: Skill): boolean {
-  return !skill.enabled && skill.source !== "manual";
-}

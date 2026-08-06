@@ -15,8 +15,9 @@ import {
   useSetAgentSkills,
 } from "../../../../../../../lib/hooks/agents";
 import { useSkills } from "../../../../../../../lib/hooks/skills";
+import { needsVetting } from "../../../../../../../lib/skills";
 import { SKILL_TYPE_COLORS } from "./constants";
-import { matchesSkillFilter, mergeSkills, needsVetting, reorderSkillRows, type SkillRow } from "./helpers";
+import { matchesSkillFilter, mergeSkills, reorderSkillRows, type SkillRow } from "./helpers";
 import { s } from "./styles";
 
 export function SkillsTab({ agent }: { agent: Agent }) {
@@ -31,13 +32,14 @@ export function SkillsTab({ agent }: { agent: Agent }) {
   const [overId, setOverId] = React.useState<string | null>(null);
 
   const merged = React.useMemo(() => mergeSkills(skills, links), [skills, links]);
-  // Local, reorderable copy: dragging updates this immediately for instant
-  // feedback; it's kept in sync with the server-derived `merged` list
-  // whenever the underlying data actually changes (new fetch/invalidation).
-  const [rows, setRows] = React.useState<SkillRow[]>(merged);
-  React.useEffect(() => {
-    setRows(merged);
-  }, [merged]);
+  // Optimistic order for an in-flight drag reorder only — NOT a synced copy
+  // of `merged`. Set on drop, cleared once that specific `setSkills` mutation
+  // settles. An unrelated `merged` recompute (e.g. another mutation elsewhere
+  // invalidating `skills`/`links` while this one is still in flight) no
+  // longer snaps the visible order back mid-interaction, since nothing
+  // resyncs `rows` from `merged` on every render.
+  const [optimisticRows, setOptimisticRows] = React.useState<SkillRow[] | null>(null);
+  const rows = optimisticRows ?? merged;
 
   const loading = skillsLoading || linksLoading;
   const total = rows.length;
@@ -51,8 +53,10 @@ export function SkillsTab({ agent }: { agent: Agent }) {
   function handleDrop(targetId: string) {
     if (dragId && dragId !== targetId) {
       const next = reorderSkillRows(rows, dragId, targetId);
-      setRows(next);
-      setSkills.mutate(next.map((r) => r.skill.id));
+      setOptimisticRows(next);
+      setSkills.mutate(next.map((r) => r.skill.id), {
+        onSettled: () => setOptimisticRows(null),
+      });
     }
     setDragId(null);
     setOverId(null);

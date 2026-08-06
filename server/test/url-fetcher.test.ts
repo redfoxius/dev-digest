@@ -5,14 +5,25 @@ import { ValidationError } from '../src/platform/errors.js';
 /**
  * The SSRF guard for the skills import-from-URL flow. Rejection paths never
  * touch the network (IP-literal hostnames skip DNS, scheme checks are pure) —
- * deterministic, no real fetch. The one "allowed" case mocks global `fetch`
- * rather than hitting the network, per this repo's no-real-network test rule.
+ * deterministic, no real fetch. The "allowed" cases mock undici's own
+ * `fetch` (NOT `globalThis.fetch` — the real fetcher calls undici's fetch
+ * directly, since Node's global fetch rejects a dispatcher built from the
+ * `undici` package) rather than hitting the network, per this repo's
+ * no-real-network test rule. Mocked via `vi.mock` (not `vi.spyOn`) because
+ * Node's ESM/CJS interop exposes `undici`'s named exports as non-writable
+ * getters, which `vi.spyOn`'s property redefinition can't touch.
  */
+const undiciFetchMock = vi.hoisted(() => vi.fn());
+vi.mock('undici', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('undici')>();
+  return { ...actual, fetch: undiciFetchMock };
+});
+
 describe('HttpUrlFetcher (SSRF guard)', () => {
   const fetcher = new HttpUrlFetcher();
 
   afterEach(() => {
-    vi.restoreAllMocks();
+    undiciFetchMock.mockReset();
   });
 
   it.each([
@@ -27,6 +38,10 @@ describe('HttpUrlFetcher (SSRF guard)', () => {
     ['http://[::1]/', 'IPv6 loopback'],
     ['http://[fe80::1]/', 'IPv6 link-local'],
     ['http://[fd00::1]/', 'IPv6 unique-local'],
+    ['http://[::ffff:127.0.0.1]/', 'IPv4-mapped IPv6 loopback (dotted form)'],
+    ['http://[::ffff:169.254.169.254]/', 'IPv4-mapped IPv6 cloud metadata (dotted form)'],
+    ['http://[::ffff:7f00:1]/', 'IPv4-mapped IPv6 loopback (compressed-hex form, as URL normalizes it)'],
+    ['http://[::ffff:a9fe:a9fe]/', 'IPv4-mapped IPv6 cloud metadata (compressed-hex form)'],
   ])('rejects %s (%s) before ever fetching', async (url) => {
     await expect(fetcher.fetch(url)).rejects.toThrow(ValidationError);
   });
@@ -44,14 +59,14 @@ describe('HttpUrlFetcher (SSRF guard)', () => {
     // Boundary check on the range math itself; both are public-looking IPs so
     // we only assert they get PAST the guard to the real fetch call, which we
     // mock rather than hit the network.
-    const spy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('ok'));
+    const spy = undiciFetchMock.mockResolvedValue(new Response('ok'));
     await fetcher.fetch('http://172.15.0.1/');
     await fetcher.fetch('http://172.32.0.1/');
     expect(spy).toHaveBeenCalledTimes(2);
   });
 
   it('allows a public IP-literal http(s) URL through to the real fetch call (mocked, no network)', async () => {
-    const spy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('# ok', { status: 200 }));
+    const spy = undiciFetchMock.mockResolvedValue(new Response('# ok', { status: 200 }));
     const res = await fetcher.fetch('http://93.184.216.34/skill.md');
     expect(res.status).toBe(200);
     expect(spy).toHaveBeenCalledWith(
@@ -61,9 +76,21 @@ describe('HttpUrlFetcher (SSRF guard)', () => {
   });
 
   it('does not follow redirects (redirect: "error" is passed to the real fetch)', async () => {
-    const spy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('ok'));
+    const spy = undiciFetchMock.mockResolvedValue(new Response('ok'));
     await fetcher.fetch('http://93.184.216.34/');
     const [, opts] = spy.mock.calls[0]!;
-    expect((opts as RequestInit).redirect).toBe('error');
+    expect((opts as { redirect?: string }).redirect).toBe('error');
+  });
+
+  it('pins the real connection to the SAME address the SSRF guard validated, via a custom dispatcher lookup (DNS-rebinding guard)', async () => {
+    // Regression test for the TOCTOU gap: without pinning, the real fetch
+    // would re-resolve `hostname` independently, so a rebinding DNS server
+    // could return a public address here and a private one at connect time.
+    const spy = undiciFetchMock.mockResolvedValue(new Response('ok'));
+    await fetcher.fetch('http://93.184.216.34/');
+    const [, opts] = spy.mock.calls[0]!;
+    const dispatcher = (opts as { dispatcher?: { constructor: { name: string } } }).dispatcher;
+    expect(dispatcher).toBeDefined();
+    expect(dispatcher!.constructor.name).toBe('Agent');
   });
 });
