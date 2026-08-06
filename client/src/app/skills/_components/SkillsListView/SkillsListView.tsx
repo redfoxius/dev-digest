@@ -67,6 +67,11 @@ export function SkillsListView({
         </div>
       </div>
 
+      {!isLoading && !isError && (
+        <div role="status" aria-live="polite" style={s.srOnly}>
+          {t("page.resultCount", { count: list.length })}
+        </div>
+      )}
       <div style={s.list}>
         {isLoading && (
           <div style={s.skeletonWrap}>

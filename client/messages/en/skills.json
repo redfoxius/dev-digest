@@ -6,6 +6,7 @@
     "addSkill": "Add Skill",
     "searchPlaceholder": "Search skills…",
     "loadError": "Could not load skills.",
+    "resultCount": "{count, plural, =0 {No skills found} =1 {1 skill found} other {# skills found}}",
     "menu": {
       "fromFile": "Import from file",
       "fromUrl": "Import from URL",
@@ -64,6 +65,7 @@
     "allLanguages": "All languages",
     "loadError": "Could not load community skills",
     "retry": "Retry",
+    "resultCount": "{count, plural, =0 {No skills found} =1 {1 skill found} other {# skills found}}",
     "noMatch": {
       "title": "No matching skills",
       "body": "Try a different search term."

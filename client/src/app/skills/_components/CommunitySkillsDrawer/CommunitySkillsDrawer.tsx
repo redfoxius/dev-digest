@@ -62,6 +62,11 @@ export function CommunitySkillsDrawer({ onClose }: { onClose: () => void }) {
         ))}
       </div>
 
+      {!isLoading && !isError && (
+        <div role="status" aria-live="polite" style={s.srOnly}>
+          {t("community.resultCount", { count: list.length })}
+        </div>
+      )}
       {isLoading && (
         <div style={s.grid}>
           <Skeleton height={140} />

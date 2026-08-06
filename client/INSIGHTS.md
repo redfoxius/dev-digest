@@ -17,6 +17,21 @@ workflow and quality bar.
 
 ## Codebase Patterns
 
+- 2026-08-06 — There is no shared `srOnly`/visually-hidden style utility in
+  this codebase yet — a repo-wide grep for `sr-only`/`visually-hidden`/
+  `clip: rect` came back empty before this date. Added the same inline
+  visually-hidden `CSSProperties` object independently to THREE different
+  `styles.ts` files (`SkillsListView`, `SkillsTab`, `CommunitySkillsDrawer`)
+  for `aria-live="polite"` result-count announcements, rather than a shared
+  export — each `<route>/_components/**/styles.ts` file is self-contained
+  per this module's existing convention, and 3 near-identical ~10-line
+  objects didn't yet justify a new shared `@devdigest/ui` primitive. If a
+  4th consumer shows up, that's the signal to promote it instead of copying
+  a 4th time. (`client/src/app/skills/_components/SkillsListView/styles.ts`,
+  `client/src/app/agents/[id]/_components/AgentEditor/_components/SkillsTab/styles.ts`,
+  `client/src/app/skills/_components/CommunitySkillsDrawer/styles.ts` — all
+  `srOnly`)
+
 - 2026-08-06 — `client/src/lib/skills.ts` is now the canonical home for
   skill-domain logic shared across route trees — created after `needsVetting()`
   (untrusted-source-skill check) was found duplicated byte-for-byte in TWO
@@ -96,6 +111,33 @@ workflow and quality bar.
   (`client/src/lib/format.ts:10`)
 
 ## Recurring Errors & Fixes
+
+- 2026-08-06 — `SkillsTab.tsx` destructured only `data`/`isLoading` from its
+  two `useQuery` hooks (`useSkills`, `useAgentSkills`), dropping `isError`
+  entirely — on a query failure, `loading` goes `false` and the filtered
+  list is `[]`, so it fell into the SAME branch as "your filter matched
+  nothing" and rendered that copy instead of an error. Every OTHER component
+  touched in the same PR (`SkillsListView`, `CommunitySkillsDrawer`,
+  `VersionsTab`) already destructures `isError`/`refetch` and renders
+  `ErrorState` — this was the one place that didn't. When adding a new
+  `useQuery`-backed list view, copy an existing sibling's FULL destructure
+  (`data, isLoading, isError, refetch`), not just the two fields the happy
+  path needs — a missing `isError` doesn't error at compile time, it just
+  silently degrades to the empty-state copy.
+  (`client/src/app/agents/[id]/_components/AgentEditor/_components/SkillsTab/SkillsTab.tsx:23-32`)
+
+- 2026-08-06 — Testing a per-test-overridable `useQuery` mock (e.g. to
+  simulate one specific test's `isError: true` while every other test in the
+  file gets the default success shape) needs the mock to be a HOISTED
+  `vi.fn()` with a module-level default `mockImplementation(...)`, not a
+  static object literal returned directly from the `vi.mock(...)` factory —
+  a static literal can't be overridden per-test via `mockReturnValueOnce`.
+  Pattern: `vi.hoisted(() => ({ useXMock: vi.fn() }))`, `vi.mock(path, () =>
+  ({ useX: useXMock }))`, then `useXMock.mockImplementation(() => ({
+  ...defaultSuccessShape }))` at module scope for the common case, and
+  `useXMock.mockReturnValueOnce({ ...errorShape })` inside the one test that
+  needs it.
+  (`client/src/app/agents/[id]/_components/AgentEditor/_components/SkillsTab/SkillsTab.test.tsx:10-32`)
 
 - 2026-08-06 — Adding a zod `.default(...)` field to a shared contract (here:
   `Agent.skills_count: z.number().int().default(0)`) breaks `pnpm typecheck`
