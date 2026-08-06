@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
+import zlib from 'node:zlib';
 import AdmZip from 'adm-zip';
 import type { Db } from '../src/db/client.js';
 import type { Container } from '../src/platform/container.js';
@@ -20,7 +21,7 @@ import {
 } from '../src/modules/skills/helpers.js';
 import { SkillsRepository, type SkillRow, type SkillVersionRow } from '../src/modules/skills/repository.js';
 import { SkillsService } from '../src/modules/skills/service.js';
-import { COMMUNITY_SKILLS_SEED } from '../src/modules/skills/constants.js';
+import { COMMUNITY_SKILLS_SEED, MAX_ARCHIVE_BYTES } from '../src/modules/skills/constants.js';
 import { NotFoundError, ValidationError } from '../src/platform/errors.js';
 
 /**
@@ -113,6 +114,10 @@ function makeFakeDb(queue: unknown[]): { db: Db; calls: FakeCall[] } {
       calls.push(call);
       return chain(call);
     },
+    // The fake has no real transactional isolation — just runs the callback
+    // against this same fake `db`, which is enough for unit coverage of
+    // "both statements happen" without a real Postgres.
+    transaction: (fn: (tx: Db) => Promise<unknown>) => fn(db),
   } as unknown as Db;
 
   return { db, calls };
@@ -549,30 +554,56 @@ describe('SkillsService.previewFileUpload', () => {
     const service = fakeService();
     await expect(service.previewFileUpload(Buffer.from('hi'), 'notes.pdf')).rejects.toThrow(ValidationError);
   });
+
+  it('rejects a zip decompression bomb — a small compressed upload that would expand past MAX_DECOMPRESSED_BYTES', async () => {
+    // Highly-compressible content (all zeros): ~21MB decompressed collapses
+    // to a few KB compressed — comfortably under MAX_ARCHIVE_BYTES (5MB) on
+    // the way in, but over MAX_DECOMPRESSED_BYTES (20MB) on the way out.
+    const zip = new AdmZip();
+    zip.addFile('bomb.md', Buffer.alloc(21 * 1024 * 1024, 0));
+    const buffer = zip.toBuffer();
+    expect(buffer.length).toBeLessThan(MAX_ARCHIVE_BYTES);
+
+    const service = fakeService();
+    await expect(service.previewFileUpload(buffer, 'bomb.zip')).rejects.toThrow(ValidationError);
+  });
+
+  it('rejects a gzip decompression bomb (.tar.gz) the same way', async () => {
+    const gzipped = zlib.gzipSync(Buffer.alloc(21 * 1024 * 1024, 0));
+    expect(gzipped.length).toBeLessThan(MAX_ARCHIVE_BYTES);
+
+    const service = fakeService();
+    await expect(service.previewFileUpload(gzipped, 'bomb.tar.gz')).rejects.toThrow(ValidationError);
+  });
 });
 
 // ---- SkillsService.previewUrlImport — fetch mocked -------------------------
 
 describe('SkillsService.previewUrlImport', () => {
-  it('fetches a .md URL and uses its content as the body', async () => {
+  it('fetches a .md URL (via the urlFetcher port) and uses its content as the body', async () => {
     const body = '# Remote skill\n\nFetched content.';
-    const fetchImpl = vi.fn().mockResolvedValue(
-      new Response(body, { status: 200 }),
-    ) as unknown as typeof fetch;
+    const urlFetcher = { fetch: vi.fn().mockResolvedValue(new Response(body, { status: 200 })) };
     const { db } = makeFakeDb([]);
-    const service = new SkillsService({ db } as unknown as Container, fetchImpl);
+    const service = new SkillsService({ db, urlFetcher } as unknown as Container);
 
     const candidate = await service.previewUrlImport('https://example.com/skills/remote-skill.md');
 
     expect(candidate.name).toBe('Remote skill');
     expect(candidate.body).toBe(body);
-    expect(fetchImpl).toHaveBeenCalledWith('https://example.com/skills/remote-skill.md');
+    expect(urlFetcher.fetch).toHaveBeenCalledWith('https://example.com/skills/remote-skill.md');
   });
 
   it('throws ExternalServiceError-ish failure on a non-OK response', async () => {
-    const fetchImpl = vi.fn().mockResolvedValue(new Response('nope', { status: 404 })) as unknown as typeof fetch;
+    const urlFetcher = { fetch: vi.fn().mockResolvedValue(new Response('nope', { status: 404 })) };
     const { db } = makeFakeDb([]);
-    const service = new SkillsService({ db } as unknown as Container, fetchImpl);
+    const service = new SkillsService({ db, urlFetcher } as unknown as Container);
     await expect(service.previewUrlImport('https://example.com/missing.md')).rejects.toThrow();
+  });
+
+  it('passes a real urlFetcher-thrown ValidationError (e.g. an SSRF-guard rejection) straight through, not wrapped as a 502', async () => {
+    const urlFetcher = { fetch: vi.fn().mockRejectedValue(new ValidationError('disallowed target')) };
+    const { db } = makeFakeDb([]);
+    const service = new SkillsService({ db, urlFetcher } as unknown as Container);
+    await expect(service.previewUrlImport('http://169.254.169.254/')).rejects.toThrow(ValidationError);
   });
 });

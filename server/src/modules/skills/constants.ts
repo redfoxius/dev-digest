@@ -16,6 +16,15 @@ export const DEFAULT_SKILL_DESCRIPTION = '';
  */
 export const MAX_ARCHIVE_BYTES = 5 * 1024 * 1024; // 5 MB
 
+/**
+ * Hard cap on an archive's total DECOMPRESSED size — `MAX_ARCHIVE_BYTES`
+ * only bounds the compressed upload; without this a small crafted zip/gzip
+ * (a decompression bomb) can expand to gigabytes in memory. Generous for a
+ * markdown skill package with a few supporting docs; small enough to make
+ * that class of attack pointless.
+ */
+export const MAX_DECOMPRESSED_BYTES = 20 * 1024 * 1024; // 20 MB
+
 /** Extensions treated as "the whole file IS the skill body" (no extraction). */
 export const ALLOWED_MARKDOWN_EXTENSIONS = ['.md', '.markdown'];
 
