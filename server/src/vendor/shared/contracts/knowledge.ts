@@ -184,15 +184,87 @@ export const ImportCandidate = z.object({
 export type ImportCandidate = z.infer<typeof ImportCandidate>;
 
 // ---- Conventions ----
+/** Fixed vocabulary — keeps the UI's grouping/filtering and the generated
+ *  skill body's sections stable; free-text categories from the model would
+ *  fragment into near-duplicates ("error handling" vs "errors"). */
+export const ConventionCategory = z.enum([
+  'naming',
+  'error-handling',
+  'api-shape',
+  'imports',
+  'testing',
+  'security',
+  'formatting',
+  'architecture',
+  'type-safety',
+]);
+export type ConventionCategory = z.infer<typeof ConventionCategory>;
+
+export const ConventionStatus = z.enum(['pending', 'accepted', 'rejected']);
+export type ConventionStatus = z.infer<typeof ConventionStatus>;
+
+/** 'model' = LLM-proposed, verified against the repo's clone before it can
+ *  exist at all. 'config' = parsed deterministically from eslint/tsconfig/
+ *  prettier — no model call, can't hallucinate, skips verification. */
+export const ConventionOrigin = z.enum(['model', 'config']);
+export type ConventionOrigin = z.infer<typeof ConventionOrigin>;
+
 export const ConventionCandidate = z.object({
   id: z.string(),
   rule: z.string(),
+  category: ConventionCategory,
+  evidence_path: z.string(),
+  evidence_snippet: z.string(),
+  evidence_line_start: z.number().int().nullish(),
+  evidence_line_end: z.number().int().nullish(),
+  confidence: z.number().min(0).max(1),
+  status: ConventionStatus,
+  origin: ConventionOrigin,
+});
+export type ConventionCandidate = z.infer<typeof ConventionCandidate>;
+
+/** Raw model output before evidence verification — no id/status/line-range
+ *  yet (those are assigned by the server after a candidate survives). */
+export const RawConventionCandidate = z.object({
+  rule: z.string(),
+  category: ConventionCategory,
   evidence_path: z.string(),
   evidence_snippet: z.string(),
   confidence: z.number().min(0).max(1),
-  accepted: z.boolean(),
 });
-export type ConventionCandidate = z.infer<typeof ConventionCandidate>;
+export type RawConventionCandidate = z.infer<typeof RawConventionCandidate>;
+
+export const UpdateConventionBody = z.object({
+  rule: z.string().min(1).optional(),
+  category: ConventionCategory.optional(),
+  status: ConventionStatus.optional(),
+});
+export type UpdateConventionBody = z.infer<typeof UpdateConventionBody>;
+
+export const ExtractConventionsResponse = z.object({
+  candidates: z.array(ConventionCandidate),
+  sample_file_count: z.number().int(),
+  scanned_at: z.string(),
+});
+export type ExtractConventionsResponse = z.infer<typeof ExtractConventionsResponse>;
+
+export const SkillDraftFromConventions = z.object({
+  name: z.string(),
+  description: z.string(),
+  body: z.string(),
+  token_count: z.number().int(),
+});
+export type SkillDraftFromConventions = z.infer<typeof SkillDraftFromConventions>;
+
+export const CreateSkillFromConventionsBody = z.object({
+  candidate_ids: z.array(z.string()).min(1),
+  name: z.string().min(1),
+  description: z.string().optional(),
+  body: z.string().min(1),
+  type: SkillType,
+  enabled: z.boolean().default(true),
+});
+export type CreateSkillFromConventionsBody = z.infer<typeof CreateSkillFromConventionsBody>;
 
 // ---- Agents ----
 // 'openrouter' routes through the OpenAI-compatible API (OpenAIProvider with a

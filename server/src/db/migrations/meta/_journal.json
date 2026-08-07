@@ -99,6 +99,13 @@
       "when": 1786032689520,
       "tag": "0013_add_skill_link_enabled_and_version_summary",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1786138040000,
+      "tag": "0014_add_convention_fields",
+      "breakpoints": true
     }
   ]
 }
