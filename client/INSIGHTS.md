@@ -32,6 +32,26 @@ workflow and quality bar.
   `client/src/app/skills/_components/CommunitySkillsDrawer/styles.ts` — all
   `srOnly`)
 
+- 2026-08-07 — A mutation-scoped optimistic-state pattern (`const [x, setX]
+  = useState<T | null>(null); const value = x ?? derived;`, cleared in that
+  specific mutation's `onSettled`) is NOT automatically safe against a
+  SECOND overlapping call to the same handler before the first settles — the
+  first mutation's `onSettled` still fires unconditionally and clears the
+  shared state, wiping out the second call's still-pending optimistic value.
+  Shipped this exact bug one day after introducing the pattern itself (see
+  the 2026-08-06 entry below) and pr-self-review's `react-best-practices`
+  skill caught it on the next review pass. Fix: a monotonic token
+  (`useRef(0)`, incremented per call) captured in a local `const` at call
+  time, and the `onSettled` callback only clears state `if (tokenRef.current
+  === token)` — i.e. only the LATEST call's settle may clear it. Any
+  "optimistic override, cleared on settle" state needs this guard the
+  moment the same handler can plausibly fire twice before the first
+  settles (drag-and-drop, rapid clicks, debounced-but-not-cancelled async
+  work) — it's not a hypothetical, it reproduces with two ordinary drags.
+  (`client/src/app/agents/[id]/_components/AgentEditor/_components/SkillsTab/SkillsTab.tsx:52-57,70-77`;
+  regression test: `SkillsTab.test.tsx` — "a second overlapping drag's
+  optimistic order survives the FIRST (now-stale) mutation settling first")
+
 - 2026-08-06 — `client/src/lib/skills.ts` is now the canonical home for
   skill-domain logic shared across route trees — created after `needsVetting()`
   (untrusted-source-skill check) was found duplicated byte-for-byte in TWO

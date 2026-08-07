@@ -49,6 +49,12 @@ export function SkillsTab({ agent }: { agent: Agent }) {
   // longer snaps the visible order back mid-interaction, since nothing
   // resyncs `rows` from `merged` on every render.
   const [optimisticRows, setOptimisticRows] = React.useState<SkillRow[] | null>(null);
+  // Guards against a SECOND overlapping drag: if a new drop starts before the
+  // previous one's mutation has settled, only the LATEST drop's `onSettled`
+  // may clear `optimisticRows` — otherwise the first mutation settling after
+  // a second drag started would wipe out the second drag's still-pending
+  // optimistic order, snapping the list back mid-interaction.
+  const dragTokenRef = React.useRef(0);
   const rows = optimisticRows ?? merged;
 
   const loading = skillsLoading || linksLoading;
@@ -65,8 +71,11 @@ export function SkillsTab({ agent }: { agent: Agent }) {
     if (dragId && dragId !== targetId) {
       const next = reorderSkillRows(rows, dragId, targetId);
       setOptimisticRows(next);
+      const token = ++dragTokenRef.current;
       setSkills.mutate(next.map((r) => r.skill.id), {
-        onSettled: () => setOptimisticRows(null),
+        onSettled: () => {
+          if (dragTokenRef.current === token) setOptimisticRows(null);
+        },
       });
     }
     setDragId(null);
