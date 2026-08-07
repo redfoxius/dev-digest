@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { Severity } from './findings.js';
+import { ConventionCategory, ConventionOrigin } from './knowledge.js';
 
 /**
  * A6 — Productionize contracts (L08).
@@ -59,9 +60,11 @@ export type PluginEvalCase = z.infer<typeof PluginEvalCase>;
 /** An exported convention (house-rule). */
 export const PluginConvention = z.object({
   rule: z.string(),
+  category: ConventionCategory.nullish(),
   evidence_path: z.string().nullish(),
   evidence_snippet: z.string().nullish(),
   confidence: z.number().nullish(),
+  origin: ConventionOrigin.nullish(),
   accepted: z.boolean(),
 });
 export type PluginConvention = z.infer<typeof PluginConvention>;

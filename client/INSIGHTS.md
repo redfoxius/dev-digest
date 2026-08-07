@@ -113,6 +113,26 @@ workflow and quality bar.
   `server/src/vendor/shared/contracts/eval-ci.ts:144-172`,
   `server/src/vendor/shared/adapters.ts:64-69,83`)
 
+- 2026-08-07 — A global "active repo" mechanism already exists
+  (`lib/repo-context.tsx`'s `useActiveRepo()`/`useRepoNotFound()`, priority
+  URL `:repoId` > localStorage > first repo from the API) and `nav.ts`'s
+  `NavItemDef.href` already documents `:repoId` templating — don't assume a
+  repo-scoped nav entry needs new "repo switcher" plumbing; it doesn't, just
+  add `{ href: "/repos/:repoId/..." }` like the existing `pulls` entry.
+  `src/vendor/ui/shell/RepoSwitcher.tsx` even already exists as a component
+  (not currently wired into the Sidebar, but the underlying state is real).
+  (`client/src/lib/repo-context.tsx:58-72`, `client/src/vendor/ui/nav.ts:72-75`)
+
+- 2026-08-07 — `messages/en/<feature>.json` files are auto-discovered by
+  filename (`i18n/request.ts`'s `loadMessages()` reads every `.json` in the
+  locale dir, keyed by filename minus extension) — a feature can ship with a
+  pre-written, currently-unused namespace file (e.g. `conventions.json`
+  existed with `page.*`/`card.*` keys before the Conventions Extractor page
+  was built) and it's already live, no registration step needed. Worth
+  grepping `messages/en/` for a matching namespace before writing new copy
+  from scratch — it may already be there, written for exactly this feature.
+  (`client/src/i18n/request.ts:16-25`, `client/messages/en/conventions.json`)
+
 ## Tool & Library Notes
 
 - 2026-08-06 — `Checkbox` (`src/vendor/ui/kit/Checkbox.tsx`) renders as a real

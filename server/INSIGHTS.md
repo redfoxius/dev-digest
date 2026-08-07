@@ -128,6 +128,30 @@ workflow and quality bar.
   test fixtures also construct.
   (`server/tsconfig.json:26` `"include": ["src/**/*.ts"]`)
 
+- 2026-08-07 — `FEATURE_MODELS` (`contracts/platform.ts:43-79`) already had a
+  `'conventions'` entry (from the Skills-feature session, unused until this
+  one) but its shipped default was `openai`/`gpt-5.4` — a flagship, non-cheap
+  model, silently contradicting the Conventions Extractor lesson's explicit
+  "cheap model" requirement. Before wiring a new module to an existing
+  `FeatureModelId` slot, check its registry default actually matches what the
+  feature needs — a placeholder registered by an earlier session isn't
+  guaranteed to have the right default, only the right shape. Fixed in both
+  vendor copies to `openrouter`/`deepseek/deepseek-v4-flash`.
+  (`server/src/vendor/shared/contracts/platform.ts:73-78`,
+  `server/src/modules/settings/feature-models.ts:51-56`)
+
+- 2026-08-07 — `SkillsService.create()` hardcodes `source: 'manual'`
+  (`server/src/modules/skills/service.ts:107-118`) — there is no service-level
+  entry point for creating a skill with a different `SkillSource`. A new
+  producer of skills (here, Conventions Extractor's `source: 'extracted'`)
+  must call `SkillsRepository.insert()` directly (it already accepts
+  `source` as a parameter, `server/src/modules/skills/repository.ts:17-26`)
+  rather than going through `SkillsService`, and reuse `toSkillDto` from
+  `skills/helpers.ts` for the response shape. Don't add a new
+  `SkillsService` method just to unlock a different `source` value — the
+  repository already supports it.
+  (`server/src/modules/conventions/service.ts` `createSkillFromCandidates`)
+
 ## Tool & Library Notes
 
 - 2026-08-06 — `adm-zip@0.6.0`'s own `entry.getData()` ALREADY caps
@@ -209,6 +233,23 @@ workflow and quality bar.
   line here; `pnpm install`/`pnpm typecheck` hard-fail until it's resolved
   to `true`/`false`. This is where to approve a new native/build-script dep.
   (`server/pnpm-workspace.yaml:2`)
+
+- 2026-08-07 — `drizzle-kit generate` (`server/drizzle.config.ts`) prompts
+  interactively ("is column X created or renamed from Y?") whenever a single
+  schema-diff both adds and drops columns on the same table — piping
+  keystrokes via `printf | script -q /dev/null pnpm db:generate` did NOT
+  reliably answer it (the process hung and had to be killed). Reliable
+  alternative used for migration `0014_add_convention_fields.sql`:
+  hand-write the SQL (mirroring the existing migration's `ALTER TABLE`
+  style) + hand-derive the new `meta/NNNN_snapshot.json` from the previous
+  snapshot (a small Python script copying `tables['public.<table>'].columns`
+  and swapping in the new/removed ones, then a fresh random `id` +
+  `prevId` = old `id`) + append one entry to `meta/_journal.json`. Verified
+  correct by re-running `pnpm db:generate` afterward — it reported "No
+  schema changes, nothing to migrate", confirming the hand-written snapshot
+  exactly matches the Drizzle schema file.
+  (`server/src/db/migrations/0014_add_convention_fields.sql`,
+  `server/src/db/migrations/meta/0014_snapshot.json`)
 
 - 2026-08-07 — The SSRF blocklist in `isDisallowedIPv4`
   (`url-fetcher/http.ts`) covered RFC1918 (10/8, 172.16/12, 192.168/16),
