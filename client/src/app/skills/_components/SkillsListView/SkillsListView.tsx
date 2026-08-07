@@ -6,7 +6,8 @@
 
 import React from "react";
 import { useTranslations } from "next-intl";
-import { Button, Dropdown, EmptyState, ErrorState, Skeleton, Icon, Badge, Toggle } from "@devdigest/ui";
+import { Button, ConfirmDialog, Dropdown, EmptyState, ErrorState, Skeleton, Icon, Badge, Toggle } from "@devdigest/ui";
+import type { Skill } from "@devdigest/shared";
 import { useSkills, useUpdateSkill, useDeleteSkill } from "../../../../lib/hooks/skills";
 import { needsVetting } from "../../../../lib/skills";
 import { ImportSkillDrawer } from "../ImportSkillDrawer";
@@ -19,10 +20,16 @@ export function SkillsListView({
   activeId,
   onSelect,
   onNewSkill,
+  onActiveDeleted,
 }: {
   activeId?: string;
   onSelect: (id: string) => void;
   onNewSkill: () => void;
+  /** Fired when the skill just deleted is the one currently open in the
+     detail pane (`activeId`) — deleting it doesn't otherwise make the
+     right-side panel notice, since `useSkill(id)`'s query cache eviction
+     removes the query but doesn't itself trigger a refetch/navigation. */
+  onActiveDeleted?: () => void;
 }) {
   const t = useTranslations("skills");
   const { data: skills, isLoading, isError, refetch } = useSkills();
@@ -31,6 +38,7 @@ export function SkillsListView({
   const [search, setSearch] = React.useState("");
   const [importTab, setImportTab] = React.useState<"file" | "url" | null>(null);
   const [communityOpen, setCommunityOpen] = React.useState(false);
+  const [deleteTarget, setDeleteTarget] = React.useState<Skill | null>(null);
 
   const list = filterSkills(skills ?? [], search);
 
@@ -114,9 +122,7 @@ export function SkillsListView({
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    if (window.confirm(`Delete skill "${sk.name}"? This cannot be undone.`)) {
-                      del.mutate(sk.id);
-                    }
+                    setDeleteTarget(sk);
                   }}
                   disabled={del.isPending}
                   title="Delete skill"
@@ -147,6 +153,27 @@ export function SkillsListView({
 
       {importTab && <ImportSkillDrawer initialTab={importTab} onClose={() => setImportTab(null)} />}
       {communityOpen && <CommunitySkillsDrawer onClose={() => setCommunityOpen(false)} />}
+      {deleteTarget && (
+        <ConfirmDialog
+          title="Delete skill"
+          body={
+            <>
+              Delete skill <strong>&ldquo;{deleteTarget.name}&rdquo;</strong>? This cannot be undone.
+            </>
+          }
+          pending={del.isPending}
+          onCancel={() => setDeleteTarget(null)}
+          onConfirm={() => {
+            const wasActive = deleteTarget.id === activeId;
+            del.mutate(deleteTarget.id, {
+              onSuccess: () => {
+                setDeleteTarget(null);
+                if (wasActive) onActiveDeleted?.();
+              },
+            });
+          }}
+        />
+      )}
     </div>
   );
 }
