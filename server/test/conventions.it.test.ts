@@ -219,6 +219,32 @@ d('/repos/:id/conventions', () => {
     expect(sameRuleDuplicates.length).toBe(1);
   });
 
+  it('buildSkillDraft names the skill after the repo, not its raw id', async () => {
+    const app = await makeApp({
+      files: { 'tsconfig.json': JSON.stringify({ compilerOptions: { strict: true } }) },
+      samples: [],
+    });
+    const extractRes = await app.inject({ method: 'POST', url: `/repos/${repoId}/conventions/extract` });
+    const candidate = (extractRes.json().candidates as { id: string }[])[0]!;
+    // Explicitly accept rather than relying on a fresh candidate's default
+    // status — this repo's rows accumulate across earlier tests in this
+    // file, some of which reject candidates that dedupe against this one.
+    await app.inject({ method: 'PATCH', url: `/conventions/${candidate.id}`, payload: { status: 'accepted' } });
+
+    const draftRes = await app.inject({
+      method: 'POST',
+      url: `/repos/${repoId}/conventions/skill-draft`,
+      payload: { candidate_ids: [candidate.id] },
+    });
+    expect(draftRes.statusCode).toBe(200);
+    const draft = draftRes.json();
+    // Seeded repo is `acme/payments-api` — the name must be slugified from
+    // that, not `${repoId}-conventions` (the raw UUID prefix this regressed
+    // to before).
+    expect(draft.name).toBe('acme-payments-api-conventions');
+    expect(draft.body).toContain('# acme-payments-api-conventions');
+  });
+
   it('createSkillFromCandidates only bundles accepted rows even if a rejected id is included', async () => {
     const app = await makeApp({
       files: { 'tsconfig.json': JSON.stringify({ compilerOptions: { strict: true, noImplicitAny: true } }) },
