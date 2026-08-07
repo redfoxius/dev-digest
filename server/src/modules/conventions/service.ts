@@ -20,6 +20,7 @@ import {
   buildSkillBody,
   findEvidenceLineRange,
   parseConfigFile,
+  slugifyRule,
   toConventionDto,
   type ConfigCandidateDraft,
 } from './helpers.js';
@@ -197,7 +198,11 @@ export class ConventionsService {
     if (candidates.length === 0) {
       throw new ValidationError('No accepted candidates among the given ids');
     }
-    const name = `${repoId}-conventions`; // client/UI lets the user rename before saving
+    // Falls back to the raw repoId only if the repo row is somehow gone —
+    // client/UI lets the user rename before saving either way.
+    const repoRow = await this.container.reposRepo.getById(workspaceId, repoId);
+    const repoSlug = repoRow ? slugifyRule(repoRow.fullName) : repoId;
+    const name = `${repoSlug}-conventions`;
     const body = buildSkillBody(name, candidates);
     return {
       name,
