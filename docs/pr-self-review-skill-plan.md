@@ -6,7 +6,10 @@ skills, posted nothing — see the 2026-08-06 correction below) and once
 against PR #8 (a real feature PR, 4 skills reviewed, gate tripped on 7
 CRITICAL findings, posted + labeled — see the 2026-08-06 second correction
 below, which found a real design flaw in the enforcement mechanism itself).
-A push-triggered re-check is still not exercised.
+A push-triggered re-check is still not exercised. **2026-08-08:**
+light/full review modes and `version` frontmatter added (see that dated
+section below) — not yet validated end-to-end on a real PR (the mode
+filtering logic is new and untested against a live `Workflow` run).
 
 **2026-08-06 correction, from the first live run:** two real bugs surfaced
 running the skill by hand, both now fixed in `SKILL.md`:
@@ -89,6 +92,53 @@ cost — a real, recurring tension worth watching: this repo's PRs are
 getting large enough that even the narrowed-scope-diff-per-subagent fix
 from the PR #7 correction isn't enough on its own; matching may need its
 own cost cap eventually, not just diff-scoping).
+
+**2026-08-08: light/full modes + `version` frontmatter added**, resolving
+the cost-cap open question from the correction directly above. The user
+asked for two modes — a cheap default and an all-skills opt-in — rather
+than an automatic cost cap, so the design landed as:
+
+- **`light` (default, every automatic and bare-manual trigger) vs. `full`
+  (explicit request only).** Matching (step 3's Match phase) always runs
+  in full over every candidate skill — only the **Review** phase (one
+  subagent per match) is gated by mode. `light` restricts review subagents
+  to a fixed critical tier: `security`, `onion-architecture`,
+  `golang-architecture`, `drizzle-orm-patterns`, `postgresql-table-design`,
+  `fastify-best-practices`, `zod`. Everything else in the catalog is
+  standard tier, reviewed only under `full`.
+- **Tier is a fixed list, not LLM-classified per PR.** Considered asking
+  the Match agent to also emit a `tier` per match (reasoning about the
+  specific diff, same pattern as the existing content-based matching) but
+  rejected it: tiering is a property of what a skill *catches* (security
+  holes, layering bugs, data loss) independent of the diff, and computing
+  severity before the Review phase even runs is circular (you don't know
+  if a finding is CRITICAL until you review). A hardcoded list, mirroring
+  the existing hardcoded exclusion list for
+  engineering-insights/mermaid-diagram/pr-self-review itself, is simpler,
+  free (no extra agent call), and auditable. New catalog skills default to
+  standard tier — a missed one is one `full` run away, never silently lost
+  forever.
+- **Skipped skills are never silent.** Every standard-tier match still
+  appears in the posted review's table (`⏭️ skipped (light mode)`) and is
+  named in the chat report, even though no subagent ran for it — same
+  transparency principle as the existing `⚠️ review incomplete` row for
+  errored skills.
+- **Proactive escalation is a suggestion, never automatic.** Three
+  heuristics (auth/payments/secrets/migration path touched; a skipped
+  skill's files overlap a file with an existing `CRITICAL`; double-digit
+  file count) make Claude *propose* `full` in chat — it still waits for
+  the user to say yes, matching this repo's general "confirm before
+  escalating scope" convention rather than the skill deciding for itself.
+- **`version: "1.0.0"`** added to `SKILL.md` frontmatter, matching the
+  convention already used by `frontend-ui-architecture` and
+  `onion-architecture`. Starts at `1.0.0` rather than back-dating a
+  version number for the four unversioned fix rounds this skill went
+  through before now (see the two 2026-08-06 corrections above) — this is
+  the first version-tracked release, and it ships with light/full modes
+  already in it. No changelog section was added elsewhere in the repo for
+  any other skill, so none was invented here either; future behavior
+  changes to this skill should bump `version` and add a dated correction
+  section here, following the pattern already established by this file.
 
 ## Context
 
@@ -350,5 +400,10 @@ architecture forks, not implementation detail):
   Same category of gap as the original "chat-only" limitation, just
   narrower now that the *first* run's block is a real GitHub state.
 - **Cost.** N matched skills × one subagent each, on every creation *and*
-  every subsequent push, is real token spend per PR. Acceptable for this
-  course project; flag if it becomes a concern later.
+  every subsequent push, is real token spend per PR. **Resolved
+  2026-08-08** by the light/full mode split (see that dated section
+  above) — `light` is now the default for every automatic trigger,
+  bounding the Review phase to the fixed critical-tier skills; `full`
+  (all matches) is opt-in. Residual gap: the critical-tier list is
+  hand-maintained, so a new catalog skill that genuinely belongs in light
+  mode won't be included until someone adds it explicitly.
