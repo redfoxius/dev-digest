@@ -26,13 +26,20 @@ export const NAV: NavGroup[] = [
     ],
   },
   {
-    // Conventions + Eval Dashboard belong here too (matching the empty
-    // `conventions`/`eval*` schema tables) but aren't built yet — don't add
-    // nav entries for them until their own lesson ships.
+    // Eval Dashboard belongs here too (matching the empty `eval*` schema
+    // tables) but isn't built yet — don't add a nav entry for it until its
+    // own lesson ships. Conventions IS built (Conventions Extractor).
     section: "SKILLS LAB",
     items: [
       { key: "skills", label: "Skills", icon: "Sparkles", href: "/skills", gKey: "s" },
       { key: "agents", label: "Agents", icon: "Cpu", href: "/agents", gKey: "a" },
+      {
+        key: "conventions",
+        label: "Conventions",
+        icon: "ListChecks",
+        href: "/repos/:repoId/conventions",
+        gKey: "c",
+      },
     ],
   },
 ];
@@ -63,6 +70,7 @@ export const SHORTCUTS: ShortcutDef[] = [
   { keys: "g p", label: "Go to Pull Requests", group: "Navigation" },
   { keys: "g s", label: "Go to Skills", group: "Navigation" },
   { keys: "g a", label: "Go to Agents", group: "Navigation" },
+  { keys: "g c", label: "Go to Conventions", group: "Navigation" },
   { keys: "j / k", label: "Next / previous finding", group: "Findings" },
   { keys: "a", label: "Accept finding", group: "Findings" },
   { keys: "d", label: "Dismiss finding", group: "Findings" },

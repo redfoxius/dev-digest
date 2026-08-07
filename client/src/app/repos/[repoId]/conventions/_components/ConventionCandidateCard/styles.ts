@@ -1,0 +1,75 @@
+import type { CSSProperties } from "react";
+
+/** Co-located styles for ConventionCandidateCard — mirrors FindingCard's shape. */
+export const s = {
+  card: (accentColor: string): CSSProperties => ({
+    border: "1px solid var(--border)",
+    borderLeft: `3px solid ${accentColor}`,
+    borderRadius: 10,
+    padding: "16px 18px",
+    marginBottom: 12,
+    background: "var(--bg-elevated)",
+    display: "flex",
+    gap: 16,
+    alignItems: "flex-start",
+  }),
+  main: { flex: 1, minWidth: 0 } satisfies CSSProperties,
+  titleRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    flexWrap: "wrap",
+  } satisfies CSSProperties,
+  title: { fontSize: 15, fontWeight: 600 } satisfies CSSProperties,
+  titleInput: {
+    fontSize: 15,
+    fontWeight: 600,
+    background: "var(--bg-surface)",
+    border: "1px solid var(--border-strong)",
+    borderRadius: 6,
+    padding: "2px 6px",
+    flex: 1,
+    minWidth: 200,
+  } satisfies CSSProperties,
+  badge: (color: string): CSSProperties => ({
+    fontSize: 11,
+    fontWeight: 600,
+    padding: "2px 8px",
+    borderRadius: 999,
+    color,
+    border: `1px solid ${color}`,
+    whiteSpace: "nowrap",
+  }),
+  evidenceBlock: {
+    marginTop: 10,
+    border: "1px solid var(--border)",
+    borderRadius: 8,
+    overflow: "hidden",
+  } satisfies CSSProperties,
+  evidencePathRow: {
+    padding: "6px 10px",
+    background: "var(--bg-surface)",
+    borderBottom: "1px solid var(--border)",
+    fontSize: 12,
+  } satisfies CSSProperties,
+  evidenceCode: {
+    margin: 0,
+    padding: "10px 12px",
+    fontFamily: "var(--font-mono, monospace)",
+    fontSize: 12.5,
+    whiteSpace: "pre-wrap",
+    overflowX: "auto",
+  } satisfies CSSProperties,
+  metaRow: {
+    marginTop: 10,
+    display: "flex",
+    alignItems: "center",
+    gap: 14,
+  } satisfies CSSProperties,
+  actions: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 8,
+    flexShrink: 0,
+  } satisfies CSSProperties,
+} as const;
