@@ -19,10 +19,12 @@ function isDisallowedIPv4(ip: string): boolean {
 }
 
 /**
- * Extracts the embedded IPv4 address from an IPv4-mapped IPv6 literal —
- * either the dotted form (`::ffff:127.0.0.1`) or the compressed-hex form
- * (`::ffff:7f00:1`) that `new URL()`/`dns.lookup` normalization produces —
- * or null if `ip` isn't one.
+ * Extracts the embedded IPv4 address from an IPv4-mapped (`::ffff:a.b.c.d`,
+ * or its compressed-hex form `::ffff:7f00:1`, or the fully-expanded
+ * `0:0:0:0:0:ffff:...` prefix) or the older, deprecated IPv4-COMPATIBLE
+ * (`::a.b.c.d`, no `ffff`) IPv6 literal — or null if `ip` isn't one of
+ * these. `new URL()`/`dns.lookup` normalization can produce any of these
+ * forms, and some resolvers/stacks still emit or accept the deprecated one.
  */
 function ipv4MappedAddress(ip: string): string | null {
   const dotted = /^(?:::ffff:|0:0:0:0:0:ffff:)(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/i.exec(ip);
@@ -33,6 +35,11 @@ function ipv4MappedAddress(ip: string): string | null {
     const lo = parseInt(hex[2]!, 16);
     return [(hi >> 8) & 0xff, hi & 0xff, (lo >> 8) & 0xff, lo & 0xff].join('.');
   }
+  // Deprecated IPv4-compatible form (`::a.b.c.d`) — `::` and `::1` don't
+  // match this (no dotted-quad follows the `::`), so no overlap with the
+  // unspecified/loopback checks above.
+  const compat = /^::(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/.exec(ip);
+  if (compat) return compat[1]!;
   return null;
 }
 
@@ -52,6 +59,7 @@ function isDisallowedTarget(ip: string): boolean {
   if (version === 6) {
     const lower = ip.toLowerCase();
     if (lower === '::1') return true; // loopback
+    if (lower === '::' || lower === '0:0:0:0:0:0:0:0') return true; // unspecified — the "0.0.0.0 Day" class of bypass
     if (lower.startsWith('fe80:')) return true; // link-local
     if (lower.startsWith('fc') || lower.startsWith('fd')) return true; // unique-local fc00::/7
     const mapped = ipv4MappedAddress(lower);

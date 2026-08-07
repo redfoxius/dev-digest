@@ -38,6 +38,7 @@ describe('HttpUrlFetcher (SSRF guard)', () => {
     ['http://100.64.0.1/', 'RFC 6598 100.64.0.0/10 lower bound'],
     ['http://100.127.255.255/', 'RFC 6598 100.64.0.0/10 upper bound'],
     ['http://0.0.0.0/', 'unspecified'],
+    ['http://[::]/', 'IPv6 unspecified (the "0.0.0.0 Day" bypass class)'],
     ['http://[::1]/', 'IPv6 loopback'],
     ['http://[fe80::1]/', 'IPv6 link-local'],
     ['http://[fd00::1]/', 'IPv6 unique-local'],
@@ -73,6 +74,18 @@ describe('HttpUrlFetcher (SSRF guard)', () => {
     await fetcher.fetch('http://100.63.255.255/');
     await fetcher.fetch('http://100.128.0.0/');
     expect(spy).toHaveBeenCalledTimes(2);
+  });
+
+  it('an ordinary compressed IPv6 address that happens to end in two hex groups after "::" is NOT a false-positive embedded-IPv4 match', async () => {
+    // `::1:2` is a completely normal (if unusual-looking) public-ish IPv6
+    // address (0:0:0:0:0:0:1:2) — bit-for-bit indistinguishable from the
+    // deprecated, no-longer-specially-routed IPv4-compatible form. Treating
+    // every "::<hex>:<hex>" shape as an embedded IPv4 address would reject
+    // legitimate IPv6 hosts; the guard deliberately does NOT do this (see
+    // `ipv4MappedAddress`'s comment).
+    const spy = undiciFetchMock.mockResolvedValue(new Response('ok'));
+    await fetcher.fetch('http://[::1:2]/');
+    expect(spy).toHaveBeenCalledTimes(1);
   });
 
   it('allows a public IP-literal http(s) URL through to the real fetch call (mocked, no network)', async () => {
