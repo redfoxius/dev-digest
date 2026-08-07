@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { render, screen, cleanup, fireEvent } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent, act } from "@testing-library/react";
 import { NextIntlClientProvider } from "next-intl";
 import type { Agent, AgentSkillLink, Skill } from "@devdigest/shared";
 import messages from "../../../../../../../../messages/en/agents.json";
@@ -164,6 +164,53 @@ describe("SkillsTab", () => {
       ["s3", "s1", "s2"],
       expect.objectContaining({ onSettled: expect.any(Function) }),
     );
+  });
+
+  it("a second overlapping drag's optimistic order survives the FIRST (now-stale) mutation settling first", () => {
+    // Regression test: two drags fired before either mutation has settled.
+    // The first mutation settling must NOT clear the optimistic order set by
+    // the second, still-in-flight drag — only the LATEST drag's own settle
+    // may do that.
+    const idToName: Record<string, string> = { s1: "z-skill", s2: "a-skill", s3: "m-skill" };
+    renderTab();
+
+    // Drag 1: s3 (last handle) onto s1's row.
+    let handles = screen.getAllByRole("button", { name: /Reorder/ });
+    fireEvent.dragStart(handles[2]!, { dataTransfer: { setData: vi.fn() } });
+    fireEvent.dragOver(handles[0]!);
+    fireEvent.drop(handles[0]!);
+
+    // Drag 2 starts before drag 1's mutation settles: drag the (now-reordered)
+    // first row onto the last row.
+    handles = screen.getAllByRole("button", { name: /Reorder/ });
+    fireEvent.dragStart(handles[0]!, { dataTransfer: { setData: vi.fn() } });
+    fireEvent.dragOver(handles[2]!);
+    fireEvent.drop(handles[2]!);
+
+    expect(setSkillsMutate).toHaveBeenCalledTimes(2);
+    const [drag1Ids, opts1] = setSkillsMutate.mock.calls[0]!;
+    const [drag2Ids, opts2] = setSkillsMutate.mock.calls[1]!;
+    const drag1Order = (drag1Ids as string[]).map((id) => idToName[id]);
+    const drag2Order = (drag2Ids as string[]).map((id) => idToName[id]);
+    // The two drags must produce genuinely different orders for this test to
+    // actually distinguish "still drag 2's order" from "reverted to drag 1's".
+    expect(drag1Order).not.toEqual(drag2Order);
+
+    // Drag 1's mutation settles AFTER drag 2 already started (the race).
+    act(() => opts1.onSettled());
+    // Still showing drag 2's optimistic order — NOT drag 1's, and not yet
+    // reverted to the server order either.
+    expect(screen.getAllByText(/-skill$/).map((el) => el.textContent)).toEqual(drag2Order);
+
+    // Now drag 2 (the LATEST one) settles — this is the one allowed to clear
+    // the optimistic override, falling back to `merged` (unchanged mock data,
+    // so back to the original server order).
+    act(() => opts2.onSettled());
+    expect(screen.getAllByText(/-skill$/).map((el) => el.textContent)).toEqual([
+      "z-skill",
+      "a-skill",
+      "m-skill",
+    ]);
   });
 
   it("shows an error state with retry when the skills query fails, instead of a misleading empty-filter message", () => {

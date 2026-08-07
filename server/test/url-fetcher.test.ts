@@ -34,6 +34,9 @@ describe('HttpUrlFetcher (SSRF guard)', () => {
     ['http://172.16.0.1/', 'RFC1918 172.16.0.0/12'],
     ['http://172.31.255.255/', 'RFC1918 172.16.0.0/12 upper bound'],
     ['http://192.168.1.1/', 'RFC1918 192.168.0.0/16'],
+    ['http://100.100.100.200/2016-01-01/meta-data/', 'RFC 6598 CGN — Alibaba Cloud metadata endpoint'],
+    ['http://100.64.0.1/', 'RFC 6598 100.64.0.0/10 lower bound'],
+    ['http://100.127.255.255/', 'RFC 6598 100.64.0.0/10 upper bound'],
     ['http://0.0.0.0/', 'unspecified'],
     ['http://[::1]/', 'IPv6 loopback'],
     ['http://[fe80::1]/', 'IPv6 link-local'],
@@ -62,6 +65,13 @@ describe('HttpUrlFetcher (SSRF guard)', () => {
     const spy = undiciFetchMock.mockResolvedValue(new Response('ok'));
     await fetcher.fetch('http://172.15.0.1/');
     await fetcher.fetch('http://172.32.0.1/');
+    expect(spy).toHaveBeenCalledTimes(2);
+  });
+
+  it('100.63.x.x and 100.128.x.x are OUTSIDE the 100.64.0.0/10 block — not rejected on that basis', async () => {
+    const spy = undiciFetchMock.mockResolvedValue(new Response('ok'));
+    await fetcher.fetch('http://100.63.255.255/');
+    await fetcher.fetch('http://100.128.0.0/');
     expect(spy).toHaveBeenCalledTimes(2);
   });
 

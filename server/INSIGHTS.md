@@ -210,6 +210,21 @@ workflow and quality bar.
   to `true`/`false`. This is where to approve a new native/build-script dep.
   (`server/pnpm-workspace.yaml:2`)
 
+- 2026-08-07 — The SSRF blocklist in `isDisallowedIPv4`
+  (`url-fetcher/http.ts`) covered RFC1918 (10/8, 172.16/12, 192.168/16),
+  loopback, link-local/169.254.169.254 (AWS/GCP/Azure metadata), and
+  unspecified — but NOT RFC 6598 `100.64.0.0/10` (Carrier-Grade NAT), which
+  is where Alibaba Cloud's ECS metadata endpoint (`100.100.100.200`) lives.
+  Found by `pr-self-review`'s `security` skill on a THIRD review pass of
+  this same file — the first two passes (checking IPv4-mapped-IPv6 bypass
+  and DNS-rebinding TOCTOU) didn't happen to probe this specific range.
+  Cloud-metadata SSRF blocklists need one range per cloud provider's own
+  metadata-service addressing scheme, not just the two most common ones
+  (169.254.169.254 covers AWS/GCP/Azure/DigitalOcean/most others, but not
+  Alibaba Cloud) — worth an explicit checklist next time rather than
+  re-deriving it from memory.
+  (`server/src/adapters/url-fetcher/http.ts:16`)
+
 ## Recurring Errors & Fixes
 
 - 2026-08-05 — `ReviewRunExecutor.runOneAgent()` (`run-executor.ts`) called
