@@ -17,6 +17,81 @@ workflow and quality bar.
 
 ## Codebase Patterns
 
+- 2026-08-06 — There is no shared `srOnly`/visually-hidden style utility in
+  this codebase yet — a repo-wide grep for `sr-only`/`visually-hidden`/
+  `clip: rect` came back empty before this date. Added the same inline
+  visually-hidden `CSSProperties` object independently to THREE different
+  `styles.ts` files (`SkillsListView`, `SkillsTab`, `CommunitySkillsDrawer`)
+  for `aria-live="polite"` result-count announcements, rather than a shared
+  export — each `<route>/_components/**/styles.ts` file is self-contained
+  per this module's existing convention, and 3 near-identical ~10-line
+  objects didn't yet justify a new shared `@devdigest/ui` primitive. If a
+  4th consumer shows up, that's the signal to promote it instead of copying
+  a 4th time. (`client/src/app/skills/_components/SkillsListView/styles.ts`,
+  `client/src/app/agents/[id]/_components/AgentEditor/_components/SkillsTab/styles.ts`,
+  `client/src/app/skills/_components/CommunitySkillsDrawer/styles.ts` — all
+  `srOnly`)
+
+- 2026-08-07 — A mutation-scoped optimistic-state pattern (`const [x, setX]
+  = useState<T | null>(null); const value = x ?? derived;`, cleared in that
+  specific mutation's `onSettled`) is NOT automatically safe against a
+  SECOND overlapping call to the same handler before the first settles — the
+  first mutation's `onSettled` still fires unconditionally and clears the
+  shared state, wiping out the second call's still-pending optimistic value.
+  Shipped this exact bug one day after introducing the pattern itself (see
+  the 2026-08-06 entry below) and pr-self-review's `react-best-practices`
+  skill caught it on the next review pass. Fix: a monotonic token
+  (`useRef(0)`, incremented per call) captured in a local `const` at call
+  time, and the `onSettled` callback only clears state `if (tokenRef.current
+  === token)` — i.e. only the LATEST call's settle may clear it. Any
+  "optimistic override, cleared on settle" state needs this guard the
+  moment the same handler can plausibly fire twice before the first
+  settles (drag-and-drop, rapid clicks, debounced-but-not-cancelled async
+  work) — it's not a hypothetical, it reproduces with two ordinary drags.
+  (`client/src/app/agents/[id]/_components/AgentEditor/_components/SkillsTab/SkillsTab.tsx:52-57,70-77`;
+  regression test: `SkillsTab.test.tsx` — "a second overlapping drag's
+  optimistic order survives the FIRST (now-stale) mutation settling first")
+
+- 2026-08-06 — `client/src/lib/skills.ts` is now the canonical home for
+  skill-domain logic shared across route trees — created after `needsVetting()`
+  (untrusted-source-skill check) was found duplicated byte-for-byte in TWO
+  unrelated component folders (`skills/_components/SkillsListView/helpers.ts`
+  and `agents/[id]/_components/AgentEditor/_components/SkillsTab/helpers.ts`),
+  both independently documenting it as "the spec's vetting gate" without
+  either referencing the other. `frontend-ui-architecture`'s rule ("logic
+  reused by 2+ components → promote to `lib/`") already covered this; the
+  gap was that a `<route>/_components/**/helpers.ts` file LOOKS
+  component-scoped even when its logic isn't. Check `lib/skills.ts` first
+  before adding a skill-domain helper to a component-local `helpers.ts`.
+  (`client/src/lib/skills.ts`)
+
+- 2026-08-06 — Local optimistic UI state for a drag-reorder (or any
+  local-edit-during-an-in-flight-mutation scenario) over TanStack Query data
+  should be scoped to THAT mutation's lifecycle (set right before `.mutate()`,
+  cleared in its own `onSettled`), not kept permanently in sync with the
+  upstream `useMemo`-derived list via a `useEffect`. The effect-sync version
+  re-applies the (possibly stale, pending-mutation-unaware) upstream value on
+  EVERY unrelated recompute of that `useMemo` — including one triggered by a
+  totally different mutation invalidating the same query keys — snapping an
+  in-progress drag back to a stale order until the effect fires again. The
+  fix pattern: `const [optimisticRows, setOptimisticRows] = useState<Row[] |
+  null>(null); const rows = optimisticRows ?? merged;`, set only on the
+  action, cleared only by that action's own `onSettled`.
+  (`client/src/app/agents/[id]/_components/AgentEditor/_components/SkillsTab/SkillsTab.tsx:33-40,51-60`)
+
+- 2026-08-06 — Relative-import depth for a `_components/<Tab>/<Name>.tsx` file
+  two levels under `AgentEditor/` (e.g. `SkillsTab.tsx`) to `src/lib/hooks/*`
+  is **7** `../` (up to `src`, then down into `lib/hooks`) — matches
+  `ConfigTab.tsx`'s existing import. But that file's **co-located test**
+  importing `client/messages/en/*.json` needs **8** `../`, one more, because
+  `messages/` sits at the `client/` root, one level above `src/` — the same
+  off-by-one that bit `AgentEditor.test.tsx` (6 vs 7). Rule of thumb: ups to
+  `src/lib/...` = folders after `src`; ups to `client/messages/...` = folders
+  after `src`, **plus one** to exit `src` itself. Check both counts
+  separately in a new colocated test file — copying one file's import depth
+  for the other target is the easy mistake.
+  (`src/app/agents/[id]/_components/AgentEditor/_components/SkillsTab/SkillsTab.test.tsx:6`)
+
 - 2026-08-05 — `Dropdown` (`src/vendor/ui/kit/Dropdown.tsx`) now supports two
   mutually-exclusive content modes behind one component: the original
   `items: DropdownItemDef[]` list, or a free-form `children` render (used by
@@ -40,6 +115,14 @@ workflow and quality bar.
 
 ## Tool & Library Notes
 
+- 2026-08-06 — `Checkbox` (`src/vendor/ui/kit/Checkbox.tsx`) renders as a real
+  `<button role="checkbox" aria-checked>` , not an `<input type="checkbox">` —
+  in RTL, toggle it with `fireEvent.click(checkbox)` (or userEvent's `.click`),
+  never `fireEvent.change`, which is a no-op on a `<button>` and will leave a
+  test silently asserting against the pre-toggle state.
+  (`src/vendor/ui/kit/Checkbox.tsx:25-30`; exercised in
+  `src/app/agents/[id]/_components/AgentEditor/_components/SkillsTab/SkillsTab.test.tsx`)
+
 - 2026-08-04 — A real review run against the live OpenRouter API (deepseek-v4-flash,
   a small diff) cost exactly `$0.000272979` — i.e. a normal, non-degenerate
   review can legitimately land under $0.001. `formatCost`'s `<$0.001` branch
@@ -48,6 +131,49 @@ workflow and quality bar.
   (`client/src/lib/format.ts:10`)
 
 ## Recurring Errors & Fixes
+
+- 2026-08-06 — `SkillsTab.tsx` destructured only `data`/`isLoading` from its
+  two `useQuery` hooks (`useSkills`, `useAgentSkills`), dropping `isError`
+  entirely — on a query failure, `loading` goes `false` and the filtered
+  list is `[]`, so it fell into the SAME branch as "your filter matched
+  nothing" and rendered that copy instead of an error. Every OTHER component
+  touched in the same PR (`SkillsListView`, `CommunitySkillsDrawer`,
+  `VersionsTab`) already destructures `isError`/`refetch` and renders
+  `ErrorState` — this was the one place that didn't. When adding a new
+  `useQuery`-backed list view, copy an existing sibling's FULL destructure
+  (`data, isLoading, isError, refetch`), not just the two fields the happy
+  path needs — a missing `isError` doesn't error at compile time, it just
+  silently degrades to the empty-state copy.
+  (`client/src/app/agents/[id]/_components/AgentEditor/_components/SkillsTab/SkillsTab.tsx:23-32`)
+
+- 2026-08-06 — Testing a per-test-overridable `useQuery` mock (e.g. to
+  simulate one specific test's `isError: true` while every other test in the
+  file gets the default success shape) needs the mock to be a HOISTED
+  `vi.fn()` with a module-level default `mockImplementation(...)`, not a
+  static object literal returned directly from the `vi.mock(...)` factory —
+  a static literal can't be overridden per-test via `mockReturnValueOnce`.
+  Pattern: `vi.hoisted(() => ({ useXMock: vi.fn() }))`, `vi.mock(path, () =>
+  ({ useX: useXMock }))`, then `useXMock.mockImplementation(() => ({
+  ...defaultSuccessShape }))` at module scope for the common case, and
+  `useXMock.mockReturnValueOnce({ ...errorShape })` inside the one test that
+  needs it.
+  (`client/src/app/agents/[id]/_components/AgentEditor/_components/SkillsTab/SkillsTab.test.tsx:10-32`)
+
+- 2026-08-06 — Adding a zod `.default(...)` field to a shared contract (here:
+  `Agent.skills_count: z.number().int().default(0)`) breaks `pnpm typecheck`
+  on every EXISTING `const x: Agent = {...}` object literal that predates the
+  field — `z.infer`'s output type treats a `.default()` field as required,
+  not optional, because the default only auto-fills during `.parse()`, which
+  literal test fixtures never call. `AgentCard.test.tsx` and
+  `AgentEditor.test.tsx` both had this exact break the same day the field was
+  added (fixed by adding `skills_count: 0` to each fixture). Generalizable:
+  after adding a `.default()` field to any `contracts/*.ts` schema, `grep` for
+  every hand-built literal typed as that contract (test fixtures especially)
+  — `pnpm typecheck` will list them, but only if you actually run it against
+  the whole package, not just the file(s) you touched.
+  (`client/src/vendor/shared/contracts/knowledge.ts` — `Agent.skills_count`;
+  `client/src/app/agents/_components/AgentCard/AgentCard.test.tsx:23`,
+  `client/src/app/agents/[id]/_components/AgentEditor/AgentEditor.test.tsx:31`)
 
 - 2026-08-05 — The PR list's `tableCard` container had `overflow: "hidden"`
   (for its rounded corners), which silently clipped the FINDINGS column's
@@ -90,6 +216,23 @@ workflow and quality bar.
   `missingExpectedReviews`/refetch effect)
 
 ## Open Questions
+
+- 2026-08-06 — `ConfigTab`'s stale-local-form bug (typed edits computed from
+  `useState` copies of `skill`, resynced only on `skill?.id` change via a
+  now-removed `useEffect`) was fixed by remounting the whole component on
+  `key={skill.id}` at the call site instead. This satisfies the CRITICAL
+  react-best-practices rule ("never `useState`+`useEffect` to sync a computed
+  value") but does NOT fully close the specific race the finding described —
+  the underlying `skill` object's CONTENT changing while its `id` stays the
+  SAME (e.g. a background refetch from another tab's edit) still leaves
+  whatever the user has already typed unreconciled against the newer server
+  data; keying only resets state on an `id` change, same as the removed
+  effect did. A real fix needs optimistic-concurrency (e.g. compare the
+  `version` the form was opened with against the current one at save time,
+  and warn/block on mismatch) — not attempted here; scope was the react rule
+  violation, not the underlying conflict-resolution gap.
+  (`client/src/app/skills/_components/SkillDetail/_components/ConfigTab/ConfigTab.tsx:29-33`,
+  `client/src/app/skills/_components/SkillDetail/SkillDetail.tsx:45`)
 
 ## Session Notes
 

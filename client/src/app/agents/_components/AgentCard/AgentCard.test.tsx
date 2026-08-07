@@ -21,6 +21,7 @@ const AGENT: Agent = {
   repo_intel: true,
   enabled: true,
   version: 1,
+  skills_count: 0,
 };
 
 function renderWithIntl(ui: React.ReactElement) {

@@ -130,6 +130,78 @@ workflow and quality bar.
 
 ## Tool & Library Notes
 
+- 2026-08-06 — `adm-zip@0.6.0`'s own `entry.getData()` ALREADY caps
+  decompression output via `zlib.inflateRawSync(compressed, {
+  maxOutputLength: <entry's own declared header.size> })` — verified
+  directly by calling its internal `Inflater` (`node_modules/adm-zip/methods/inflater.js`)
+  with a mismatched declared-vs-actual payload: it throws a `RangeError`
+  rather than fully materializing an oversized buffer. This is that
+  version's fix for a real CVE (referenced in its own source as
+  CVE-2026-39244) — so "adm-zip lets a lying zip header cause a
+  decompression bomb" is a STALE assumption for this pinned version; the
+  actual residual bug was narrower: the RangeError wasn't caught anywhere in
+  `readZipEntries`, so a size-mismatched entry surfaced as an uncaught
+  exception → generic 500, not a clean `ValidationError` (422). Rewrote to
+  decompress via `entry.getCompressedData()` + our own
+  `zlib.inflateRawSync(compressed, { maxOutputLength: remaining })` against
+  a shared cross-entry budget (not the entry's own declared/attacker-
+  controlled size) — makes the safety property independent of adm-zip's
+  internal implementation, adds proper CRC-32 verification via Node's
+  built-in `zlib.crc32()` (Node ≥22, no dependency needed), and converts the
+  failure into a clean `ValidationError`. Verified against a HAND-CRAFTED
+  zip with a patched declared-size header (both local + central-directory
+  4-byte LE fields overwritten post-hoc, matching how a real attacker would
+  do it) — see `test/skills.test.ts`'s `patchDeclaredSize` helper. Before
+  "fixing" a reviewer-flagged vulnerability in a vendored dependency, verify
+  it's still reproducible against the ACTUAL installed version — reading 2-3
+  levels into `node_modules` source directly settled this in minutes.
+  (`server/src/modules/skills/service.ts` — `readZipEntries`)
+
+- 2026-08-06 — Node's GLOBAL `fetch()` (built on Node's own internal, bundled
+  undici) rejects a `dispatcher` built from the userland `undici` NPM
+  package — fails at runtime with `InvalidArgumentError: invalid onError
+  method`, not a type error, so it only surfaces when actually called.
+  Verified directly: an `Agent` from `import { Agent } from 'undici'` works
+  fine as a `dispatcher` for `undici`'s OWN `fetch` (`import { fetch } from
+  'undici'`), but throws when passed to `globalThis.fetch`. To pin a
+  connection's DNS resolution (e.g. for an SSRF DNS-rebinding fix), import
+  BOTH `fetch` and `Agent` from `undici` together — never mix Node's global
+  fetch with an externally-constructed `undici` `Agent`.
+  (`server/src/adapters/url-fetcher/http.ts:1,116-140` — `undiciFetch`)
+
+- 2026-08-06 — A custom `lookup` function passed via `undici`'s `Agent({
+  connect: { lookup } })` (or Node's `net.connect`/`tls.connect` `lookup`
+  option generally) gets invoked with TWO different callback contracts
+  depending on `options.all`: the classic `dns.lookup` single-address form
+  `(err, address, family)` when `options.all` is falsy, but an ARRAY form
+  `(err, [{address, family}])` when `options.all` is true — which recent
+  Node versions request by default (Happy Eyeballs / `autoSelectFamily`).
+  Implementing only the single-address form fails with `ERR_INVALID_IP_ADDRESS:
+  Invalid IP address: undefined` even though the lookup function itself was
+  called correctly — verified by direct reproduction before shipping the
+  fix. A custom `lookup` must branch on `options?.all` and support both
+  shapes. (`server/src/adapters/url-fetcher/http.ts:129-134`)
+
+- 2026-08-06 — `@fastify/multipart`'s `limits` object has 7 independent
+  fields (`fieldNameSize`, `fieldSize`, `fields`, `fileSize`, `files`,
+  `headerPairs`, `parts`) — setting only `fileSize`/`files` (the two that
+  bound the actual uploaded file) leaves `fields`/`parts` at effectively
+  Infinity, letting a client flood a file-upload-only route with unbounded
+  non-file form parts before `request.file()` ever gets a chance to reject
+  anything. For a route that only ever expects ONE file and ZERO other
+  fields (`/skills/import/file/preview`), the tightest correct config sets
+  `fields: 0` outright, not just a large-but-finite number.
+  (`server/src/modules/skills/routes.ts:75-90`)
+
+- 2026-08-06 — `@fastify/multipart`'s `limits.fileSize` truncates the upload
+  stream SILENTLY by default when exceeded — `throwFileSizeLimit: true` is
+  required to make it throw a (413) `RequestFileTooLargeError` instead. Without
+  it, `data.toBuffer()` returns a buffer whose length is capped at (never
+  exceeds) the configured limit, so any downstream `buffer.length >
+  MAX_ARCHIVE_BYTES` guard can never fire for an actually-oversized upload —
+  it silently accepts a truncated/corrupted file instead of rejecting it.
+  (`server/src/modules/skills/routes.ts:70-73`)
+
 - 2026-08-04 — `server/pnpm-workspace.yaml` is pnpm's own `allowBuilds`
   build-script-approval file, not a stray tooling artifact (previously
   assumed so and excluded from commits — it's real and meant to be
@@ -137,6 +209,43 @@ workflow and quality bar.
   line here; `pnpm install`/`pnpm typecheck` hard-fail until it's resolved
   to `true`/`false`. This is where to approve a new native/build-script dep.
   (`server/pnpm-workspace.yaml:2`)
+
+- 2026-08-07 — The SSRF blocklist in `isDisallowedIPv4`
+  (`url-fetcher/http.ts`) covered RFC1918 (10/8, 172.16/12, 192.168/16),
+  loopback, link-local/169.254.169.254 (AWS/GCP/Azure metadata), and
+  unspecified — but NOT RFC 6598 `100.64.0.0/10` (Carrier-Grade NAT), which
+  is where Alibaba Cloud's ECS metadata endpoint (`100.100.100.200`) lives.
+  Found by `pr-self-review`'s `security` skill on a THIRD review pass of
+  this same file — the first two passes (checking IPv4-mapped-IPv6 bypass
+  and DNS-rebinding TOCTOU) didn't happen to probe this specific range.
+  Cloud-metadata SSRF blocklists need one range per cloud provider's own
+  metadata-service addressing scheme, not just the two most common ones
+  (169.254.169.254 covers AWS/GCP/Azure/DigitalOcean/most others, but not
+  Alibaba Cloud) — worth an explicit checklist next time rather than
+  re-deriving it from memory.
+  (`server/src/adapters/url-fetcher/http.ts:16`)
+
+- 2026-08-07 — Same file, FOURTH consecutive `pr-self-review` `security`
+  pass finding a new gap in `isDisallowedTarget`/`isDisallowedIPv4`: the
+  IPv6 branch never checked `::` (the "unspecified" address, IPv6's
+  analog of `0.0.0.0` — the IPv4 form was already blocked, at line 17,
+  specifically BECAUSE of the "0.0.0.0 Day" OS-level bypass class, but the
+  IPv6 twin was missed). A clean way to have caught this earlier: for
+  every IPv4 check in `isDisallowedIPv4`, ask "does IPv6 have a direct
+  analog of this?" as a checklist item, rather than reviewing the IPv6
+  branch's completeness independently. Separately (WARNING, not fixed the
+  same way): `ipv4MappedAddress` deliberately does NOT match the
+  deprecated `::a.b.c.d` (no `ffff`) IPv4-COMPATIBLE form when it appears
+  in `::<hex>:<hex>` compressed form — verified `net.isIP('::1:2')` is a
+  perfectly ordinary, valid IPv6 address bit-for-bit identical in shape to
+  a deprecated-form embedded IPv4 address, so blocking that shape
+  categorically would false-positive on real IPv6 hosts. Confirmed low
+  real-world exploitability too (modern kernels don't specially route the
+  deprecated form). Sometimes the correct fix for a WARNING is "add a test
+  proving why NOT fixing it further is the right call," not more code.
+  (`server/src/adapters/url-fetcher/http.ts:27-43,52-59`; test:
+  `url-fetcher.test.ts` — "an ordinary compressed IPv6 address... is NOT a
+  false-positive")
 
 ## Recurring Errors & Fixes
 
@@ -243,7 +352,32 @@ workflow and quality bar.
   Worth trying `od -c` early if an `Edit` inexplicably can't find text that
   `Read` clearly shows.
 
+- 2026-08-06 — `agents/repository.ts`'s `insert()`/`update()` were still
+  using the OLD unsafe pattern (JS-computed `existing.version + 1`, no
+  transaction wrapping the row write + `agent_versions` snapshot) on the
+  same day `skills/repository.ts`'s equivalent methods were already fixed to
+  the atomic-`sql`-increment-in-a-transaction pattern in the SAME PR —
+  `skills/repository.ts`'s own docstring even says the fix "mirror[s] the
+  same fix in `agents/repository.ts`'s `bumpVersionAfterSkillChange`," but
+  nobody had actually mirrored it back into `insert()`/`update()` there.
+  `bumpVersionAfterSkillChange` (a THIRD write path in the same file, for
+  skill-link changes) already had the atomic/transactional fix. Lesson: when
+  fixing a race/consistency bug in one repository file, `grep` sibling
+  repository files (and OTHER write paths in the SAME file) for the same
+  shape before considering the fix complete — a correct pattern existing
+  once in a file is not evidence every write path in that file uses it.
+  (`server/src/modules/agents/repository.ts:86-172` vs
+  `server/src/modules/skills/repository.ts:79-148`)
+
 ## Open Questions
+
+- 2026-08-06 — `z.coerce.boolean()` on a query param (`?enabled=false` being
+  read as `true` — any non-empty string coerces truthy) was found and fixed
+  in exactly one place (`server/src/modules/skills/routes.ts:39-46`, now
+  `z.enum(['true','false']).transform(...)`). Not audited: whether the same
+  `z.coerce.boolean()` footgun exists on any OTHER boolean query/body field
+  elsewhere in `src/modules/**/routes.ts` — worth a repo-wide grep for
+  `z.coerce.boolean()` before assuming this was the only instance.
 
 - 2026-07-27 — No sync/codegen step keeps `src/vendor/shared` in step with
   the client's copy — is a checked-in diff script or a build-time copy step

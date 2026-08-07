@@ -92,6 +92,13 @@
       "when": 1785951112076,
       "tag": "0012_lively_molly_hayes",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1786032689520,
+      "tag": "0013_add_skill_link_enabled_and_version_summary",
+      "breakpoints": true
     }
   ]
 }

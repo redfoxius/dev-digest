@@ -58,6 +58,10 @@ export const agentSkills = pgTable(
       .notNull()
       .references(() => skills.id, { onDelete: 'cascade' }),
     order: integer('order').notNull().default(0),
+    // Per-agent override, independent of the skill's own global `enabled`.
+    // Unchecking in the Agent Editor's Skills tab keeps the row (and its
+    // `order`) and just flips this — never deletes on uncheck.
+    enabled: boolean('enabled').notNull().default(true),
   },
   (t) => ({ pk: primaryKey({ columns: [t.agentId, t.skillId] }) }),
 );

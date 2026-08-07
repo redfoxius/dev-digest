@@ -3,7 +3,7 @@
    screen_agents.jsx. */
 "use client";
 
-import React from "react";
+import React, { Suspense } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { Button, Dropdown, ErrorState, Skeleton, Icon, Badge } from "@devdigest/ui";
 import { AppShell } from "../../../components/app-shell";
@@ -12,9 +12,17 @@ import { AgentEditor } from "./_components/AgentEditor";
 import { useAgents, useAgent, useUpdateAgent } from "../../../lib/hooks/agents";
 import { ApiError } from "../../../lib/api";
 
-const VALID_TABS = ["config"];
+const VALID_TABS = ["config", "skills"];
 
 export default function AgentEditorPage() {
+  return (
+    <Suspense fallback={<Skeleton height={24} width={240} />}>
+      <AgentEditorPageInner />
+    </Suspense>
+  );
+}
+
+function AgentEditorPageInner() {
   const params = useParams<{ id: string }>();
   const search = useSearchParams();
   const router = useRouter();
@@ -85,6 +93,7 @@ export default function AgentEditorPage() {
                 key={a.id}
                 ag={a}
                 active={a.id === id}
+                skillCount={a.skills_count}
                 onClick={() => router.push(`/agents/${a.id}?tab=${tab}`)}
                 onToggle={(enabled) => update.mutate({ id: a.id, patch: { enabled } })}
               />
