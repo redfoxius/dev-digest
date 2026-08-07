@@ -226,10 +226,10 @@ export type ConventionCandidate = z.infer<typeof ConventionCandidate>;
 /** Raw model output before evidence verification — no id/status/line-range
  *  yet (those are assigned by the server after a candidate survives). */
 export const RawConventionCandidate = z.object({
-  rule: z.string(),
+  rule: z.string().min(1),
   category: ConventionCategory,
-  evidence_path: z.string(),
-  evidence_snippet: z.string(),
+  evidence_path: z.string().min(1),
+  evidence_snippet: z.string().min(1),
   confidence: z.number().min(0).max(1),
 });
 export type RawConventionCandidate = z.infer<typeof RawConventionCandidate>;

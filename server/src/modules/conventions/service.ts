@@ -14,7 +14,6 @@ import { z } from 'zod';
 import type { Container } from '../../platform/container.js';
 import { NotFoundError, ValidationError } from '../../platform/errors.js';
 import { resolveFeatureModel } from '../settings/feature-models.js';
-import { SkillsRepository } from '../skills/repository.js';
 import { toSkillDto } from '../skills/helpers.js';
 import { ConventionsRepository, dedupKey, type InsertConvention } from './repository.js';
 import {
@@ -41,11 +40,9 @@ import { CONFIG_FILE_CANDIDATES, SAMPLE_FILE_COUNT } from './constants.js';
  */
 export class ConventionsService {
   private repo: ConventionsRepository;
-  private skillsRepo: SkillsRepository;
 
   constructor(private container: Container) {
     this.repo = new ConventionsRepository(container.db);
-    this.skillsRepo = new SkillsRepository(container.db);
   }
 
   async list(
@@ -133,7 +130,14 @@ export class ConventionsService {
           evidenceLineStart: range.start,
           evidenceLineEnd: range.end,
           confidence: candidate.confidence,
-          status: 'accepted',
+          // Unlike the deterministic config pool, `rule`/`category` here are
+          // LLM output over attacker-influenceable repo content — only
+          // `evidence_snippet` is verified against the clone, not the prose
+          // itself. Land as 'pending' so a human reviews/accepts before it
+          // can ever reach a skill (createSkillFromCandidates only bundles
+          // 'accepted' rows) and become a persistent instruction fed back
+          // into future review prompts (OWASP Agentic AI ASI09).
+          status: 'pending',
           origin: 'model',
         });
       }
@@ -216,7 +220,7 @@ export class ConventionsService {
       throw new ValidationError('No accepted candidates among the given ids');
     }
 
-    const row = await this.skillsRepo.insert({
+    const row = await this.container.skillsRepo.insert({
       workspaceId,
       name: input.name,
       description: input.description,
