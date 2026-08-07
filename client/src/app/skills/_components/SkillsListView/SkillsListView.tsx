@@ -7,7 +7,7 @@
 import React from "react";
 import { useTranslations } from "next-intl";
 import { Button, Dropdown, EmptyState, ErrorState, Skeleton, Icon, Badge, Toggle } from "@devdigest/ui";
-import { useSkills, useUpdateSkill } from "../../../../lib/hooks/skills";
+import { useSkills, useUpdateSkill, useDeleteSkill } from "../../../../lib/hooks/skills";
 import { needsVetting } from "../../../../lib/skills";
 import { ImportSkillDrawer } from "../ImportSkillDrawer";
 import { CommunitySkillsDrawer } from "../CommunitySkillsDrawer";
@@ -27,6 +27,7 @@ export function SkillsListView({
   const t = useTranslations("skills");
   const { data: skills, isLoading, isError, refetch } = useSkills();
   const update = useUpdateSkill();
+  const del = useDeleteSkill();
   const [search, setSearch] = React.useState("");
   const [importTab, setImportTab] = React.useState<"file" | "url" | null>(null);
   const [communityOpen, setCommunityOpen] = React.useState(false);
@@ -110,6 +111,20 @@ export function SkillsListView({
                     size={14}
                   />
                 </div>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (window.confirm(`Delete skill "${sk.name}"? This cannot be undone.`)) {
+                      del.mutate(sk.id);
+                    }
+                  }}
+                  disabled={del.isPending}
+                  title="Delete skill"
+                  aria-label="Delete skill"
+                  style={s.deleteButton(del.isPending)}
+                >
+                  <Icon.Trash size={13} style={del.isPending ? { animation: "ddspin 1s linear infinite" } : undefined} />
+                </button>
               </div>
               <div style={s.description}>{sk.description}</div>
               <div style={s.metaRow}>

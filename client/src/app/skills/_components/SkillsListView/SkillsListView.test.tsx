@@ -10,10 +10,12 @@ vi.mock("../ImportSkillDrawer", () => ({ ImportSkillDrawer: () => <div data-test
 vi.mock("../CommunitySkillsDrawer", () => ({ CommunitySkillsDrawer: () => <div data-testid="community-drawer" /> }));
 
 const updateMutate = vi.fn();
+const deleteMutate = vi.fn();
 let mockSkills: Skill[] = [];
 vi.mock("../../../../lib/hooks/skills", () => ({
   useSkills: () => ({ data: mockSkills, isLoading: false, isError: false, refetch: vi.fn() }),
   useUpdateSkill: () => ({ mutate: updateMutate, isPending: false }),
+  useDeleteSkill: () => ({ mutate: deleteMutate, isPending: false }),
 }));
 
 import { SkillsListView } from "./SkillsListView";
@@ -21,6 +23,7 @@ import { SkillsListView } from "./SkillsListView";
 afterEach(() => {
   cleanup();
   updateMutate.mockClear();
+  deleteMutate.mockClear();
 });
 
 const RUBRIC: Skill = {
@@ -87,6 +90,24 @@ describe("SkillsListView (smoke)", () => {
     fireEvent.click(screen.getByRole("switch"));
     expect(updateMutate).toHaveBeenCalledWith({ id: "sk1", patch: { enabled: false } });
     expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it("deletes a skill without navigating when the delete button is confirmed", () => {
+    mockSkills = [RUBRIC];
+    const onSelect = vi.fn();
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    renderWithIntl(<SkillsListView onSelect={onSelect} onNewSkill={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Delete skill" }));
+    expect(deleteMutate).toHaveBeenCalledWith("sk1");
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it("does not delete when the confirm dialog is dismissed", () => {
+    mockSkills = [RUBRIC];
+    vi.spyOn(window, "confirm").mockReturnValue(false);
+    renderWithIntl(<SkillsListView onSelect={vi.fn()} onNewSkill={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Delete skill" }));
+    expect(deleteMutate).not.toHaveBeenCalled();
   });
 
   it("shows the empty state when there are no skills", () => {
