@@ -33,7 +33,7 @@ export default function ConventionsPage() {
   const { data: indexState } = useRepoIntelStatus(repoId);
   const extract = useExtractConventions(repoId);
   const update = useUpdateConvention(repoId);
-  const [pendingId, setPendingId] = React.useState<string | null>(null);
+  const [pendingIds, setPendingIds] = React.useState<ReadonlySet<string>>(new Set());
   const [modalOpen, setModalOpen] = React.useState(false);
 
   const repoName = activeRepo?.full_name ?? repoId;
@@ -42,10 +42,17 @@ export default function ConventionsPage() {
   const hasScanned = list.length > 0 || extract.isSuccess;
 
   const setStatus = (id: string, status: "accepted" | "rejected" | "pending") => {
-    setPendingId(id);
+    setPendingIds((prev) => new Set(prev).add(id));
     update.mutate(
       { id, patch: { status } },
-      { onSettled: () => setPendingId(null) },
+      {
+        onSettled: () =>
+          setPendingIds((prev) => {
+            const next = new Set(prev);
+            next.delete(id);
+            return next;
+          }),
+      },
     );
   };
 
@@ -143,7 +150,7 @@ export default function ConventionsPage() {
               c={c}
               repoFullName={activeRepo?.full_name}
               sha={indexState?.lastIndexedSha}
-              pending={pendingId === c.id}
+              pending={pendingIds.has(c.id)}
               onAccept={() => setStatus(c.id, c.status === "accepted" ? "pending" : "accepted")}
               onReject={() => setStatus(c.id, c.status === "rejected" ? "pending" : "rejected")}
               onRuleChange={(rule) => update.mutate({ id: c.id, patch: { rule } })}
