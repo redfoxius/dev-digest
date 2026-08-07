@@ -225,6 +225,28 @@ workflow and quality bar.
   re-deriving it from memory.
   (`server/src/adapters/url-fetcher/http.ts:16`)
 
+- 2026-08-07 — Same file, FOURTH consecutive `pr-self-review` `security`
+  pass finding a new gap in `isDisallowedTarget`/`isDisallowedIPv4`: the
+  IPv6 branch never checked `::` (the "unspecified" address, IPv6's
+  analog of `0.0.0.0` — the IPv4 form was already blocked, at line 17,
+  specifically BECAUSE of the "0.0.0.0 Day" OS-level bypass class, but the
+  IPv6 twin was missed). A clean way to have caught this earlier: for
+  every IPv4 check in `isDisallowedIPv4`, ask "does IPv6 have a direct
+  analog of this?" as a checklist item, rather than reviewing the IPv6
+  branch's completeness independently. Separately (WARNING, not fixed the
+  same way): `ipv4MappedAddress` deliberately does NOT match the
+  deprecated `::a.b.c.d` (no `ffff`) IPv4-COMPATIBLE form when it appears
+  in `::<hex>:<hex>` compressed form — verified `net.isIP('::1:2')` is a
+  perfectly ordinary, valid IPv6 address bit-for-bit identical in shape to
+  a deprecated-form embedded IPv4 address, so blocking that shape
+  categorically would false-positive on real IPv6 hosts. Confirmed low
+  real-world exploitability too (modern kernels don't specially route the
+  deprecated form). Sometimes the correct fix for a WARNING is "add a test
+  proving why NOT fixing it further is the right call," not more code.
+  (`server/src/adapters/url-fetcher/http.ts:27-43,52-59`; test:
+  `url-fetcher.test.ts` — "an ordinary compressed IPv6 address... is NOT a
+  false-positive")
+
 ## Recurring Errors & Fixes
 
 - 2026-08-05 — `ReviewRunExecutor.runOneAgent()` (`run-executor.ts`) called
