@@ -120,6 +120,20 @@ export function isMarkdownFilename(filename: string): boolean {
   return ALLOWED_MARKDOWN_EXTENSIONS.some((ext) => lower.endsWith(ext));
 }
 
+// A URL with no recognized archive extension (e.g. a bare path, or a page
+// someone linked instead of a raw file) falls through to "treat the whole
+// response as markdown text" — this catches the case where that response is
+// actually a full HTML document (a rendered webpage, not a raw .md file),
+// so it doesn't silently become a skill's body verbatim. Checks only the
+// first ~1KB for a doctype/<html> tag at the top — deliberately narrow, so
+// markdown that merely contains inline HTML snippets (e.g. an example
+// `<div>` in a fenced code block) isn't false-flagged.
+const HTML_DOCUMENT_RE = /^\s*(<!doctype\s+html|<html[\s>])/i;
+
+export function looksLikeHtmlDocument(text: string): boolean {
+  return HTML_DOCUMENT_RE.test(text.slice(0, 1024));
+}
+
 export type ArchiveKind = 'zip' | 'tar' | null;
 
 /** Detect archive kind from a filename/URL path. `.tar.gz`/`.tgz`/`.tar` → 'tar'. */
