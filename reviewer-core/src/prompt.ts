@@ -39,7 +39,14 @@ const MAX_PR_DESCRIPTION_CHARS = 4000;
 export interface PromptParts {
   /** Agent's system prompt (trusted). */
   system: string;
-  /** Linked skill bodies (trusted-ish; community skills should be sanitized upstream). */
+  /**
+   * Linked skill bodies. Untrusted (a skill may originate from a file
+   * upload, a URL import, or a community catalog, not just a human typing
+   * directly into the app) — `assemblePrompt` is where that sanitization
+   * actually happens: every entry is delimiter-wrapped via `wrapUntrusted`
+   * unconditionally, regardless of source, before being joined into the
+   * `## Skills / rules` block.
+   */
   skills?: string[];
   /** Relevant memory items (trusted, curated). */
   memory?: string[];
@@ -79,14 +86,16 @@ export interface AssembledPrompt {
 
 /**
  * Assemble the messages array + the PromptAssembly record for the run trace.
- * Untrusted blocks (specs, diff) are delimiter-wrapped; the injection guard is
- * appended to the system message.
+ * Untrusted blocks (skills, specs, diff, ...) are delimiter-wrapped; the
+ * injection guard is appended to the system message.
  */
 export function assemblePrompt(parts: PromptParts): AssembledPrompt {
   const system = `${parts.system}\n\n${INJECTION_GUARD}`;
 
   const skillsBlock =
-    parts.skills && parts.skills.length > 0 ? parts.skills.join('\n\n') : undefined;
+    parts.skills && parts.skills.length > 0
+      ? parts.skills.map((s, i) => wrapUntrusted(`skill-${i}`, s)).join('\n\n')
+      : undefined;
   const memoryBlock =
     parts.memory && parts.memory.length > 0
       ? parts.memory.map((m) => `- ${m}`).join('\n')

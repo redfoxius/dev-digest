@@ -1,0 +1,241 @@
+import { describe, it, expect, afterEach, vi } from "vitest";
+import { render, screen, cleanup, fireEvent, act } from "@testing-library/react";
+import { NextIntlClientProvider } from "next-intl";
+import type { Agent, AgentSkillLink, Skill } from "@devdigest/shared";
+import messages from "../../../../../../../../messages/en/agents.json";
+
+// Mocks are read inside the vi.mock factories below (which Vitest hoists
+// above these imports), so the spies themselves must be created via
+// vi.hoisted rather than a plain module-level const. `useSkillsMock`/
+// `useAgentSkillsMock` are functions (not static objects) so individual
+// tests can override their return value (e.g. to simulate a query error).
+const { setSkillsMutate, setEnabledMutate, useSkillsMock, useAgentSkillsMock, refetchSkillsMock, refetchLinksMock } =
+  vi.hoisted(() => ({
+    setSkillsMutate: vi.fn(),
+    setEnabledMutate: vi.fn(),
+    refetchSkillsMock: vi.fn(),
+    refetchLinksMock: vi.fn(),
+    useSkillsMock: vi.fn(),
+    useAgentSkillsMock: vi.fn(),
+  }));
+
+vi.mock("../../../../../../../lib/hooks/agents", () => ({
+  useAgentSkills: useAgentSkillsMock,
+  useSetAgentSkills: () => ({ mutate: setSkillsMutate }),
+  useSetAgentSkillEnabled: () => ({ mutate: setEnabledMutate }),
+}));
+
+vi.mock("../../../../../../../lib/hooks/skills", () => ({
+  useSkills: useSkillsMock,
+}));
+
+import { SkillsTab } from "./SkillsTab";
+
+afterEach(() => {
+  cleanup();
+  setSkillsMutate.mockClear();
+  setEnabledMutate.mockClear();
+  refetchSkillsMock.mockClear();
+  refetchLinksMock.mockClear();
+});
+
+useSkillsMock.mockImplementation(() => ({
+  data: SKILLS,
+  isLoading: false,
+  isError: false,
+  refetch: refetchSkillsMock,
+}));
+useAgentSkillsMock.mockImplementation(() => ({
+  data: LINKS,
+  isLoading: false,
+  isError: false,
+  refetch: refetchLinksMock,
+}));
+
+const AGENT: Agent = {
+  id: "ag1",
+  name: "Security Reviewer",
+  description: "Flags secrets and injection",
+  provider: "openai",
+  model: "gpt-4.1",
+  system_prompt: "You are a security reviewer.",
+  output_schema: null,
+  strategy: "single-pass",
+  ci_fail_on: "critical",
+  repo_intel: true,
+  enabled: true,
+  version: 1,
+  skills_count: 1,
+};
+
+// s1: linked, enabled, manual+enabled (never needs vetting).
+// s2: linked, but the LINK is disabled; the skill itself is
+//     community-sourced and globally disabled -> needs vetting.
+// s3: never linked to this agent (appended after, sorted by name).
+const SKILLS: Skill[] = [
+  {
+    id: "s1",
+    name: "z-skill",
+    description: "",
+    type: "custom",
+    source: "manual",
+    body: "body",
+    enabled: true,
+    version: 1,
+  },
+  {
+    id: "s2",
+    name: "a-skill",
+    description: "",
+    type: "security",
+    source: "community",
+    body: "body",
+    enabled: false,
+    version: 1,
+  },
+  {
+    id: "s3",
+    name: "m-skill",
+    description: "",
+    type: "rubric",
+    source: "manual",
+    body: "body",
+    enabled: true,
+    version: 1,
+  },
+];
+
+const LINKS: AgentSkillLink[] = [
+  { agent_id: "ag1", skill_id: "s1", order: 0, enabled: true },
+  { agent_id: "ag1", skill_id: "s2", order: 1, enabled: false },
+];
+
+function renderTab() {
+  return render(
+    <NextIntlClientProvider locale="en" messages={{ agents: messages }}>
+      <SkillsTab agent={AGENT} />
+    </NextIntlClientProvider>,
+  );
+}
+
+describe("SkillsTab", () => {
+  it("merges the catalog with the agent's links: linked first (in order), then unlinked", () => {
+    renderTab();
+    const names = screen.getAllByText(/-skill$/).map((el) => el.textContent);
+    expect(names).toEqual(["z-skill", "a-skill", "m-skill"]);
+  });
+
+  it("shows the linked/total enabled count", () => {
+    renderTab();
+    // Only s1's link is enabled -> 1 of 3.
+    expect(screen.getByText("1 of 3 enabled")).toBeInTheDocument();
+  });
+
+  it("checking an unlinked skill attaches it (enabled: true)", () => {
+    renderTab();
+    const checkboxes = screen.getAllByRole("checkbox");
+    // Row order is s1, s2, s3 -> s3's checkbox is the third.
+    fireEvent.click(checkboxes[2]!);
+    expect(setEnabledMutate).toHaveBeenCalledWith({ skillId: "s3", enabled: true });
+  });
+
+  it("unchecking a linked+enabled skill detaches it (enabled: false)", () => {
+    renderTab();
+    const checkboxes = screen.getAllByRole("checkbox");
+    fireEvent.click(checkboxes[0]!); // s1
+    expect(setEnabledMutate).toHaveBeenCalledWith({ skillId: "s1", enabled: false });
+  });
+
+  it("flags a globally-unvetted skill's row but not an already-vetted one", () => {
+    renderTab();
+    expect(screen.getByText("needs vetting")).toBeInTheDocument();
+    // Exactly one row should carry the indicator (s2 only).
+    expect(screen.getAllByText("needs vetting")).toHaveLength(1);
+  });
+
+  it("dragging a row onto another calls useSetAgentSkills with the full reordered id list", () => {
+    renderTab();
+    const handles = screen.getAllByRole("button", { name: /Reorder/ });
+    // handles[2] = s3 (unlinked, currently last); drag it onto s1's row (handles[0]).
+    fireEvent.dragStart(handles[2]!, { dataTransfer: { setData: vi.fn() } });
+    fireEvent.dragOver(handles[0]!);
+    fireEvent.drop(handles[0]!);
+    expect(setSkillsMutate).toHaveBeenCalledWith(
+      ["s3", "s1", "s2"],
+      expect.objectContaining({ onSettled: expect.any(Function) }),
+    );
+  });
+
+  it("a second overlapping drag's optimistic order survives the FIRST (now-stale) mutation settling first", () => {
+    // Regression test: two drags fired before either mutation has settled.
+    // The first mutation settling must NOT clear the optimistic order set by
+    // the second, still-in-flight drag — only the LATEST drag's own settle
+    // may do that.
+    const idToName: Record<string, string> = { s1: "z-skill", s2: "a-skill", s3: "m-skill" };
+    renderTab();
+
+    // Drag 1: s3 (last handle) onto s1's row.
+    let handles = screen.getAllByRole("button", { name: /Reorder/ });
+    fireEvent.dragStart(handles[2]!, { dataTransfer: { setData: vi.fn() } });
+    fireEvent.dragOver(handles[0]!);
+    fireEvent.drop(handles[0]!);
+
+    // Drag 2 starts before drag 1's mutation settles: drag the (now-reordered)
+    // first row onto the last row.
+    handles = screen.getAllByRole("button", { name: /Reorder/ });
+    fireEvent.dragStart(handles[0]!, { dataTransfer: { setData: vi.fn() } });
+    fireEvent.dragOver(handles[2]!);
+    fireEvent.drop(handles[2]!);
+
+    expect(setSkillsMutate).toHaveBeenCalledTimes(2);
+    const [drag1Ids, opts1] = setSkillsMutate.mock.calls[0]!;
+    const [drag2Ids, opts2] = setSkillsMutate.mock.calls[1]!;
+    const drag1Order = (drag1Ids as string[]).map((id) => idToName[id]);
+    const drag2Order = (drag2Ids as string[]).map((id) => idToName[id]);
+    // The two drags must produce genuinely different orders for this test to
+    // actually distinguish "still drag 2's order" from "reverted to drag 1's".
+    expect(drag1Order).not.toEqual(drag2Order);
+
+    // Drag 1's mutation settles AFTER drag 2 already started (the race).
+    act(() => opts1.onSettled());
+    // Still showing drag 2's optimistic order — NOT drag 1's, and not yet
+    // reverted to the server order either.
+    expect(screen.getAllByText(/-skill$/).map((el) => el.textContent)).toEqual(drag2Order);
+
+    // Now drag 2 (the LATEST one) settles — this is the one allowed to clear
+    // the optimistic override, falling back to `merged` (unchanged mock data,
+    // so back to the original server order).
+    act(() => opts2.onSettled());
+    expect(screen.getAllByText(/-skill$/).map((el) => el.textContent)).toEqual([
+      "z-skill",
+      "a-skill",
+      "m-skill",
+    ]);
+  });
+
+  it("shows an error state with retry when the skills query fails, instead of a misleading empty-filter message", () => {
+    useSkillsMock.mockReturnValueOnce({
+      data: undefined,
+      isLoading: false,
+      isError: true,
+      refetch: refetchSkillsMock,
+    });
+    renderTab();
+    expect(screen.getByText("Couldn't load skills for this agent.")).toBeInTheDocument();
+    expect(screen.queryByText("No skills match this filter.")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /retry/i }));
+    expect(refetchSkillsMock).toHaveBeenCalled();
+  });
+
+  it("shows an error state when the agent-skills links query fails", () => {
+    useAgentSkillsMock.mockReturnValueOnce({
+      data: undefined,
+      isLoading: false,
+      isError: true,
+      refetch: refetchLinksMock,
+    });
+    renderTab();
+    expect(screen.getByText("Couldn't load skills for this agent.")).toBeInTheDocument();
+  });
+});

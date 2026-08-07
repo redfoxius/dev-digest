@@ -166,6 +166,11 @@ export class ReviewRunExecutor {
 
     runLog.info(`Starting review with agent "${agent.name}" (${agent.provider}/${agent.model})`);
 
+    // Resolved once per attempt (outside the try) so the catch-path trace
+    // below can reflect whatever was actually resolved before a later
+    // failure, instead of always falling back to nothing.
+    let resolvedSkills: string[] = [];
+
     try {
       // Resolve the agent's LLM provider. (container.llm throws if the provider
       // key is missing — caught below and persisted as a failed run.)
@@ -195,6 +200,19 @@ export class ReviewRunExecutor {
       const repoMap = repoIntelOn ? await this.buildRepoMapDigest(pull.repoId, runLog) : undefined;
       const rankNote = repoIntelOn ? await this.buildRankNote(pull.repoId, diff, runLog) : '';
 
+      // Agent Skills — reusable text/config blocks linked via the Agent
+      // Editor's Skills tab (docs/skills-feature-plan.md). Resolved fresh on
+      // every run (not cached) so a toggled link/skill takes effect on the
+      // very next run. Filtered on BOTH the per-agent link's `enabled` AND
+      // the skill's own global `enabled` — attaching a skill while it's
+      // still unvetted is allowed, but it only injects once both are true.
+      // Rows come back ordered ascending by `order`, so no extra sort needed.
+      const linkedSkills = await this.agents.linkedSkills(agent.id);
+      resolvedSkills = linkedSkills.filter((l) => l.enabled && l.skill.enabled).map((l) => l.skill.body);
+      if (resolvedSkills.length > 0) {
+        runLog.info(`skills: ${resolvedSkills.length} attached`);
+      }
+
       const task = taskLine(pull) + rankNote;
 
       // Phase 4 (docs/go-language-support-plan.md) — the seeded system prompts
@@ -222,6 +240,10 @@ export class ReviewRunExecutor {
         ...(callersDigest ? { callers: callersDigest } : {}),
         // T3 — repo skeleton, same omit-when-empty contract.
         ...(repoMap ? { repoMap } : {}),
+        // Agent Skills — linked + enabled skill bodies, in `order`. Omitted
+        // (not an empty array) when nothing resolved, matching the
+        // callers/repoMap omit-when-empty contract above.
+        ...(resolvedSkills.length ? { skills: resolvedSkills } : {}),
         // PR author's description/body — untrusted; assemblePrompt wraps +
         // truncates it. Omitted when the PR has no body.
         ...(pull.body ? { prDescription: pull.body } : {}),
@@ -332,7 +354,10 @@ export class ReviewRunExecutor {
         })
         .catch(() => undefined);
       await this.repo
-        .saveRunTrace(runId, this.traceFromBuffer(runId, pull, agent, '0/0 passed', Date.now() - start))
+        .saveRunTrace(
+          runId,
+          this.traceFromBuffer(runId, pull, agent, '0/0 passed', Date.now() - start, resolvedSkills),
+        )
         .catch(() => undefined);
       this.container.runBus.complete(runId);
       throw err;
@@ -437,6 +462,7 @@ export class ReviewRunExecutor {
     agent: AgentRow,
     grounding: string,
     durationMs = 0,
+    resolvedSkills: string[] = [],
   ): RunTrace {
     return {
       config: {
@@ -448,7 +474,17 @@ export class ReviewRunExecutor {
         source: 'local',
       },
       stats: { duration_ms: durationMs, tokens_in: 0, tokens_out: 0, cost_usd: null, findings: 0, grounding },
-      prompt_assembly: { system: agent.systemPrompt, skills: null, memory: null, specs: null, user: '' },
+      prompt_assembly: {
+        system: agent.systemPrompt,
+        // Reflects whatever was actually resolved before the failure (empty
+        // when none, e.g. a pre-work failure that never reached per-agent
+        // skill resolution) — was hardcoded `null` regardless, which made
+        // the failure-path trace lie about what would have been injected.
+        skills: resolvedSkills.length > 0 ? resolvedSkills.join('\n\n') : null,
+        memory: null,
+        specs: null,
+        user: '',
+      },
       tool_calls: [],
       raw_output: '',
       memory_pulled: [],

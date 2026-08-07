@@ -31,6 +31,7 @@ import type {
   AuthWorkspace,
   SecretsProvider,
   SecretKey,
+  UrlFetcher,
 } from '@devdigest/shared';
 import { parseUnifiedDiff } from './git/diff-parser.js';
 
@@ -326,5 +327,13 @@ export class MockSecretsProvider implements SecretsProvider {
   constructor(private secrets: Partial<Record<string, string>> = {}) {}
   async get(key: SecretKey): Promise<string | undefined> {
     return this.secrets[key as string];
+  }
+}
+
+/** Deterministic fake for `previewUrlImport` tests — no real network, no DNS. */
+export class MockUrlFetcher implements UrlFetcher {
+  constructor(private impl: (url: string) => Promise<Response> = async () => new Response('', { status: 404 })) {}
+  async fetch(url: string): Promise<Response> {
+    return this.impl(url);
   }
 }

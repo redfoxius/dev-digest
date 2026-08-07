@@ -2,6 +2,23 @@ import React from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
+/**
+ * Only http(s)/mailto links render as clickable — `javascript:`/`data:`
+ * hrefs (or anything unparsable) are dropped. `react-markdown` never
+ * renders raw HTML from the source by default (no `rehype-raw`), so this
+ * is defense in depth for untrusted bodies (e.g. an imported skill), not a
+ * gap in the markdown parser itself.
+ */
+function safeHref(href?: string): string | undefined {
+  if (!href) return undefined;
+  try {
+    const protocol = new URL(href, "http://x").protocol;
+    return protocol === "http:" || protocol === "https:" || protocol === "mailto:" ? href : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Markdown renderer (replaces prototype mdLite). Inline + GFM. */
 export function Markdown({ children }: { children?: string | null }) {
   if (!children) return null;
@@ -29,7 +46,12 @@ export function Markdown({ children }: { children?: string | null }) {
             </code>
           ),
           a: ({ children, href }) => (
-            <a href={href} style={{ color: "var(--accent-text)", textDecoration: "underline" }}>
+            <a
+              href={safeHref(href)}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ color: "var(--accent-text)", textDecoration: "underline" }}
+            >
               {children}
             </a>
           ),
