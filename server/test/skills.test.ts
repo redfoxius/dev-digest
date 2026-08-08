@@ -555,6 +555,12 @@ describe('SkillsService.previewFileUpload', () => {
     await expect(service.previewFileUpload(Buffer.from('hi'), 'notes.pdf')).rejects.toThrow(ValidationError);
   });
 
+  it('rejects a .md-named upload whose content is actually an HTML document', async () => {
+    const service = fakeService();
+    const html = '<!DOCTYPE html>\n<html><head><title>Not a skill</title></head><body>Hi</body></html>';
+    await expect(service.previewFileUpload(Buffer.from(html), 'page.md')).rejects.toThrow(ValidationError);
+  });
+
   it('rejects a zip decompression bomb — a small compressed upload that would expand past MAX_DECOMPRESSED_BYTES', async () => {
     // Highly-compressible content (all zeros): ~21MB decompressed collapses
     // to a few KB compressed — comfortably under MAX_ARCHIVE_BYTES (5MB) on
@@ -658,5 +664,25 @@ describe('SkillsService.previewUrlImport', () => {
     const { db } = makeFakeDb([]);
     const service = new SkillsService({ db, urlFetcher } as unknown as Container);
     await expect(service.previewUrlImport('http://169.254.169.254/')).rejects.toThrow(ValidationError);
+  });
+
+  it('rejects a URL whose response declares content-type: text/html — a rendered page, not a raw file', async () => {
+    const html = '<!DOCTYPE html><html><body>An article, not a skill</body></html>';
+    const urlFetcher = {
+      fetch: vi.fn().mockResolvedValue(new Response(html, { status: 200, headers: { 'content-type': 'text/html; charset=utf-8' } })),
+    };
+    const { db } = makeFakeDb([]);
+    const service = new SkillsService({ db, urlFetcher } as unknown as Container);
+    await expect(service.previewUrlImport('https://example.com/blog/some-post')).rejects.toThrow(ValidationError);
+  });
+
+  it('rejects HTML content sniffed from the body even when content-type lies (mislabeled as text/plain)', async () => {
+    const html = '<!DOCTYPE html>\n<html><head></head><body>Mislabeled page</body></html>';
+    const urlFetcher = {
+      fetch: vi.fn().mockResolvedValue(new Response(html, { status: 200, headers: { 'content-type': 'text/plain' } })),
+    };
+    const { db } = makeFakeDb([]);
+    const service = new SkillsService({ db, urlFetcher } as unknown as Container);
+    await expect(service.previewUrlImport('https://example.com/skills/tricky.md')).rejects.toThrow(ValidationError);
   });
 });

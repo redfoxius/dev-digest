@@ -133,6 +133,21 @@ workflow and quality bar.
   from scratch — it may already be there, written for exactly this feature.
   (`client/src/i18n/request.ts:16-25`, `client/messages/en/conventions.json`)
 
+- 2026-08-08 — Before assuming a missing feature needs new API/hook work,
+  check whether it already exists just unwired: `useDeleteSkill`
+  (`client/src/lib/hooks/skills.ts:93-102`) and its backend
+  (`DELETE /skills/:id`, `server/src/modules/skills/routes.ts:184-189`) were
+  both fully implemented with zero callers anywhere in `src/app/skills/**` —
+  the entire gap was a missing UI button. `grep -rn useDeleteSkill
+  client/src/app` before building anything new.
+
+- 2026-08-08 — Deleting a skill needs no client-side "used by N agents"
+  warning: `agent_skills.skillId` and `skill_versions.skillId` both declare
+  `onDelete: 'cascade'` (`server/src/db/schema/agents.ts:57-59`,
+  `server/src/db/schema/skills.ts:26-28`), so the DB detaches/cleans up
+  automatically on skill delete. A plain `window.confirm` is sufficient,
+  matching `AgentCard.tsx`'s existing delete-button pattern.
+
 ## Tool & Library Notes
 
 - 2026-08-06 — `Checkbox` (`src/vendor/ui/kit/Checkbox.tsx`) renders as a real
@@ -253,6 +268,16 @@ workflow and quality bar.
   violation, not the underlying conflict-resolution gap.
   (`client/src/app/skills/_components/SkillDetail/_components/ConfigTab/ConfigTab.tsx:29-33`,
   `client/src/app/skills/_components/SkillDetail/SkillDetail.tsx:45`)
+
+- 2026-08-08 — `AgentCard.tsx`'s delete-button pattern (inline trash icon +
+  `window.confirm` + mutate) has zero test coverage — `AgentCard.test.tsx`
+  has no delete/confirm test at all — despite being the established
+  precedent copied for `SkillsListView`'s new delete button
+  (`SkillsListView.test.tsx` gained two tests: confirm-accepted,
+  confirm-dismissed). Worth backfilling `AgentCard.test.tsx` with the
+  equivalent pair next time that file is touched.
+  (`client/src/app/agents/_components/AgentCard/AgentCard.tsx:41-59`,
+  `client/src/app/agents/_components/AgentCard/AgentCard.test.tsx`)
 
 ## Session Notes
 

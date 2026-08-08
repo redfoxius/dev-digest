@@ -85,6 +85,7 @@ function SkillDetailPageInner() {
             activeId={isNew ? undefined : id}
             onSelect={(sid) => router.push(`/skills/${sid}`)}
             onNewSkill={() => router.push("/skills/new")}
+            onActiveDeleted={() => router.push("/skills")}
           />
         </div>
         {!isNew && (isLoading || !skill) ? (

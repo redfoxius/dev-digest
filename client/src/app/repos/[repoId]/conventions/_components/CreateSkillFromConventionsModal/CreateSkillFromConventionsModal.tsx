@@ -40,18 +40,31 @@ export function CreateSkillFromConventionsModal({
   const [body, setBody] = React.useState("");
   const [type, setType] = React.useState<SkillType>("convention");
   const [enabled, setEnabled] = React.useState(true);
-  const requested = React.useRef(false);
 
   React.useEffect(() => {
-    if (requested.current || candidateIds.length === 0) return;
-    requested.current = true;
+    if (candidateIds.length === 0) return;
+    // `active` (not a skip-once ref) — a ref-guarded "only call mutate once"
+    // pattern drops the draft entirely under React Strict Mode's dev-only
+    // double-invoke: the guard blocks the SECOND effect run from firing a
+    // real request, but the FIRST run's mutation subscription is exactly
+    // what Strict Mode tears down via cleanup before the response lands, so
+    // its onSuccess never fires and the form stays empty. Letting both
+    // invocations call mutate (cheap — buildSkillDraft is a pure in-memory
+    // merge, no LLM call) and gating the STATE UPDATE on this closure-local
+    // flag instead means whichever invocation is still mounted when the
+    // response arrives is the one that applies it.
+    let active = true;
     draft.mutate(candidateIds, {
       onSuccess: (data) => {
+        if (!active) return;
         setName(data.name);
         setDescription(data.description);
         setBody(data.body);
       },
     });
+    return () => {
+      active = false;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [candidateIds]);
 
@@ -91,58 +104,60 @@ export function CreateSkillFromConventionsModal({
         </div>
       }
     >
-      <div style={s.banner}>
-        <Icon.Sparkles size={15} style={{ flexShrink: 0, marginTop: 1 }} />
-        <span>
-          Merged from {candidateIds.length} accepted convention{candidateIds.length === 1 ? "" : "s"} in{" "}
-          <strong>{repoLabel}</strong>. Everything below is editable before you save.
-        </span>
-      </div>
+      <div style={s.body}>
+        <div style={s.banner}>
+          <Icon.Sparkles size={15} style={{ flexShrink: 0, marginTop: 1 }} />
+          <span>
+            Merged from {candidateIds.length} accepted convention{candidateIds.length === 1 ? "" : "s"} in{" "}
+            <strong>{repoLabel}</strong>. Everything below is editable before you save.
+          </span>
+        </div>
 
-      <div style={s.field}>
-        <FormField label="Name" required>
-          <TextInput value={name} onChange={setName} placeholder="repo-conventions" mono />
-        </FormField>
-      </div>
-      <div style={s.field}>
-        <FormField label="Description">
-          <TextInput value={description} onChange={setDescription} placeholder="What this skill covers" />
-        </FormField>
-      </div>
-      <div style={s.row}>
-        <div style={{ ...s.field, flex: 1 }}>
-          <FormField label="Type">
-            <SelectInput
-              value={type}
-              onChange={(v) => setType(v as SkillType)}
-              options={SKILL_TYPES.map((v) => ({ value: v, label: v }))}
-            />
+        <div style={s.field}>
+          <FormField label="Name" required>
+            <TextInput value={name} onChange={setName} placeholder="repo-conventions" mono />
           </FormField>
         </div>
-        <label style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
-          Enabled
-          <Toggle on={enabled} onChange={setEnabled} size={16} />
-        </label>
-      </div>
-
-      <FormField label="Skill body" required>
-        <div style={s.editorFrame}>
-          <div style={s.editorTitleBar}>
-            <Icon.FileText size={13} style={{ color: "var(--text-muted)" }} />
-            <span className="mono">{(name || "skill").trim() || "skill"}.md</span>
-            <span style={s.tokenCount}>{Math.ceil(body.length / 4)} tokens</span>
-          </div>
-          <CodeEditor
-            value={body}
-            language="markdown"
-            onChange={(e) => setBody(e.target.value)}
-            padding={12}
-            minHeight={260}
-            data-color-mode={theme}
-            style={{ fontFamily: "var(--font-mono, monospace)", fontSize: 13 }}
-          />
+        <div style={s.field}>
+          <FormField label="Description">
+            <TextInput value={description} onChange={setDescription} placeholder="What this skill covers" />
+          </FormField>
         </div>
-      </FormField>
+        <div style={s.row}>
+          <div style={{ ...s.field, flex: 1 }}>
+            <FormField label="Type">
+              <SelectInput
+                value={type}
+                onChange={(v) => setType(v as SkillType)}
+                options={SKILL_TYPES.map((v) => ({ value: v, label: v }))}
+              />
+            </FormField>
+          </div>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
+            Enabled
+            <Toggle on={enabled} onChange={setEnabled} size={16} />
+          </label>
+        </div>
+
+        <FormField label="Skill body" required>
+          <div style={s.editorFrame}>
+            <div style={s.editorTitleBar}>
+              <Icon.FileText size={13} style={{ color: "var(--text-muted)" }} />
+              <span className="mono">{(name || "skill").trim() || "skill"}.md</span>
+              <span style={s.tokenCount}>{Math.ceil(body.length / 4)} tokens</span>
+            </div>
+            <CodeEditor
+              value={body}
+              language="markdown"
+              onChange={(e) => setBody(e.target.value)}
+              padding={12}
+              minHeight={260}
+              data-color-mode={theme}
+              style={{ fontFamily: "var(--font-mono, monospace)", fontSize: 13 }}
+            />
+          </div>
+        </FormField>
+      </div>
     </Modal>
   );
 }

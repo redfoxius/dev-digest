@@ -20,6 +20,7 @@ import {
   extractMarkdownFromEntries,
   fileStem,
   isMarkdownFilename,
+  looksLikeHtmlDocument,
   restoreSummary,
   toSkillDto,
   toSkillVersionDto,
@@ -202,6 +203,9 @@ export class SkillsService {
 
     if (isMarkdownFilename(filename)) {
       const body = buffer.toString('utf8');
+      if (looksLikeHtmlDocument(body)) {
+        throw new ValidationError(`${filename} looks like an HTML document, not markdown`);
+      }
       const name = deriveSkillNameFromBody(body) ?? fileStem(filename);
       return { name, description: '', type: 'custom', body, ignored_files: [], evidence_files: [] };
     }
@@ -259,6 +263,16 @@ export class SkillsService {
     if (!res.ok) {
       throw new ExternalServiceError(`Failed to fetch ${url}: HTTP ${res.status}`);
     }
+    // A rendered webpage (someone linking the article instead of the raw
+    // file) declares this honestly almost always — reject before spending
+    // the read/decompress budget on it. Content sniffing below is the
+    // backstop for a server that mislabels it.
+    const contentType = res.headers.get('content-type') ?? '';
+    if (/\btext\/html\b|\bapplication\/xhtml\+xml\b/i.test(contentType)) {
+      throw new ValidationError(
+        `${url} returned HTML (content-type: ${contentType}), not a markdown/plain-text skill — link the raw file, not a rendered page`,
+      );
+    }
 
     const buffer = await readBodyWithLimit(res, url);
 
@@ -270,6 +284,9 @@ export class SkillsService {
       // No recognized archive extension → treat the whole response as markdown
       // text (covers `.md` URLs and plain-text pages alike).
       const body = buffer.toString('utf8');
+      if (looksLikeHtmlDocument(body)) {
+        throw new ValidationError(`${url} looks like an HTML document, not markdown`);
+      }
       const name = deriveSkillNameFromBody(body) ?? (fileStem(filename) || 'Imported skill');
       return { name, description: '', type: 'custom', body, ignored_files: [], evidence_files: [] };
     }
