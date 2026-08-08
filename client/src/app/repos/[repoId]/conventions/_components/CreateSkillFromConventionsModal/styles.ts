@@ -2,6 +2,11 @@ import type { CSSProperties } from "react";
 
 /** Co-located styles for CreateSkillFromConventionsModal. */
 export const s = {
+  // Modal's own content wrapper (kit/Modal.tsx) has zero padding by design —
+  // every OTHER modal in the app (e.g. CreateAgentModal) wraps its content in
+  // its own `padding: 24` div; this one didn't, so fields sat flush against
+  // the modal's edges with no breathing room.
+  body: { padding: 24 } satisfies CSSProperties,
   banner: {
     display: "flex",
     alignItems: "flex-start",

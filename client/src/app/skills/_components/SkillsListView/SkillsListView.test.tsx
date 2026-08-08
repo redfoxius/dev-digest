@@ -10,10 +10,15 @@ vi.mock("../ImportSkillDrawer", () => ({ ImportSkillDrawer: () => <div data-test
 vi.mock("../CommunitySkillsDrawer", () => ({ CommunitySkillsDrawer: () => <div data-testid="community-drawer" /> }));
 
 const updateMutate = vi.fn();
+// Default: behaves like a resolved mutation (calls onSuccess synchronously) —
+// realistic enough to exercise onActiveDeleted, and matches the shape every
+// test needs except the ones that don't care about onSuccess at all.
+const deleteMutate = vi.fn((_id: string, opts?: { onSuccess?: () => void }) => opts?.onSuccess?.());
 let mockSkills: Skill[] = [];
 vi.mock("../../../../lib/hooks/skills", () => ({
   useSkills: () => ({ data: mockSkills, isLoading: false, isError: false, refetch: vi.fn() }),
   useUpdateSkill: () => ({ mutate: updateMutate, isPending: false }),
+  useDeleteSkill: () => ({ mutate: deleteMutate, isPending: false }),
 }));
 
 import { SkillsListView } from "./SkillsListView";
@@ -21,6 +26,7 @@ import { SkillsListView } from "./SkillsListView";
 afterEach(() => {
   cleanup();
   updateMutate.mockClear();
+  deleteMutate.mockClear();
 });
 
 const RUBRIC: Skill = {
@@ -87,6 +93,59 @@ describe("SkillsListView (smoke)", () => {
     fireEvent.click(screen.getByRole("switch"));
     expect(updateMutate).toHaveBeenCalledWith({ id: "sk1", patch: { enabled: false } });
     expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it("shows an in-app confirm dialog (not window.confirm) and deletes on confirm", () => {
+    mockSkills = [RUBRIC];
+    const onSelect = vi.fn();
+    renderWithIntl(<SkillsListView onSelect={onSelect} onNewSkill={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete skill" }));
+    expect(deleteMutate).not.toHaveBeenCalled();
+    expect(screen.getByText(/pr-quality-rubric/, { selector: "strong" })).toBeInTheDocument();
+    expect(screen.getByText(/This cannot be undone/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    expect(deleteMutate).toHaveBeenCalledWith("sk1", expect.anything());
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it("does not delete when the confirm dialog is cancelled, and closes it", () => {
+    mockSkills = [RUBRIC];
+    renderWithIntl(<SkillsListView onSelect={vi.fn()} onNewSkill={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete skill" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(deleteMutate).not.toHaveBeenCalled();
+    expect(screen.queryByText(/This cannot be undone/)).not.toBeInTheDocument();
+  });
+
+  it("calls onActiveDeleted when the deleted skill is the one currently open (activeId)", () => {
+    mockSkills = [RUBRIC];
+    const onActiveDeleted = vi.fn();
+    renderWithIntl(
+      <SkillsListView onSelect={vi.fn()} onNewSkill={vi.fn()} activeId="sk1" onActiveDeleted={onActiveDeleted} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Delete skill" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    expect(onActiveDeleted).toHaveBeenCalled();
+  });
+
+  it("does not call onActiveDeleted when the deleted skill is NOT the one currently open", () => {
+    mockSkills = [RUBRIC];
+    const onActiveDeleted = vi.fn();
+    renderWithIntl(
+      <SkillsListView
+        onSelect={vi.fn()}
+        onNewSkill={vi.fn()}
+        activeId="some-other-skill-id"
+        onActiveDeleted={onActiveDeleted}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Delete skill" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    expect(onActiveDeleted).not.toHaveBeenCalled();
   });
 
   it("shows the empty state when there are no skills", () => {

@@ -36,7 +36,13 @@ export default function ConventionsPage() {
   const [pendingIds, setPendingIds] = React.useState<ReadonlySet<string>>(new Set());
   const [modalOpen, setModalOpen] = React.useState(false);
 
-  const repoName = activeRepo?.full_name ?? repoId;
+  // Server render always has `activeRepo: null` (it comes from a client-only
+  // useRepos() query) — gating the friendly name behind a post-mount flag
+  // keeps the FIRST client paint byte-identical to the server's, so React
+  // never has to discard and regenerate this subtree during hydration.
+  const [mounted, setMounted] = React.useState(false);
+  React.useEffect(() => setMounted(true), []);
+  const repoName = mounted ? (activeRepo?.full_name ?? repoId) : repoId;
   const list = candidates ?? [];
   const acceptedIds = list.filter((c) => c.status === "accepted").map((c) => c.id);
   const hasScanned = list.length > 0 || extract.isSuccess;
