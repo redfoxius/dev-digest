@@ -16,15 +16,15 @@ import { NotFoundError, ValidationError } from '../../platform/errors.js';
 import { resolveFeatureModel } from '../settings/feature-models.js';
 import { toSkillDto } from '../skills/helpers.js';
 import { ConventionsRepository, dedupKey, type InsertConvention } from './repository.js';
+import { buildSkillBody, findEvidenceLineRange, slugifyRule, toConventionDto } from './helpers.js';
 import {
-  buildSkillBody,
-  findEvidenceLineRange,
+  allConfigFileCandidates,
   parseConfigFile,
-  slugifyRule,
-  toConventionDto,
+  languageForConfigFile,
   type ConfigCandidateDraft,
-} from './helpers.js';
-import { CONFIG_FILE_CANDIDATES, SAMPLE_FILE_COUNT } from './constants.js';
+} from './langs/index.js';
+import { SAMPLE_FILE_COUNT } from './constants.js';
+import { languageIdForFile } from '../repo-intel/languages/index.js';
 
 /**
  * Conventions service. `extract()` runs two independent candidate pools per
@@ -49,7 +49,11 @@ export class ConventionsService {
   async list(
     workspaceId: string,
     repoId: string,
-    filters?: { status?: ConventionCandidate['status']; category?: ConventionCandidate['category'] },
+    filters?: {
+      status?: ConventionCandidate['status'];
+      category?: ConventionCandidate['category'];
+      language?: string;
+    },
   ): Promise<ConventionCandidate[]> {
     const rows = await this.repo.list(workspaceId, repoId, filters ?? {});
     return rows.map(toConventionDto);
@@ -72,7 +76,7 @@ export class ConventionsService {
 
     // ---- Pool 1: deterministic config-derived candidates (no model call) --
     const configDrafts: ConfigCandidateDraft[] = [];
-    for (const candidatePath of CONFIG_FILE_CANDIDATES) {
+    for (const candidatePath of allConfigFileCandidates()) {
       const content = await this.container.repoIntel.getFileContent(repoId, candidatePath);
       if (content == null) continue;
       sampleFileCount++;
@@ -94,11 +98,21 @@ export class ConventionsService {
         confidence: draft.confidence,
         status: 'accepted',
         origin: 'config',
+        // Derived from which pack matched the config filename, NOT
+        // languageIdForFile (config filenames have no registered source
+        // extension) — see languageForConfigFile's doc comment.
+        language: languageForConfigFile(draft.evidence_path),
       });
     }
 
     // ---- Pool 2: cheap-model candidates over top-ranked sample files ------
-    const sampleFiles = await this.container.repoIntel.getConventionSamples(repoId, SAMPLE_FILE_COUNT);
+    // Stratified by language (Phase 7.3, docs/go-language-support-plan.md) —
+    // plain top-rank sampling can crowd a less-central language's files
+    // entirely out of a mixed-language repo's sample.
+    const sampleFiles = await this.container.repoIntel.getConventionSamplesStratified(
+      repoId,
+      SAMPLE_FILE_COUNT,
+    );
     const sampleContents: { file: string; content: string }[] = [];
     for (const file of sampleFiles) {
       const content = await this.container.repoIntel.getFileContent(repoId, file);
@@ -140,6 +154,9 @@ export class ConventionsService {
           // into future review prompts (OWASP Agentic AI ASI09).
           status: 'pending',
           origin: 'model',
+          // Real indexed source file — languageIdForFile is the correct
+          // (and, unlike languageForConfigFile, applicable) derivation here.
+          language: languageIdForFile(candidate.evidence_path),
         });
       }
     }

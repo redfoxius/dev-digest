@@ -34,6 +34,11 @@ export const s = {
     fontSize: 13,
     color: "var(--text-muted)",
   } satisfies CSSProperties,
+  languageFilter: {
+    display: "flex",
+    alignItems: "center",
+    gap: 4,
+  } satisfies CSSProperties,
   toolbarRight: {
     marginLeft: "auto",
   } satisfies CSSProperties,

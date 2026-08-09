@@ -14,7 +14,7 @@ import { ConventionsService } from './service.js';
 /**
  * Conventions module — Conventions Extractor (see docs/conventions-extractor-plan.md).
  *   POST   /repos/:id/conventions/extract        → run extraction (sync — one LLM call over ≤15 files)
- *   GET    /repos/:id/conventions                 → list (filterable by status/category)
+ *   GET    /repos/:id/conventions                 → list (filterable by status/category/language)
  *   PATCH  /conventions/:id                       → edit rule/category or accept/reject
  *   POST   /repos/:id/conventions/skill-draft     → prefilled, editable skill draft from accepted candidates
  *   POST   /repos/:id/conventions/skill           → persist the skill (source: 'extracted')
@@ -25,6 +25,17 @@ const RepoIdParams = z.object({ id: z.string().uuid() });
 const ListConventionsQuery = z.object({
   status: ConventionStatus.optional(),
   category: ConventionCategory.optional(),
+  // Deliberately z.string(), not a z.enum() of registered language ids
+  // (unlike status/category, both genuinely fixed small vocabularies) —
+  // the valid set is `repo-intel/languages/index.ts`'s LANGUAGES registry,
+  // which is meant to grow as new language packs are added (Phase 7,
+  // docs/go-language-support-plan.md). Hardcoding an enum here would
+  // duplicate that registry in the shared-contracts package and need
+  // editing every time a language pack is added — exactly the
+  // "language list lives in N places" problem this plan exists to close.
+  // An unrecognized value degrades safely to zero results (a plain `eq()`
+  // filter), never a crash or a validation error.
+  language: z.string().optional(),
 });
 
 const SkillDraftBody = z.object({ candidate_ids: z.array(z.string()).min(1) });

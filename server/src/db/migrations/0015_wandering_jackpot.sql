@@ -1,0 +1,1 @@
+ALTER TABLE "conventions" ADD COLUMN "language" text;

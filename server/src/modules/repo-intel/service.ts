@@ -51,9 +51,10 @@ import {
   REFRESH_JOB_KIND,
   RESYNC_JOB_KIND,
 } from './constants.js';
-import { SUPPORTED_EXT, languageIdForFile } from './languages/index.js';
+import { SUPPORTED_EXT, languageIdForFile, isLanguageTestFile } from './languages/index.js';
 import { runFullIndex, type IndexPayload } from './pipeline/full.js';
 import { runIncremental } from './pipeline/incremental.js';
+import { stratifyByLanguage } from './pipeline/sample.js';
 
 /**
  * GLOBALS allowlist — common builtins + runtime that appear as bare
@@ -666,6 +667,30 @@ export class RepoIntelService implements RepoIntel {
     return this.getTopFilesByRank(repoId, n);
   }
 
+  /**
+   * Language-stratified variant of `getConventionSamples` — Phase 7.3 of
+   * docs/go-language-support-plan.md. Plain top-rank sampling has no
+   * per-language quota, so in a mixed-language repo a structurally more
+   * central language's files can crowd a less-central one entirely out of
+   * the sample (confirmed as a real risk, not just theoretical, by
+   * `conventions-go.it.test.ts`'s empirical checks). Fetches one ranked-path
+   * page (same over-fetch as `getTopFilesByRank`) and delegates the actual
+   * reservation math to the pure, hermetically-unit-tested
+   * `stratifyByLanguage` (`pipeline/sample.ts`) rather than N+1 separate
+   * per-language DB round-trips. Degrades to plain `getTopFilesByRank` for
+   * 0-1 detected languages, where stratification would be a no-op anyway.
+   */
+  async getConventionSamplesStratified(repoId: string, n: number): Promise<string[]> {
+    if (!this.container.config.repoIntelEnabled) return [];
+    if (n <= 0) return [];
+    const { languages } = await this.getIndexState(repoId);
+    if (languages.length <= 1) return this.getTopFilesByRank(repoId, n);
+
+    const rows = await this.repo.getRankedPaths(repoId, Math.max(n * 10, 100));
+    const ranked = rows.map((r) => r.path).filter((p) => !isJunkPath(p));
+    return stratifyByLanguage(ranked, languages, n, languageIdForFile);
+  }
+
   /** One file's content from the repo's clone, or null if absent/unindexed. */
   async getFileContent(repoId: string, file: string): Promise<string | null> {
     const repo = await this.repo.getRepoBasics(repoId);
@@ -675,8 +700,8 @@ export class RepoIntelService implements RepoIntel {
 
   /**
    * Top-N file paths by rank DESC, dropping tests/configs/migrations and any
-   * caller-supplied `exclude` substrings. Over-fetches by 10× before filtering
-   * so the post-filter still yields N where possible.
+   * caller-supplied `exclude` substrings. Over-fetches by 10× before
+   * filtering so the post-filter still yields N where possible.
    */
   async getTopFilesByRank(
     repoId: string,
@@ -771,7 +796,12 @@ const JUNK_PATH_PATTERNS = [
 
 function isJunkPath(path: string): boolean {
   const lower = path.toLowerCase();
-  return JUNK_PATH_PATTERNS.some((p) => lower.includes(p));
+  if (JUNK_PATH_PATTERNS.some((p) => lower.includes(p))) return true;
+  // Substring patterns above only cover TS/JS's dot-based test naming
+  // (`.test.`/`.spec.`) — a language whose convention isn't substring-shaped
+  // (Go's colocated `_test.go` suffix) registers its own predicate instead.
+  // See Phase 7.5 of docs/go-language-support-plan.md.
+  return isLanguageTestFile(path);
 }
 
 /** Enclosing top-level (bare-name) symbol for a line, from persistent rows. */
