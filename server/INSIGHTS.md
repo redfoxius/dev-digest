@@ -15,6 +15,21 @@ workflow and quality bar.
 
 ## What Doesn't Work
 
+- 2026-08-09 — Deriving a config-derived convention candidate's `language`
+  via `languageIdForFile(evidence_path)` is wrong: that function resolves by
+  SOURCE-file extension (`.ts`, `.go`), but config filenames (`tsconfig.json`,
+  `go.mod`, `.golangci.yml`) have no registered source extension, so it
+  silently returns `null` for every config-origin candidate — exactly the
+  pool where the field matters most (highest-confidence, always-`accepted`).
+  Fixed with a second, pack-aware helper (`languageForConfigFile`,
+  `conventions/langs/index.ts`) that returns whichever pack's `id` matched
+  the filename, instead of re-deriving from an extension that isn't there.
+  Before adding a "language" field to anything keyed by a config file path
+  (not a source file path), check whether the extension-based registry
+  lookup even applies — it doesn't for config filenames.
+  (`server/src/modules/conventions/service.ts`,
+  `server/src/modules/conventions/langs/index.ts:languageForConfigFile`)
+
 ## Codebase Patterns
 
 - 2026-08-05 — `multi_agent_runs` (`server/src/db/schema/runs.ts`) sat in the
@@ -152,7 +167,54 @@ workflow and quality bar.
   repository already supports it.
   (`server/src/modules/conventions/service.ts` `createSkillFromCandidates`)
 
+- 2026-08-09 — When a DB-reading service method needs real, verifiable
+  computation (ranking, stratification, any non-trivial algorithm), split
+  the algorithm into a pure function in `pipeline/*.ts` (input arrays/
+  values in, result out — no DB, no `this`) and keep the service method as
+  a thin fetch-then-delegate wrapper. Mirrors `pipeline/rank.ts`'s existing
+  split of PageRank out of its DB wrapper; followed again for
+  `pipeline/sample.ts`'s `stratifyByLanguage`. Makes the actual logic
+  hermetically unit-testable (`repo-intel-sample.test.ts`) without a
+  repository stub or Postgres, and sidesteps subtle real-world flakiness
+  (see the `DepCruiseGraph` macOS entry below) a DB/real-pipeline-backed
+  test would otherwise be at the mercy of.
+  (`server/src/modules/repo-intel/pipeline/sample.ts`,
+  `server/src/modules/repo-intel/service.ts:getConventionSamplesStratified`)
+
 ## Tool & Library Notes
+
+- 2026-08-09 — `DepCruiseGraph.buildEdges`
+  (`server/src/adapters/depgraph/index.ts`) silently returns ZERO edges for
+  any fixture rooted under `os.tmpdir()` on macOS. `/tmp` and `/var` are
+  themselves symlinks to `/private/tmp`/`/private/var` on macOS;
+  dependency-cruiser's resolver canonicalizes (realpaths) a dependency's
+  RESOLVED path but not the ENTRY file paths passed into `cruise()`, so
+  `toRel(root, dep.resolved)` produces a long `../../private/...` escape
+  that never matches `fileSet`, and every edge is dropped as "not a local
+  file" — with no error surfaced (the adapter's own try/catch is built to
+  degrade silently on a broken tsconfig, which hides this failure mode
+  too). No existing test caught this because nothing exercised the real
+  `DepCruiseGraph` against a real on-disk fixture before —
+  `depgraph-go.test.ts` only covers `GoDepGraph` (its own resolver,
+  unaffected), `indexer-pipeline.test.ts`'s stub replaces `depgraph`
+  entirely. Confirmed via a standalone repro (`cruise()` called directly
+  against a `/tmp`-rooted fixture — `source` stayed `/tmp/...`, `resolved`
+  came back `/private/tmp/...`). **Not fixed** (out of scope for the
+  session that found it) — a real correctness gap worth its own follow-up.
+  Any new test needing a real, ranked TS fixture should seed
+  `file_rank`/`file_edges` rows directly instead of depending on
+  `runFullIndex` + dependency-cruiser on macOS.
+  (`server/src/adapters/depgraph/index.ts`,
+  `server/test/repo-intel-sample.it.test.ts`)
+
+- 2026-08-09 — Addendum to the 2026-08-07 `drizzle-kit generate` entry
+  below: a single-column, add-only schema diff (migration `0015`,
+  `conventions.language`) generated cleanly with NO interactive prompt —
+  the prompt only triggers when a diff has both an addition AND a
+  removal/rename to disambiguate in the same table. Safe to run
+  `pnpm db:generate` normally for a pure `ADD COLUMN`; only fall back to
+  hand-writing the migration+snapshot when the diff also drops/renames a
+  column. (`server/src/db/migrations/0015_wandering_jackpot.sql`)
 
 - 2026-08-06 — `adm-zip@0.6.0`'s own `entry.getData()` ALREADY caps
   decompression output via `zlib.inflateRawSync(compressed, {
@@ -482,3 +544,20 @@ workflow and quality bar.
   Phase 6 complete, not after. Also created the skill itself this session
   (`.claude/skills/add-language-support/`), the first non-course-provided
   project skill authored from this repo's own findings.
+
+- 2026-08-09 — Implemented Phase 7 of `docs/go-language-support-plan.md`
+  (Conventions Extractor multi-language support, all 5 sub-phases 7.1-7.5)
+  on `feat/conventions-multilang`, following up a separate plan-only PR
+  (#12, `docs/conventions-extractor-multilang-plan`) that did the
+  root-cause analysis first. Same "verify empirically, don't trust the
+  analysis as written" discipline as the original Go implementation: 7.3's
+  empirical checks (real DB, real `repoIntel`, not `conventions.it.test.ts`'s
+  `FakeRepoIntel`) confirmed one predicted gap was real (`_test.go` leaking
+  into samples) and one predicted risk was NOT a bug (the model pool already
+  worked on Go) — both findings changed the actual scope of 7.2/7.5 versus
+  what the plan alone would have suggested. Two genuine architecture/
+  dependency decisions (gofmt handling, YAML dependency choice) were
+  resolved via `AskUserQuestion` mid-session rather than picked
+  unilaterally, per the plan's own "Open Questions" flagging them as
+  undecided. Full suite (server 281 unit + 62 integration, client 121)
+  green at every phase boundary, each phase committed separately.
