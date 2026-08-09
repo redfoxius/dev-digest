@@ -11,7 +11,7 @@ import { ConventionCategory } from '@devdigest/shared';
 /** The fixed category vocabulary (mirrors the shared `ConventionCategory` enum). */
 export const CONVENTION_CATEGORIES = ConventionCategory.options;
 
-/** Top-N ranked files sampled per extraction, via `repoIntel.getConventionSamples`. */
+/** Top-N ranked files sampled per extraction, via `repoIntel.getConventionSamplesStratified`. */
 export const SAMPLE_FILE_COUNT = 12;
 
 /** Fuzzy line-window match threshold (token-overlap ratio) for evidence verification. */

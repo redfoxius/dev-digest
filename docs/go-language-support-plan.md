@@ -774,3 +774,81 @@ Both of Phase 7.5's questions are now answered ("is this real" — yes) so
 that phase is ready to build without a further empirical gate; 7.2 (Go
 config pool) still needs the Open Questions below resolved first (YAML
 dependency choice, gofmt handling) before its parser code is written.
+
+## Implementation notes — Phase 7.5, 7.2, 7.3 (this iteration, continued)
+
+**Status: 7.5 done. 7.2 done (both open questions resolved with the user:
+skip gofmt for v1, add a real `yaml` dependency rather than hand-roll a
+regex extractor). 7.3 done.**
+
+**7.5** — `isTestFile?(file: string)` added to `LanguageDef`
+(`repo-intel/languages/index.ts`), with Go's entry set to
+`file.endsWith('_test.go')`; a new `isLanguageTestFile()` dispatches through
+the existing `languageIdForFile` lookup (same shape as
+`PHANTOM_GLOBALS_BY_LANGUAGE`). `isJunkPath` (`repo-intel/service.ts`) now
+checks it after the generic `JUNK_PATH_PATTERNS` substrings. Chosen over a
+one-off `_test.go` substring pattern specifically for the "any future
+language" part of this ask — a 3rd language with its own non-dot test-file
+convention registers its own predicate instead of growing `isJunkPath`
+again. `conventions-go.it.test.ts`'s previously-pinned KNOWN GAP test now
+asserts the fixed behavior.
+
+**7.2** — new `server/src/modules/conventions/langs/go.ts`:
+`parseGoModDirectives` (the `go 1.x` version directive → one
+`'type-safety'` candidate; no module-path candidate — a module path is an
+identifier, not a house convention) and `parseGolangciLint` (`linters.
+enable` list → one candidate per enabled linter, via a
+`GOLANGCI_LINT_CATEGORY_MAP` mirroring `ESLINT_RULE_CATEGORY_MAP`). Real
+YAML parsing via the new `yaml` npm dependency (added to `server/
+package.json`, no native/postinstall build-script approval needed) — the
+user's call, reasoning that golangci-lint configs use real YAML features a
+flat-object regex extractor (this module's existing approach for JS
+configs) would likely mis-parse. `.golangci.toml` intentionally not probed
+(YAML only, per the same decision) and gofmt intentionally has no
+candidate at all (no config file exists to anchor its evidence to, which
+would've broken every other config-origin candidate's "evidence IS the
+config file" invariant — the user's call, also reasoned as arguably out of
+scope since gofmt is a language-wide standard, not a house choice).
+
+**7.3** — two deliverables, one algorithmic and one about test design:
+- `stratifyByLanguage` (new `repo-intel/pipeline/sample.ts`) is a **pure**
+  function (ranked paths in, reservation math out) rather than the N+1-
+  DB-round-trip version first sketched — mirrors `pipeline/rank.ts`'s
+  existing split of pure PageRank computation out of its DB-reading
+  service wrapper, and makes the reservation math hermetically unit-
+  testable (`repo-intel-sample.test.ts`) without depending on real
+  PageRank tie-breaking. `RepoIntelService.getConventionSamplesStratified`
+  does one `getRankedPaths` fetch + one `getIndexState` call and delegates.
+  `ConventionsService.extract()` now calls this instead of plain
+  `getConventionSamples`.
+- **Real bug found while building the DB-backed wiring test, unrelated to
+  Phase 7 but worth recording**: `DepCruiseGraph.buildEdges`
+  (`server/src/adapters/depgraph/index.ts`) silently returns **zero edges**
+  for any fixture rooted under `os.tmpdir()` on macOS. `/tmp` and `/var`
+  are themselves symlinks to `/private/tmp`/`/private/var` on macOS;
+  dependency-cruiser's resolver realpath's a dependency's *resolved* path
+  but not the *entry* file paths passed into `cruise()`, so `toRel(root,
+  dep.resolved)` produces a long `../../private/...` escape that never
+  matches `fileSet`, and every edge is dropped as "not a local file" —
+  with no error surfaced (the adapter's own try/catch is designed to
+  degrade silently on a broken tsconfig, which makes this failure mode
+  doubly invisible). No existing test caught this because no test exercised
+  the real `DepCruiseGraph` against a real on-disk fixture before now —
+  `depgraph-go.test.ts` only covers `GoDepGraph` (its own hand-rolled
+  resolver, unaffected), and `indexer-pipeline.test.ts`'s in-memory stub
+  replaces `depgraph` entirely (`buildEdges: async () => []`). Worked
+  around here by seeding `file_rank`/`repo_index_state` rows directly in
+  `repo-intel-sample.it.test.ts` rather than depending on a real
+  `runFullIndex` + dependency-cruiser pass — kept the fix itself **out of
+  scope** for this iteration (a TS/JS depgraph correctness bug, not a
+  multi-language-conventions concern) rather than folding an unrelated fix
+  into this PR; worth its own follow-up.
+
+Tests this iteration: `repo-intel-sample.test.ts` (hermetic, 5 cases
+including the crowd-out scenario), `repo-intel-sample.it.test.ts` (3 cases,
+real Postgres, proves the `getIndexState`/`getRankedPaths` wiring),
+`conventions.test.ts` gained `parseGoModDirectives`/`parseGolangciLint`
+coverage, `conventions-go.it.test.ts` gained a config-pool case, `languages.
+test.ts` gained `isLanguageTestFile` coverage, `repo-intel-facade-degraded.
+test.ts` gained a `getConventionSamplesStratified` degraded-state case.
+Full suite: 277 unit + 62 integration tests green.
