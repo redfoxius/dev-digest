@@ -112,7 +112,14 @@ export function parseGolangciLint(content: string, filePath: string): ConfigCand
   const out: ConfigCandidateDraft[] = [];
   for (const name of enabled) {
     if (typeof name !== 'string') continue;
-    const category = GOLANGCI_LINT_CATEGORY_MAP[name] ?? 'formatting';
+    // `name` is untrusted repo content (a .golangci.yml linter name) used as
+    // a lookup key — a plain `[name]` bracket access would resolve to an
+    // inherited Object.prototype member (e.g. name === 'constructor') for
+    // any key not actually own-property-present, silently defeating the
+    // `?? 'formatting'` fallback. Object.hasOwn guards against that.
+    const category = Object.hasOwn(GOLANGCI_LINT_CATEGORY_MAP, name)
+      ? GOLANGCI_LINT_CATEGORY_MAP[name]!
+      : 'formatting';
     const loc = findListItemLine(content, name);
     out.push({
       rule: `golangci-lint linter \`${name}\` is enabled — code must comply.`,

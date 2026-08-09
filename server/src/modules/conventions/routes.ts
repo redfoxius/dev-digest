@@ -25,6 +25,16 @@ const RepoIdParams = z.object({ id: z.string().uuid() });
 const ListConventionsQuery = z.object({
   status: ConventionStatus.optional(),
   category: ConventionCategory.optional(),
+  // Deliberately z.string(), not a z.enum() of registered language ids
+  // (unlike status/category, both genuinely fixed small vocabularies) —
+  // the valid set is `repo-intel/languages/index.ts`'s LANGUAGES registry,
+  // which is meant to grow as new language packs are added (Phase 7,
+  // docs/go-language-support-plan.md). Hardcoding an enum here would
+  // duplicate that registry in the shared-contracts package and need
+  // editing every time a language pack is added — exactly the
+  // "language list lives in N places" problem this plan exists to close.
+  // An unrecognized value degrades safely to zero results (a plain `eq()`
+  // filter), never a crash or a validation error.
   language: z.string().optional(),
 });
 

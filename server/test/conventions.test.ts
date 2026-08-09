@@ -245,6 +245,20 @@ describe('parseEslintRules', () => {
   it('returns [] when there is no rules block at all', () => {
     expect(parseEslintRules('export default [];', 'eslint.config.js')).toEqual([]);
   });
+
+  it('falls back to formatting for a rule name that collides with an inherited Object.prototype member', () => {
+    // Same class of bug as parseGolangciLint's equivalent test — a plain
+    // `map[ruleName]` lookup with no own-property guard would resolve
+    // 'constructor' to the inherited Object constructor instead of
+    // falling through to '?? formatting'.
+    const content = JSON.stringify({ rules: { constructor: 'error', toString: 'error' } });
+    const out = parseEslintRules(content, '.eslintrc.json');
+    expect(out.length).toBe(2);
+    for (const c of out) {
+      expect(c.category).toBe('formatting');
+      expect(typeof c.category).toBe('string');
+    }
+  });
 });
 
 describe('parsePrettierConfig', () => {
@@ -353,6 +367,21 @@ describe('parseGolangciLint', () => {
   it('returns [] when there is no linters.enable list', () => {
     expect(parseGolangciLint('linters:\n  disable-all: true\n', '.golangci.yml')).toEqual([]);
     expect(parseGolangciLint('run:\n  timeout: 5m\n', '.golangci.yml')).toEqual([]);
+  });
+
+  it('falls back to formatting for a linter name that collides with an inherited Object.prototype member', () => {
+    // A plain `map[name]` bracket lookup with no own-property guard would
+    // resolve 'constructor' to the inherited Object constructor function
+    // instead of falling through to the '?? formatting' default — a real
+    // bug found by pr-self-review's security skill on this PR. Names like
+    // this come straight from repo-controlled .golangci.yml content.
+    const content = 'linters:\n  enable:\n    - constructor\n    - toString\n    - hasOwnProperty\n';
+    const out = parseGolangciLint(content, '.golangci.yml');
+    expect(out.length).toBe(3);
+    for (const c of out) {
+      expect(c.category).toBe('formatting');
+      expect(typeof c.category).toBe('string');
+    }
   });
 
   it('returns [] for invalid YAML without throwing', () => {

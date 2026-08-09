@@ -87,7 +87,16 @@ function isEslintRuleValueEnforced(value: unknown): boolean {
 }
 
 function buildEslintCandidate(ruleName: string, filePath: string, content: string): ConfigCandidateDraft {
-  const category = ESLINT_RULE_CATEGORY_MAP[ruleName] ?? 'formatting';
+  // `ruleName` is untrusted repo content (an .eslintrc/eslint.config rule
+  // name) used as a lookup key — a plain `[ruleName]` bracket access would
+  // resolve to an inherited Object.prototype member (e.g. ruleName ===
+  // 'constructor') for any key not actually own-property-present, silently
+  // defeating the `?? 'formatting'` fallback. Object.hasOwn guards against
+  // that. Pre-existing pattern, found while fixing the identical bug newly
+  // introduced in langs/go.ts (Phase 7.2, docs/go-language-support-plan.md).
+  const category = Object.hasOwn(ESLINT_RULE_CATEGORY_MAP, ruleName)
+    ? ESLINT_RULE_CATEGORY_MAP[ruleName]!
+    : 'formatting';
   const loc = findKeyLine(content, ruleName);
   return {
     rule: `ESLint rule \`${ruleName}\` is enforced as an error — code must comply.`,
