@@ -729,3 +729,48 @@ pack for free instead of rediscovering this gap a third time.
    and doesn't block 7.1-7.3 from being independently useful.
 6. 7.5 (junk-path fix, once its empirical check from step 2 is in) +
    fold lessons into `add-language-support`.
+
+## Implementation notes — Phase 7.1 + 7.3's empirical checks (this iteration)
+
+**Status: 7.1 done. 7.3's empirical checks done — both open questions
+resolved with real answers, not assumptions.**
+
+**7.1** landed as planned: `server/src/modules/conventions/langs/{types,shared,typescript}.ts`
++ a thin `langs/index.ts` dispatcher, `constants.ts`/`helpers.ts` reduced to
+genuinely language-agnostic content, `service.ts` calls
+`allConfigFileCandidates()`/`parseConfigFile()` from the new module. Zero
+behavior change, confirmed by the full 259-test unit suite passing with only
+`conventions.test.ts`'s import paths touched.
+
+**7.3's empirical checks** — new `server/test/conventions-go.it.test.ts`,
+using a REAL (non-`FakeRepoIntel`) `repoIntel` for the first time in this
+module's test suite, run against a real Go fixture indexed via
+`runFullIndex` (same fixture-generation pattern as
+`repo-intel-go.it.test.ts`). This mattered because `conventions.it.test.ts`'s
+existing `FakeRepoIntel.getConventionSamples()` returns whatever the test
+hardcodes — it was never actually exercising the real
+`getConventionSamples` → `getTopFilesByRank` → `isJunkPath` pipeline this
+plan's root-cause analysis reasoned about from reading the code alone.
+Both predictions confirmed, empirically:
+
+1. **The model pool already works on Go — no bug, as predicted.** The real
+   `getConventionSamples(repoId, 12)` returns `main.go` from the fixture,
+   and a full `POST /repos/:id/conventions/extract` round-trip (real
+   `repoIntel`, mocked LLM/git/github) produces a verified `origin: 'model'`
+   candidate whose evidence resolves against the real Go file content. Confirms
+   Decision 10-era code (the evidence-verification algorithm, the extraction
+   prompt) needed zero changes to work for Go — the gap was always the
+   config-derived pool (7.2) and sampling/filtering (7.3/7.5), never this path.
+2. **The `_test.go` leak is real, not a theoretical worry.** `main_test.go`
+   appears in `getConventionSamples`'s real output alongside `main.go` —
+   `JUNK_PATH_PATTERNS`'s `.test.`/`vitest.`/`jest.` patterns genuinely never
+   match Go's `_test.go` suffix. One test in the new file
+   (`'KNOWN GAP (Phase 7.5): _test.go is not excluded from convention
+   sampling'`) pins this as today's actual behavior with a comment pointing
+   at the fix, rather than silently accepting it — flip its assertion when
+   Phase 7.5 lands.
+
+Both of Phase 7.5's questions are now answered ("is this real" — yes) so
+that phase is ready to build without a further empirical gate; 7.2 (Go
+config pool) still needs the Open Questions below resolved first (YAML
+dependency choice, gofmt handling) before its parser code is written.
