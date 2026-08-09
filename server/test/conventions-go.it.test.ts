@@ -62,6 +62,12 @@ func TestGreet(t *testing.T) {
 }
 `;
 
+const GOLANGCI_YML = `linters:
+  enable:
+    - errcheck
+    - gosec
+`;
+
 d('Conventions Extractor — model pool over a real Go repo (Testcontainers pg)', () => {
   let pg: PgFixture;
   let cloneDir: string;
@@ -75,6 +81,7 @@ d('Conventions Extractor — model pool over a real Go repo (Testcontainers pg)'
     await writeFile(join(cloneDir, 'go.mod'), GO_MOD);
     await writeFile(join(cloneDir, 'main.go'), MAIN_GO);
     await writeFile(join(cloneDir, 'main_test.go'), MAIN_TEST_GO);
+    await writeFile(join(cloneDir, '.golangci.yml'), GOLANGCI_YML);
 
     const [repo] = await pg.handle.db
       .insert(t.repos)
@@ -163,6 +170,41 @@ d('Conventions Extractor — model pool over a real Go repo (Testcontainers pg)'
     expect(modelCandidates.length).toBe(1);
     expect(modelCandidates[0].evidence_path).toBe('main.go');
     expect(modelCandidates[0].evidence_line_start).toBeGreaterThan(0);
+    await app.close();
+  });
+
+  it('extract() also produces config-derived candidates from go.mod and .golangci.yml (Phase 7.2)', async () => {
+    const config = loadConfig({ ...process.env, NODE_ENV: 'test' } as NodeJS.ProcessEnv);
+    const app = await buildApp({
+      config,
+      db: pg.handle.db,
+      overrides: {
+        git: new MockGitClient(),
+        github: new MockGitHubClient(),
+        llm: {
+          openrouter: new MockLLMProvider('openai', {
+            structuredBySchema: { convention_candidates: { candidates: [] } },
+          }),
+        },
+      },
+    });
+    const res = await app.inject({ method: 'POST', url: `/repos/${repoId}/conventions/extract` });
+    expect(res.statusCode).toBe(200);
+    const configCandidates = res
+      .json()
+      .candidates.filter((c: { origin: string }) => c.origin === 'config' && c.evidence_path !== 'tsconfig.json');
+
+    const goModCandidate = configCandidates.find((c: { evidence_path: string }) => c.evidence_path === 'go.mod');
+    expect(goModCandidate?.rule).toContain('1.22');
+    expect(goModCandidate?.status).toBe('accepted');
+    expect(goModCandidate?.confidence).toBe(1);
+
+    const linterRules = configCandidates
+      .filter((c: { evidence_path: string }) => c.evidence_path === '.golangci.yml')
+      .map((c: { rule: string }) => c.rule)
+      .join(' ');
+    expect(linterRules).toContain('errcheck');
+    expect(linterRules).toContain('gosec');
     await app.close();
   });
 });

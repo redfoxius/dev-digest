@@ -12,6 +12,7 @@ import {
   parseEslintRules,
   parsePrettierConfig,
 } from '../src/modules/conventions/langs/typescript.js';
+import { parseGoModDirectives, parseGolangciLint } from '../src/modules/conventions/langs/go.js';
 import { dedupKey } from '../src/modules/conventions/repository.js';
 import type { ConventionCandidate } from '@devdigest/shared';
 import type { ConventionRow } from '../src/db/rows.js';
@@ -257,7 +258,68 @@ describe('parseConfigFile (dispatch by filename)', () => {
     expect(out[0]?.category).toBe('type-safety');
   });
 
+  it('routes go.mod to the Go directive parser', () => {
+    const out = parseConfigFile('go.mod', 'module example.com/greeter\n\ngo 1.22\n');
+    expect(out[0]?.category).toBe('type-safety');
+    expect(out[0]?.rule).toContain('1.22');
+  });
+
+  it('routes .golangci.yml to the golangci-lint parser', () => {
+    const out = parseConfigFile('.golangci.yml', 'linters:\n  enable:\n    - errcheck\n');
+    expect(out[0]?.category).toBe('error-handling');
+  });
+
   it('returns [] for an unrecognized filename', () => {
     expect(parseConfigFile('README.md', '# hi')).toEqual([]);
+  });
+});
+
+describe('parseGoModDirectives', () => {
+  it('emits one type-safety candidate for the go directive, with the right line number', () => {
+    const content = 'module example.com/greeter\n\ngo 1.22\n\nrequire (\n\tfoo v1.0.0\n)\n';
+    const out = parseGoModDirectives(content, 'go.mod');
+    expect(out.length).toBe(1);
+    expect(out[0]!.category).toBe('type-safety');
+    expect(out[0]!.confidence).toBe(1);
+    expect(out[0]!.rule).toContain('Go 1.22');
+    expect(out[0]!.evidence_line_start).toBe(3);
+    expect(out[0]!.evidence_snippet).toBe('go 1.22');
+  });
+
+  it('returns [] when go.mod has no go directive', () => {
+    expect(parseGoModDirectives('module example.com/greeter\n', 'go.mod')).toEqual([]);
+  });
+
+  it('returns [] for empty content without throwing', () => {
+    expect(parseGoModDirectives('', 'go.mod')).toEqual([]);
+  });
+});
+
+describe('parseGolangciLint', () => {
+  it('emits one candidate per enabled linter, mapped to its category', () => {
+    const content = ['linters:', '  enable:', '    - errcheck', '    - gosec', '    - revive'].join('\n');
+    const out = parseGolangciLint(content, '.golangci.yml');
+    const byName = new Map(out.map((c) => [c.rule, c]));
+    expect(out.length).toBe(3);
+    expect([...byName.values()].find((c) => c.rule.includes('errcheck'))?.category).toBe('error-handling');
+    expect([...byName.values()].find((c) => c.rule.includes('gosec'))?.category).toBe('security');
+    expect([...byName.values()].find((c) => c.rule.includes('revive'))?.category).toBe('naming');
+    // Line numbers point at the actual list entry, not always line 1.
+    for (const c of out) expect(c.evidence_line_start).toBeGreaterThan(0);
+  });
+
+  it('falls back to formatting for an unmapped linter name', () => {
+    const content = 'linters:\n  enable:\n    - whitespace\n';
+    const out = parseGolangciLint(content, '.golangci.yml');
+    expect(out[0]?.category).toBe('formatting');
+  });
+
+  it('returns [] when there is no linters.enable list', () => {
+    expect(parseGolangciLint('linters:\n  disable-all: true\n', '.golangci.yml')).toEqual([]);
+    expect(parseGolangciLint('run:\n  timeout: 5m\n', '.golangci.yml')).toEqual([]);
+  });
+
+  it('returns [] for invalid YAML without throwing', () => {
+    expect(parseGolangciLint(':\n  - not: [valid\n', '.golangci.yml')).toEqual([]);
   });
 });
