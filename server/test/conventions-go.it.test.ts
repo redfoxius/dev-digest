@@ -111,14 +111,18 @@ d('Conventions Extractor — model pool over a real Go repo (Testcontainers pg)'
     await app.close();
   });
 
-  it('KNOWN GAP (Phase 7.5): _test.go is not excluded from convention sampling', async () => {
+  it('excludes _test.go from convention sampling (Phase 7.5)', async () => {
     const config = loadConfig({ ...process.env, NODE_ENV: 'test' } as NodeJS.ProcessEnv);
     const app = await buildApp({ config, db: pg.handle.db });
     const samples = await app.container.repoIntel.getConventionSamples(repoId, 12);
-    // Documents today's actual behavior, confirmed empirically rather than
-    // assumed from reading JUNK_PATH_PATTERNS — flip this assertion once
-    // Phase 7.5 lands a Go-aware junk-path predicate.
-    expect(samples).toContain('main_test.go');
+    // Before Phase 7.5, this contained 'main_test.go' — confirmed
+    // empirically (not just assumed from reading JUNK_PATH_PATTERNS) as a
+    // real gap: none of `.test.`/`vitest.`/`jest.` match Go's `_test.go`
+    // suffix convention. Fixed via `isLanguageTestFile`
+    // (repo-intel/languages/index.ts), a per-language predicate alongside
+    // the Phase 0 registry rather than a one-off substring pattern.
+    expect(samples).not.toContain('main_test.go');
+    expect(samples).toContain('main.go');
     await app.close();
   });
 

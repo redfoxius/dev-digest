@@ -51,7 +51,7 @@ import {
   REFRESH_JOB_KIND,
   RESYNC_JOB_KIND,
 } from './constants.js';
-import { SUPPORTED_EXT, languageIdForFile } from './languages/index.js';
+import { SUPPORTED_EXT, languageIdForFile, isLanguageTestFile } from './languages/index.js';
 import { runFullIndex, type IndexPayload } from './pipeline/full.js';
 import { runIncremental } from './pipeline/incremental.js';
 
@@ -771,7 +771,12 @@ const JUNK_PATH_PATTERNS = [
 
 function isJunkPath(path: string): boolean {
   const lower = path.toLowerCase();
-  return JUNK_PATH_PATTERNS.some((p) => lower.includes(p));
+  if (JUNK_PATH_PATTERNS.some((p) => lower.includes(p))) return true;
+  // Substring patterns above only cover TS/JS's dot-based test naming
+  // (`.test.`/`.spec.`) — a language whose convention isn't substring-shaped
+  // (Go's colocated `_test.go` suffix) registers its own predicate instead.
+  // See Phase 7.5 of docs/go-language-support-plan.md.
+  return isLanguageTestFile(path);
 }
 
 /** Enclosing top-level (bare-name) symbol for a line, from persistent rows. */

@@ -19,6 +19,19 @@ export interface LanguageDef {
   /** Human-readable name, e.g. for a review prompt's "languages touched" framing. */
   label: string;
   extensions: readonly string[];
+  /**
+   * True if `file` (a repo-relative path already known to belong to this
+   * language) follows this language's own test-file naming convention —
+   * e.g. Go's colocated `_test.go` suffix, which has no dot-based analog
+   * (`.test.`/`.spec.`) for a substring rule to catch. Optional: a language
+   * whose test files are already caught by a generic path-substring rule
+   * (TS/JS's `.test.`/`.spec.`/`__tests__/`, checked independently of this
+   * registry) doesn't need one. See `isLanguageTestFile` below and Phase
+   * 7.5 of docs/go-language-support-plan.md (found via
+   * `conventions-go.it.test.ts` empirically leaking `_test.go` files into
+   * convention sampling before this existed).
+   */
+  isTestFile?(file: string): boolean;
 }
 
 export const LANGUAGES: readonly LanguageDef[] = [
@@ -27,7 +40,12 @@ export const LANGUAGES: readonly LanguageDef[] = [
     label: 'TypeScript/JavaScript',
     extensions: ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs'],
   },
-  { id: 'go', label: 'Go', extensions: ['.go'] },
+  {
+    id: 'go',
+    label: 'Go',
+    extensions: ['.go'],
+    isTestFile: (file) => file.endsWith('_test.go'),
+  },
 ];
 
 /** Flattened list of every indexed extension, across every language. */
@@ -49,6 +67,19 @@ const LABEL_BY_ID: ReadonlyMap<string, string> = new Map(LANGUAGES.map((l) => [l
 /** Human-readable label for a language id, falling back to the id itself. */
 export function labelForLanguageId(id: string): string {
   return LABEL_BY_ID.get(id) ?? id;
+}
+
+const LANG_BY_ID: ReadonlyMap<string, LanguageDef> = new Map(LANGUAGES.map((l) => [l.id, l]));
+
+/** True if `file` matches its own language's registered test-file naming
+ *  convention (e.g. Go's `_test.go`). False for files whose language has no
+ *  such convention registered — their test files are expected to be caught
+ *  by a generic path-substring rule instead (e.g. TS/JS's `.test.`/
+ *  `__tests__/`, which this function deliberately does not duplicate). */
+export function isLanguageTestFile(file: string): boolean {
+  const id = languageIdForFile(file);
+  if (!id) return false;
+  return LANG_BY_ID.get(id)?.isTestFile?.(file) ?? false;
 }
 
 /**
