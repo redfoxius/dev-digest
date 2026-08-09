@@ -16,15 +16,9 @@ import { NotFoundError, ValidationError } from '../../platform/errors.js';
 import { resolveFeatureModel } from '../settings/feature-models.js';
 import { toSkillDto } from '../skills/helpers.js';
 import { ConventionsRepository, dedupKey, type InsertConvention } from './repository.js';
-import {
-  buildSkillBody,
-  findEvidenceLineRange,
-  parseConfigFile,
-  slugifyRule,
-  toConventionDto,
-  type ConfigCandidateDraft,
-} from './helpers.js';
-import { CONFIG_FILE_CANDIDATES, SAMPLE_FILE_COUNT } from './constants.js';
+import { buildSkillBody, findEvidenceLineRange, slugifyRule, toConventionDto } from './helpers.js';
+import { allConfigFileCandidates, parseConfigFile, type ConfigCandidateDraft } from './langs/index.js';
+import { SAMPLE_FILE_COUNT } from './constants.js';
 
 /**
  * Conventions service. `extract()` runs two independent candidate pools per
@@ -72,7 +66,7 @@ export class ConventionsService {
 
     // ---- Pool 1: deterministic config-derived candidates (no model call) --
     const configDrafts: ConfigCandidateDraft[] = [];
-    for (const candidatePath of CONFIG_FILE_CANDIDATES) {
+    for (const candidatePath of allConfigFileCandidates()) {
       const content = await this.container.repoIntel.getFileContent(repoId, candidatePath);
       if (content == null) continue;
       sampleFileCount++;
