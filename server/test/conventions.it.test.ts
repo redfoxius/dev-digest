@@ -75,6 +75,9 @@ class FakeRepoIntel implements RepoIntel {
   async getConventionSamples(): Promise<string[]> {
     return this.sampleFiles;
   }
+  async getConventionSamplesStratified(): Promise<string[]> {
+    return this.sampleFiles;
+  }
   async getFileContent(_repoId: string, file: string): Promise<string | null> {
     return this.files[file] ?? null;
   }

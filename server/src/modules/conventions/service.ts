@@ -92,7 +92,13 @@ export class ConventionsService {
     }
 
     // ---- Pool 2: cheap-model candidates over top-ranked sample files ------
-    const sampleFiles = await this.container.repoIntel.getConventionSamples(repoId, SAMPLE_FILE_COUNT);
+    // Stratified by language (Phase 7.3, docs/go-language-support-plan.md) —
+    // plain top-rank sampling can crowd a less-central language's files
+    // entirely out of a mixed-language repo's sample.
+    const sampleFiles = await this.container.repoIntel.getConventionSamplesStratified(
+      repoId,
+      SAMPLE_FILE_COUNT,
+    );
     const sampleContents: { file: string; content: string }[] = [];
     for (const file of sampleFiles) {
       const content = await this.container.repoIntel.getFileContent(repoId, file);
