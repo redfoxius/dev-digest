@@ -1,7 +1,17 @@
-import { pgTable, uuid, text, integer, jsonb, timestamp, doublePrecision } from 'drizzle-orm/pg-core';
+import {
+  pgTable,
+  uuid,
+  text,
+  integer,
+  jsonb,
+  timestamp,
+  doublePrecision,
+  primaryKey,
+} from 'drizzle-orm/pg-core';
 import { workspaces } from './core';
 import { agents } from './agents';
 import { pullRequests } from './pulls';
+import { skills } from './skills';
 
 // ============================================================ Observability
 
@@ -64,3 +74,24 @@ export const runTraces = pgTable('run_traces', {
     .references(() => agentRuns.id, { onDelete: 'cascade' }),
   trace: jsonb('trace').notNull(),
 });
+
+/**
+ * One row per (run, skill) actually resolved/attached for that run — the
+ * queryable record `run_traces.trace.prompt_assembly.skills` can't provide
+ * (a concatenated markdown blob, not per-skill rows). Feeds the Skill
+ * Editor's Stats tab (pull frequency, findings-by-category, etc). Inserted
+ * at skill-resolution time, before the LLM call, independent of whether the
+ * run later succeeds or fails.
+ */
+export const agentRunSkills = pgTable(
+  'agent_run_skills',
+  {
+    runId: uuid('run_id')
+      .notNull()
+      .references(() => agentRuns.id, { onDelete: 'cascade' }),
+    skillId: uuid('skill_id')
+      .notNull()
+      .references(() => skills.id, { onDelete: 'cascade' }),
+  },
+  (t) => ({ pk: primaryKey({ columns: [t.runId, t.skillId] }) }),
+);

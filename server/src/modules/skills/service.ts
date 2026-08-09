@@ -9,6 +9,7 @@ import type {
   ImportCandidate,
   Skill,
   SkillSource,
+  SkillStats,
   SkillType,
   SkillVersion,
 } from '@devdigest/shared';
@@ -183,6 +184,16 @@ export class SkillsService {
       summary ?? restoreSummary(version),
     );
     return row ? toSkillDto(row) : undefined;
+  }
+
+  // ---- stats (docs/skills-feature-plan.md#stats-tab--addendum) -----------
+
+  /** Workspace-scoped: undefined when the skill isn't in this workspace
+   *  (route → 404), same pattern as `listVersions`/`getVersion`. */
+  async getStats(workspaceId: string, skillId: string, days: number): Promise<SkillStats | undefined> {
+    const skill = await this.repo.getById(workspaceId, skillId);
+    if (!skill) return undefined;
+    return this.repo.getStats(workspaceId, skillId, days);
   }
 
   // ---- import: file upload / archive (in-memory only) --------------------

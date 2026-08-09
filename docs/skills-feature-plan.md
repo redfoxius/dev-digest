@@ -10,7 +10,9 @@ packages (server: 199 unit + 50 integration; reviewer-core: 26; client: 99).
 **Not done**: the acceptance script's live walkthrough (seeding the two
 demo agents + skills, running the control experiment, eyeballing the trace
 drawer in a browser) and the `pr-self-review` auto-invoke toggle — both
-need a running app / human judgment call, not just code.
+need a running app / human judgment call, not just code. **Addendum**: the
+Stats tab, originally deferred below as a separate lesson, is now built —
+see "Stats tab — addendum" at the bottom of this doc.
 
 ## Context
 
@@ -576,3 +578,127 @@ All five items raised in the previous pass are now decided:
   whatever code-editor library implementation settles on) is this
   client's first syntax-highlighting editor — confirm it doesn't clash
   with the existing `Textarea` primitive's styling conventions once wired.
+
+## Stats tab — addendum
+
+**Status:** implemented — `agent_run_skills` table + migration, `run-
+executor.ts` wiring (`recordRunSkills`), `GET /skills/:id/stats`, contracts
+(both vendor copies), `useSkillStats`, and `SkillStatsTab` (wired into
+`SkillDetail`'s Stats tab, replacing the placeholder) are all built and
+verified: server unit (2 new tests) + integration (3 new tests, real
+Postgres) + `run-executor.test.ts` (2 new tests) green, client hook (3 new
+tests) + `SkillStatsTab.test.tsx` (3 tests) green, both packages typecheck
+clean. Manually verified in the running app: a skill with no run history
+renders the "no usage data yet" empty state correctly; a skill linked to 2
+agents renders `used_by: 2`, the agents list with working "Open" links to
+each Agent Editor, and zeroed windowed metrics (expected — historical runs
+predate this table, "Runs that happened before this ships will not appear
+in stats" per the design note above).
+
+The Skill Editor's Stats tab was explicitly deferred above ("Evals and
+Stats tabs are out of scope... same 'later lesson' pattern") — this
+addendum is that lesson, picked up as its own scoped plan
+(`GET /skills/:id/stats` + a real `SkillStatsTab`), backed by the design
+mockup `working-screenshots/Skill Editor _ Stats.png` (4 KPI tiles: Used
+By, Pull Frequency, Accept Rate, Findings 30D — an "Agents using this
+skill" list — a findings-by-category donut).
+
+**The catch, found during research**: nothing in the DB records which
+skills were actually attached to a given run today. `agent_runs` has no
+`skill_ids` column; the only per-run record of skills is a concatenated
+markdown blob in `run_traces.trace.prompt_assembly.skills`
+(unqueryable in bulk). This addendum adds a small new link table,
+`agent_run_skills`, populated going forward at the exact point
+`run-executor.ts` already resolves which skills apply to a run. **Runs
+that happened before this ships will not appear in stats** — tiles read
+0/empty until new runs accumulate; inherent to adding the tracking now,
+not a bug to fix.
+
+Also confirmed during research: `GET /agents/performance`
+(`AgentPerf`/`AgentPerfRow` in `productionize.ts:141-192`), which the
+original deferred-tab note said to "mirror," is itself unimplemented
+(contract-only) — so this addendum has no existing query to copy; it
+reuses the one grouped-count query pattern that does exist,
+`skillsCountByAgentIds` (`server/src/modules/agents/repository.ts:229-246`).
+
+**Decisions:**
+- The findings-by-category donut shows **finding counts**, not a `$`
+  value (findings have no direct cost; only runs do — counts are the
+  unambiguous metric).
+- All windowed metrics (pull frequency, accept rate, findings count) use
+  a **consistent 30-day window**, overridable via `?days=`.
+  `used_by`/`agents_using_this_skill` are current-state snapshots (not
+  windowed — they reflect live `agent_skills` links).
+
+### Data model
+
+New table `agent_run_skills` — one row per (run, skill) actually
+resolved/attached for that run:
+```ts
+export const agentRunSkills = pgTable(
+  'agent_run_skills',
+  {
+    runId: uuid('run_id').notNull().references(() => agentRuns.id, { onDelete: 'cascade' }),
+    skillId: uuid('skill_id').notNull().references(() => skills.id, { onDelete: 'cascade' }),
+  },
+  (t) => ({ pk: primaryKey({ columns: [t.runId, t.skillId] }) }),
+);
+```
+Added to `server/src/db/schema/runs.ts`, next to `agentRuns`/`runTraces` —
+mirrors the composite-PK link-table pattern already used for
+`agentSkills` in `schema/agents.ts`.
+
+`run-executor.ts` wiring — where `resolvedSkills` (bodies) is already
+computed from `linkedSkills`, also captures the skill **ids** and
+persists them via a new `recordRunSkills(runId, skillIds)` on
+`run.repo.ts` — a plain bulk insert, called at resolution time (before
+the LLM call), independent of whether the run later succeeds or fails,
+since "this skill was attached for this run" is true regardless of
+outcome (needed for an honest pull-frequency denominator).
+
+### Server: `skills` module additions
+
+New contracts (both vendor copies): `SkillStatsAgent`
+(`agent_id`/`agent_name`), `SkillStatsCategory` (`category`/`count`),
+`SkillStats` (`used_by`, `pull_frequency`, `accept_rate`,
+`findings_count`, `agents_using_this_skill`, `findings_by_category`).
+
+`repository.ts` — `getStats(workspaceId, skillId, days)`: two-query
+pattern (agents list + runs/findings aggregate), not N-query, per the
+existing `docs/findings-by-severity-plan.md` convention. Eligible runs =
+`agent_run_skills` rows for this skill joined to `agent_runs` within the
+window; `pull_frequency` = eligible runs / all runs by the same
+agent-set in the window (null when denominator is 0); `accept_rate` /
+`findings_count` / `findings_by_category` join eligible runs → `reviews`
+→ `findings`.
+
+`service.ts` — `getStats(workspaceId, skillId, days = 30)`, 404s via the
+same `NotFoundError` pattern as `get()`.
+
+`routes.ts` — `GET /skills/:id/stats?days=` (coerced int, 1-365, default
+30).
+
+### Client
+
+`useSkillStats(id, days?)` in `client/src/lib/hooks/skills.ts`, shaped
+like `useSkillVersions`. New `SkillStatsTab`
+(`SkillDetail/_components/SkillStatsTab/`) — the first real composition
+of the `@devdigest/ui` chart kit outside the component Showcase: 4
+`MetricCard`s, an agents-using-this-skill list, a `Donut` fed
+`findings_by_category`. Replaces the Stats tab's `EmptyState` in
+`SkillDetail.tsx`. New `stats` i18n block in
+`client/messages/en/skills.json`.
+
+### Verification
+
+- `server/test/skills.test.ts` (unit) — `getStats` shape/404.
+- `server/test/skills.it.test.ts` (integration, real Postgres) — seed
+  runs spanning inside/outside the 30-day window, assert every metric
+  computes correctly and a zero-run skill returns nulls/zeros, not a 500.
+- `server/test/run-executor.test.ts` — `recordRunSkills` called with the
+  resolved skill ids when skills are attached, not called when none are.
+- `client`: `SkillStatsTab.test.tsx` — tiles from a mocked
+  `useSkillStats` response; empty-state when all-zero.
+- Manual: `pnpm db:migrate`, run the app, open a skill linked to an
+  agent with runs (or trigger a fresh run), confirm the Stats tab
+  renders real numbers.
