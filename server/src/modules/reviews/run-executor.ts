@@ -274,6 +274,10 @@ export class ReviewRunExecutor {
         ...(intentText ? { intent: intentText } : {}),
         task,
         sessionId: `${repo.owner}/${repo.name}#${pull.number}:${agent.name}`,
+        // Local-only verbose prompt-composition breakdown (PROMPT_ASSEMBLY_DEBUG) —
+        // the compact structured `prompt_assembly` event is always emitted
+        // regardless of this flag; see reviewer-core's ReviewInput doc.
+        promptLogVerbose: this.container.config.promptAssemblyDebug,
         onEvent: (e) => runLog.event(e.kind, e.msg, e.data),
         checkCancelled: () => {
           if (this.container.runBus.isCancelled(runId)) throw new RunCancelledError();

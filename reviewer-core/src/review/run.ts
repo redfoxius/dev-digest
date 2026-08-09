@@ -7,7 +7,7 @@ import type {
   UnifiedDiff,
 } from '@devdigest/shared';
 import { Review as ReviewSchema } from '@devdigest/shared';
-import { assemblePrompt } from '../prompt.js';
+import { assemblePrompt, estimateTokens, summarizePromptAssembly } from '../prompt.js';
 import { groundFindings, groundingSummary } from '../grounding.js';
 import { filterByScope, reduceReviews, scoreFromFindings, sliceDiff } from './reduce.js';
 
@@ -88,9 +88,18 @@ export interface ReviewInput {
   mapThresholdLines?: number;
   /**
    * OpenRouter session id — forwarded on every LLM call so all chunks of this
-   * review group into one session in the OpenRouter dashboard.
+   * review group into one session in the OpenRouter dashboard. Also used as
+   * the correlation id on the structured `prompt_assembly` log event below.
    */
   sessionId?: string;
+  /**
+   * Emit the additional, more granular `prompt_assembly_verbose` event (per-
+   * skill/per-spec length breakdown) alongside the always-on compact one.
+   * Still never includes section content — only more entries, each still
+   * just a name + length. The caller (server) decides this from a
+   * LOCAL-ONLY env flag; this engine has no config/env access of its own.
+   */
+  promptLogVerbose?: boolean;
   /** Progress sink. */
   onEvent?: (e: ReviewEvent) => void;
   /**
@@ -150,6 +159,40 @@ export async function reviewPullRequest(input: ReviewInput): Promise<ReviewOutco
 
   // Whole-diff assembly is the trace default; overwritten below for single-pass.
   let assembly: PromptAssembly = assemblePrompt({ ...promptParts, diff: input.diff.raw }).assembly;
+
+  // Safe, structured prompt-composition log — section names/sources/lengths
+  // only, never content. Always on (nothing here is sensitive by
+  // construction); the richer per-item breakdown below is local-debug-only.
+  emit('info', 'Prompt assembled', {
+    event: 'prompt_assembly',
+    correlationId: input.sessionId ?? null,
+    model: input.model,
+    sections: summarizePromptAssembly(assembly, { diffChars: input.diff.raw.length }),
+  });
+  if (input.promptLogVerbose) {
+    emit('tool', 'Prompt assembly (verbose)', {
+      event: 'prompt_assembly_verbose',
+      correlationId: input.sessionId ?? null,
+      model: input.model,
+      skills: (input.skills ?? []).map((s, i) => ({
+        section: `skill-${i}`,
+        chars: s.length,
+        estTokens: estimateTokens(s.length),
+      })),
+      specs: (input.specs ?? []).map((s, i) => ({
+        section: `spec-${i}`,
+        chars: s.length,
+        estTokens: estimateTokens(s.length),
+      })),
+      memory: (input.memory ?? []).map((m, i) => ({
+        section: `memory-${i}`,
+        chars: m.length,
+        estTokens: estimateTokens(m.length),
+      })),
+      totalUserChars: assembly.user.length,
+      totalUserEstTokens: estimateTokens(assembly.user.length),
+    });
+  }
 
   const chunks =
     mode === 'map-reduce'
