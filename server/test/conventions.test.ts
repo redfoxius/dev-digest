@@ -6,7 +6,7 @@ import {
   buildSkillBody,
   toConventionDto,
 } from '../src/modules/conventions/helpers.js';
-import { parseConfigFile } from '../src/modules/conventions/langs/index.js';
+import { parseConfigFile, languageForConfigFile } from '../src/modules/conventions/langs/index.js';
 import {
   parseTsconfigStrictness,
   parseEslintRules,
@@ -113,7 +113,7 @@ describe('buildSkillBody', () => {
 });
 
 describe('toConventionDto', () => {
-  it('maps a DB row to the public candidate shape', () => {
+  it('maps a DB row to the public candidate shape, including language', () => {
     const row = {
       id: 'c1',
       workspaceId: 'w1',
@@ -127,6 +127,7 @@ describe('toConventionDto', () => {
       confidence: 0.5,
       status: 'pending',
       origin: 'model',
+      language: 'typescript',
     } as unknown as ConventionRow;
     expect(toConventionDto(row)).toEqual({
       id: 'c1',
@@ -139,7 +140,25 @@ describe('toConventionDto', () => {
       confidence: 0.5,
       status: 'pending',
       origin: 'model',
+      language: 'typescript',
     });
+  });
+
+  it('maps a null language (pre-Phase-7.4 row) to null, not undefined', () => {
+    const row = {
+      id: 'c1',
+      rule: 'Rule text',
+      category: 'naming',
+      evidencePath: 'a.ts',
+      evidenceSnippet: 'code',
+      evidenceLineStart: 1,
+      evidenceLineEnd: 2,
+      confidence: 0.5,
+      status: 'pending',
+      origin: 'model',
+      language: null,
+    } as unknown as ConventionRow;
+    expect(toConventionDto(row).language).toBeNull();
   });
 });
 
@@ -271,6 +290,23 @@ describe('parseConfigFile (dispatch by filename)', () => {
 
   it('returns [] for an unrecognized filename', () => {
     expect(parseConfigFile('README.md', '# hi')).toEqual([]);
+  });
+});
+
+describe('languageForConfigFile', () => {
+  it('resolves TS/JS config filenames to "typescript"', () => {
+    expect(languageForConfigFile('tsconfig.json')).toBe('typescript');
+    expect(languageForConfigFile('.eslintrc.json')).toBe('typescript');
+    expect(languageForConfigFile('.prettierrc')).toBe('typescript');
+  });
+
+  it('resolves Go config filenames to "go"', () => {
+    expect(languageForConfigFile('go.mod')).toBe('go');
+    expect(languageForConfigFile('.golangci.yml')).toBe('go');
+  });
+
+  it('returns null for an unrecognized filename', () => {
+    expect(languageForConfigFile('README.md')).toBeNull();
   });
 });
 

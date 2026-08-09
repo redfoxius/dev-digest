@@ -170,6 +170,9 @@ d('Conventions Extractor — model pool over a real Go repo (Testcontainers pg)'
     expect(modelCandidates.length).toBe(1);
     expect(modelCandidates[0].evidence_path).toBe('main.go');
     expect(modelCandidates[0].evidence_line_start).toBeGreaterThan(0);
+    // Phase 7.4 — derived via languageIdForFile since evidence_path here is
+    // a real indexed source file, not a config filename.
+    expect(modelCandidates[0].language).toBe('go');
     await app.close();
   });
 
@@ -198,6 +201,10 @@ d('Conventions Extractor — model pool over a real Go repo (Testcontainers pg)'
     expect(goModCandidate?.rule).toContain('1.22');
     expect(goModCandidate?.status).toBe('accepted');
     expect(goModCandidate?.confidence).toBe(1);
+    // Phase 7.4 — derived via languageForConfigFile (which pack matched the
+    // filename), since go.mod/.golangci.yml have no registered source
+    // extension for languageIdForFile to key off.
+    expect(goModCandidate?.language).toBe('go');
 
     const linterRules = configCandidates
       .filter((c: { evidence_path: string }) => c.evidence_path === '.golangci.yml')

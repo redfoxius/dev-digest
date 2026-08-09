@@ -22,6 +22,15 @@ import { s } from "./styles";
 
 const SKELETON_ROWS = 3;
 
+// Mirrors ConventionCandidateCard's own LANGUAGE_LABEL — two 2-entry local
+// maps in the same feature folder didn't yet justify a shared export (see
+// client/INSIGHTS.md's "if a 4th consumer shows up, promote" convention).
+// Phase 7.4, docs/go-language-support-plan.md.
+const LANGUAGE_LABEL: Record<string, string> = {
+  typescript: "TypeScript/JavaScript",
+  go: "Go",
+};
+
 export default function ConventionsPage() {
   const t = useTranslations("conventions");
   const params = useParams<{ repoId: string }>();
@@ -35,6 +44,7 @@ export default function ConventionsPage() {
   const update = useUpdateConvention(repoId);
   const [pendingIds, setPendingIds] = React.useState<ReadonlySet<string>>(new Set());
   const [modalOpen, setModalOpen] = React.useState(false);
+  const [languageFilter, setLanguageFilter] = React.useState<string | null>(null);
 
   // Server render always has `activeRepo: null` (it comes from a client-only
   // useRepos() query) — gating the friendly name behind a post-mount flag
@@ -46,6 +56,15 @@ export default function ConventionsPage() {
   const list = candidates ?? [];
   const acceptedIds = list.filter((c) => c.status === "accepted").map((c) => c.id);
   const hasScanned = list.length > 0 || extract.isSuccess;
+  // Only surfaced when 2+ languages are actually present — a single-language
+  // repo has nothing to filter, same "don't build a switcher for one option"
+  // reasoning as this codebase's repo switcher (client/INSIGHTS.md).
+  const presentLanguages = Array.from(
+    new Set(list.map((c) => c.language).filter((l): l is string => !!l)),
+  ).sort();
+  // Filtering is view-only: acceptedIds/deselectAll/counter still operate on
+  // the full repo-wide set, not just what's currently visible.
+  const visibleList = languageFilter ? list.filter((c) => c.language === languageFilter) : list;
 
   const setStatus = (id: string, status: "accepted" | "rejected" | "pending") => {
     setPendingIds((prev) => new Set(prev).add(id));
@@ -110,6 +129,29 @@ export default function ConventionsPage() {
           <span style={s.counter}>
             {acceptedIds.length} of {list.length} accepted
           </span>
+          {presentLanguages.length > 1 && (
+            <div style={s.languageFilter}>
+              <Button
+                kind="ghost"
+                size="sm"
+                active={languageFilter === null}
+                onClick={() => setLanguageFilter(null)}
+              >
+                All languages
+              </Button>
+              {presentLanguages.map((lang) => (
+                <Button
+                  key={lang}
+                  kind="ghost"
+                  size="sm"
+                  active={languageFilter === lang}
+                  onClick={() => setLanguageFilter(lang)}
+                >
+                  {LANGUAGE_LABEL[lang] ?? lang}
+                </Button>
+              ))}
+            </div>
+          )}
           <div style={s.toolbarRight}>
             <Button
               kind="primary"
@@ -150,7 +192,7 @@ export default function ConventionsPage() {
         </div>
       ) : (
         <div style={s.list}>
-          {list.map((c) => (
+          {visibleList.map((c) => (
             <ConventionCandidateCard
               key={c.id}
               c={c}

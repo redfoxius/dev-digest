@@ -31,6 +31,7 @@ export function toConventionDto(row: ConventionRow): ConventionCandidate {
     confidence: row.confidence ?? 0,
     status: row.status as ConventionStatus,
     origin: row.origin as ConventionOrigin,
+    language: row.language ?? null,
   };
 }
 

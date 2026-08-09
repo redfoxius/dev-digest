@@ -17,8 +17,14 @@ import { resolveFeatureModel } from '../settings/feature-models.js';
 import { toSkillDto } from '../skills/helpers.js';
 import { ConventionsRepository, dedupKey, type InsertConvention } from './repository.js';
 import { buildSkillBody, findEvidenceLineRange, slugifyRule, toConventionDto } from './helpers.js';
-import { allConfigFileCandidates, parseConfigFile, type ConfigCandidateDraft } from './langs/index.js';
+import {
+  allConfigFileCandidates,
+  parseConfigFile,
+  languageForConfigFile,
+  type ConfigCandidateDraft,
+} from './langs/index.js';
 import { SAMPLE_FILE_COUNT } from './constants.js';
+import { languageIdForFile } from '../repo-intel/languages/index.js';
 
 /**
  * Conventions service. `extract()` runs two independent candidate pools per
@@ -43,7 +49,11 @@ export class ConventionsService {
   async list(
     workspaceId: string,
     repoId: string,
-    filters?: { status?: ConventionCandidate['status']; category?: ConventionCandidate['category'] },
+    filters?: {
+      status?: ConventionCandidate['status'];
+      category?: ConventionCandidate['category'];
+      language?: string;
+    },
   ): Promise<ConventionCandidate[]> {
     const rows = await this.repo.list(workspaceId, repoId, filters ?? {});
     return rows.map(toConventionDto);
@@ -88,6 +98,10 @@ export class ConventionsService {
         confidence: draft.confidence,
         status: 'accepted',
         origin: 'config',
+        // Derived from which pack matched the config filename, NOT
+        // languageIdForFile (config filenames have no registered source
+        // extension) — see languageForConfigFile's doc comment.
+        language: languageForConfigFile(draft.evidence_path),
       });
     }
 
@@ -140,6 +154,9 @@ export class ConventionsService {
           // into future review prompts (OWASP Agentic AI ASI09).
           status: 'pending',
           origin: 'model',
+          // Real indexed source file — languageIdForFile is the correct
+          // (and, unlike languageForConfigFile, applicable) derivation here.
+          language: languageIdForFile(candidate.evidence_path),
         });
       }
     }

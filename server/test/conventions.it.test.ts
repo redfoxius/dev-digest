@@ -161,6 +161,7 @@ d('/repos/:id/conventions', () => {
     expect(configCandidates.length).toBeGreaterThan(0);
     expect(configCandidates[0].status).toBe('accepted');
     expect(configCandidates[0].confidence).toBe(1);
+    expect(configCandidates[0].language).toBe('typescript'); // Phase 7.4
   });
 
   it('extract discards a model candidate whose evidence cannot be verified in the file', async () => {

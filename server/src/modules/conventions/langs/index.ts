@@ -29,3 +29,23 @@ export function parseConfigFile(filePath: string, content: string): ConfigCandid
   }
   return [];
 }
+
+/**
+ * The language id of whichever pack recognizes `filePath` as one of its own
+ * config files (e.g. `tsconfig.json` → `'typescript'`, `go.mod` → `'go'`),
+ * or null if unrecognized. Deliberately NOT `languageIdForFile`
+ * (`repo-intel/languages/index.ts`) — that resolves by SOURCE-file
+ * extension (`.ts`, `.go`), and config filenames like `tsconfig.json`/
+ * `go.mod`/`.golangci.yml` have no registered source extension, so it would
+ * return null for every config-derived candidate. Used by
+ * `ConventionsService.extract()`'s `origin: 'config'` pool for Phase 7.4's
+ * `language` field; the `origin: 'model'` pool uses `languageIdForFile`
+ * directly since its evidence paths ARE real indexed source files.
+ */
+export function languageForConfigFile(filePath: string): string | null {
+  const base = filePath.split('/').pop() ?? filePath;
+  for (const pack of CONVENTION_LANG_PACKS) {
+    if (pack.matchesConfigFile(base)) return pack.id;
+  }
+  return null;
+}

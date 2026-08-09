@@ -22,6 +22,16 @@ const CATEGORY_COLOR: Record<string, string> = {
   "type-safety": "var(--warn)",
 };
 
+// Mirrors `server/src/modules/repo-intel/languages/index.ts`'s LANGUAGES
+// labels — no server-only module to import client-side, so a small local
+// map (same pattern as CATEGORY_COLOR above). Phase 7.4,
+// docs/go-language-support-plan.md. Falls back to the raw id for any
+// language id not yet in this map.
+const LANGUAGE_LABEL: Record<string, string> = {
+  typescript: "TypeScript/JavaScript",
+  go: "Go",
+};
+
 function lineLabel(c: ConventionCandidate): string {
   if (c.evidence_line_start == null) return "";
   if (c.evidence_line_end != null && c.evidence_line_end !== c.evidence_line_start) {
@@ -95,6 +105,9 @@ export function ConventionCandidateCard({
           <span style={s.badge("var(--text-muted)")}>
             {c.origin === "config" ? "From config" : "AI-detected"}
           </span>
+          {c.language && (
+            <span style={s.badge("var(--text-muted)")}>{LANGUAGE_LABEL[c.language] ?? c.language}</span>
+          )}
         </div>
 
         <div style={s.evidenceBlock}>

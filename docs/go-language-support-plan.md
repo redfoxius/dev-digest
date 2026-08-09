@@ -852,3 +852,77 @@ coverage, `conventions-go.it.test.ts` gained a config-pool case, `languages.
 test.ts` gained `isLanguageTestFile` coverage, `repo-intel-facade-degraded.
 test.ts` gained a `getConventionSamplesStratified` degraded-state case.
 Full suite: 277 unit + 62 integration tests green.
+
+## Implementation notes — Phase 7.4 (this iteration, continued)
+
+**Status: done.** Threaded `language` through the data model, both server
+and client, end to end.
+
+**Schema/contracts**: `conventions.language` (nullable `text`, migration
+`0015_wandering_jackpot.sql` — a clean single-`ADD COLUMN`, no interactive
+`drizzle-kit generate` prompt since nothing was dropped/renamed alongside
+it, unlike migration `0014`'s gotcha). `ConventionCandidate.language` and
+`PluginConvention.language` (both `z.string().nullish()`) added to **both**
+vendor copies (`server/src/vendor/shared`, `client/src/vendor/shared`) per
+this repo's non-default hand-copy convention — confirmed the two copies'
+`ConventionCandidate`/`ConventionOrigin` blocks were still byte-identical
+before editing (the two files have DRIFTED elsewhere, pre-existing and
+unrelated — e.g. client is missing `AgentVersion`/`AgentVersionConfig` —
+left untouched, out of scope here).
+
+**Derivation — two different helpers for two different pools, not one.**
+The naive approach (`languageIdForFile(evidence_path)` for every candidate)
+is wrong for the config pool: `languageIdForFile` resolves by SOURCE-file
+extension (`.ts`, `.go`), but config filenames (`tsconfig.json`, `go.mod`,
+`.golangci.yml`) have no registered source extension, so it would return
+`null` for every config-derived candidate — silently defeating Phase 7.4
+for the pool where it matters most (config candidates are the
+highest-confidence ones). Fixed with a second helper,
+`languageForConfigFile` (`conventions/langs/index.ts`), which returns
+whichever pack's `id` matched the config filename (the same dispatch
+`parseConfigFile` already does) instead of re-deriving from an extension
+that isn't there. `origin: 'model'` candidates use plain `languageIdForFile`
+(their `evidence_path` values ARE real indexed source files, so this is
+the correct and sufficient derivation). Both computed server-side in
+`ConventionsService.extract()`, never asked of the model or the parser —
+same "don't trust anything code can derive" principle as Decision 1's
+line-number computation.
+
+**API**: `GET /repos/:id/conventions` gained a `language` query param
+(`ListConventionsQuery`/`ListConventionsFilters`), mirroring the existing
+`status`/`category` filter shape.
+
+**Client UI**: `ConventionCandidateCard` gets a language badge (reusing the
+existing `s.badge` color-pill primitive, same as the origin badge) via a
+small local `LANGUAGE_LABEL` map — no server-only `repo-intel/languages`
+module to import client-side, so this mirrors the file's own existing
+`CATEGORY_COLOR` local-map pattern. The conventions list page gets a
+language filter, but **not** by wiring a query param through
+`useConventions` — that hook (and this whole page) has no status/category
+filter UI either despite the API already supporting both, so "alongside
+the existing filters" (the plan's original phrasing) didn't describe a
+real pattern to extend. Built instead as view-only client-side filtering
+(a small toggle-button row, mirroring the toolbar's existing `Button`
+group rather than pulling in `Dropdown` for 2 options) over the
+already-fetched list; `acceptedIds`/`deselectAll`/the counter stay scoped
+to the full repo-wide set regardless of the filter, so filtering never
+changes what "accepted" means or what a "Create skill" click bundles — only
+what's currently rendered. The filter row itself only renders when 2+
+languages are actually present, same reasoning already established for
+this codebase's repo switcher (no control for a choice of one).
+
+**Quality report**: no code changes — `docs/conventions-extractor-quality-plan.md`'s
+Phase 1 accept-rate report was already flagged as "not decided"
+infrastructure (ad-hoc script vs. a route vs. a manual check), so there
+was nothing shipped yet to add a `language` breakdown dimension to. The
+underlying data (`conventions.language`, populated on every future scan)
+is now there for whichever shape that report takes later.
+
+Tests: `conventions.test.ts` gained `toConventionDto` language-mapping
+cases (present + null) and `languageForConfigFile` coverage;
+`conventions.it.test.ts`/`conventions-go.it.test.ts` gained `language`
+assertions on real extracted candidates (`'typescript'`/`'go'`
+respectively); `ConventionCandidateCard.test.tsx` gained badge cases
+(mapped label, unmapped-id fallback, absent-language no-badge). Full
+suite: server 281 unit + 62 integration, client 121 — all green; both
+packages typecheck clean; `next build` succeeds.
