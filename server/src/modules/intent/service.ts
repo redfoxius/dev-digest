@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { EvidenceTier, Intent } from '@devdigest/shared';
-import { wrapUntrusted } from '@devdigest/reviewer-core';
+import { estimateTokens, wrapUntrusted, type PromptSectionSummary } from '@devdigest/reviewer-core';
 import type { Container } from '../../platform/container.js';
 import { resolveFeatureModel } from '../settings/feature-models.js';
 import { AppError } from '../../platform/errors.js';
@@ -119,15 +119,59 @@ export class IntentDeriverService implements IntentDeriver {
       const { provider, model } = await resolveFeatureModel(this.container, workspaceId, 'review_intent');
       const llm = await this.container.llm(provider);
 
-      const promptComponents = [
-        'pr-title-and-description',
-        ...(linkedIssueText ? ['linked-issue'] : []),
-        ...(specText ? ['linked-spec'] : specUrl ? ['linked-spec-unreachable'] : []),
-        'changed-files',
-        'hunk-headers',
-        'branch-and-commits',
-      ];
-      log.tool(`PR intent LLM call (${provider}/${model})`, { promptComponents, provider, model });
+      // Distinct correlation id from the main review's (`...#N:<agent.name>`) —
+      // groups this call separately in both the OpenRouter dashboard and logs.
+      const correlationId = `${repo.owner}/${repo.name}#${pull.number}:intent`;
+
+      // Safe, structured prompt-composition metadata — section name, source,
+      // and length only, NEVER content (no diff bodies, no spec/issue text,
+      // no secrets). Same shape as the main reviewer's `prompt_assembly`
+      // event (`summarizePromptAssembly` in reviewer-core), hand-built here
+      // since this classifier composes its own messages, not via
+      // `assemblePrompt`.
+      const titleAndDescChars = pull.title.length + (descriptionEmpty ? 0 : (pull.body ?? '').length);
+      const hunkHeaderChars = hunkHeaders.reduce((n, h) => n + h.length, 0);
+      const fileListChars = fileList.reduce((n, f) => n + f.path.length, 0);
+      const branchAndCommitsChars =
+        pull.branch.length + commits.reduce((n, c) => n + c.message.length, 0);
+      const sections: PromptSectionSummary[] = [
+        { section: 'pr-title-and-description', source: descriptionEmpty ? 'pr-title-only' : 'pr-body', chars: titleAndDescChars },
+        ...(linkedIssueText
+          ? [{ section: 'linked-issue', source: 'github-issue', chars: linkedIssueText.length }]
+          : []),
+        ...(specText
+          ? [{ section: 'linked-spec', source: 'fetched-url', chars: specText.length }]
+          : specUrl
+            ? [{ section: 'linked-spec-unreachable', source: 'fetched-url', chars: 0 }]
+            : []),
+        { section: 'changed-files', source: 'diff-loader', chars: fileListChars },
+        { section: 'hunk-headers', source: 'diff-loader', chars: hunkHeaderChars },
+        { section: 'branch-and-commits', source: 'git-metadata', chars: branchAndCommitsChars },
+      ].map((s) => ({ ...s, estTokens: estimateTokens(s.chars) }));
+
+      log.tool(`PR intent LLM call (${provider}/${model})`, {
+        event: 'prompt_assembly',
+        correlationId,
+        provider,
+        model,
+        sections,
+      });
+
+      // Local-only verbose breakdown (PROMPT_ASSEMBLY_DEBUG) — per-file/per-
+      // hunk-header/per-commit lengths, still never content.
+      if (this.container.config.promptAssemblyDebug) {
+        log.tool('Prompt assembly (verbose)', {
+          event: 'prompt_assembly_verbose',
+          correlationId,
+          sections: [
+            { section: 'title', chars: pull.title.length },
+            { section: 'description', chars: descriptionEmpty ? 0 : (pull.body ?? '').length },
+            ...fileList.map((f, i) => ({ section: `file-${i}`, chars: f.path.length })),
+            ...hunkHeaders.map((h, i) => ({ section: `hunk-header-${i}`, chars: h.length })),
+            ...commits.map((c, i) => ({ section: `commit-${i}`, chars: c.message.length })),
+          ].map((s) => ({ ...s, estTokens: estimateTokens(s.chars) })),
+        });
+      }
 
       const messages = buildMessages({
         pull,
@@ -145,10 +189,7 @@ export class IntentDeriverService implements IntentDeriver {
         schema: IntentDerivation,
         schemaName: 'IntentDerivation',
         messages,
-        // A distinct session id from the main review's (`...#N:<agent.name>`)
-        // so the two LLM calls group separately in the OpenRouter dashboard,
-        // not just in DevDigest's own logs.
-        sessionId: `${repo.owner}/${repo.name}#${pull.number}:intent`,
+        sessionId: correlationId,
       });
 
       // ---- server-side confidence clamp --------------------------------------
@@ -167,7 +208,7 @@ export class IntentDeriverService implements IntentDeriver {
       log.info(
         `intent: derived (tier=${evidenceTier}, ${sources.length} source(s), ` +
           `tokensIn=${result.tokensIn}, tokensOut=${result.tokensOut})`,
-        { sources },
+        { correlationId, sources, tokensIn: result.tokensIn, tokensOut: result.tokensOut },
       );
       return intent;
     } catch (err) {

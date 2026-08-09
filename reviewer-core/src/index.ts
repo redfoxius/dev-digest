@@ -19,6 +19,16 @@ export {
   type AssembledPrompt,
 } from './prompt.js';
 
+// Safe, structured prompt-composition metadata for logging (section name +
+// source + length only — NEVER content). Shared by the server's main-review
+// path (consumed via `ReviewEvent`s, see `ReviewInput.promptLogVerbose`) and
+// the Intent Layer classifier's own logging (`modules/intent/service.ts`).
+export {
+  estimateTokens,
+  summarizePromptAssembly,
+  type PromptSectionSummary,
+} from './prompt.js';
+
 // Citation grounding — the mandatory mechanical gate for diff findings.
 export { groundFindings, groundingSummary, type GroundingResult } from './grounding.js';
 

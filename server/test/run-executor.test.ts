@@ -108,6 +108,10 @@ describe('ReviewRunExecutor — Agent Skills resolution', () => {
     container = {
       runBus: new RunBus(),
       llm: vi.fn().mockResolvedValue({}),
+      // Minimal AppConfig stub — this suite predates any code path reading
+      // container.config; only the fields actually read by run-executor.ts
+      // need to be present.
+      config: { promptAssemblyDebug: false },
     };
     executor = new (ReviewRunExecutor as unknown as new (
       container: unknown,

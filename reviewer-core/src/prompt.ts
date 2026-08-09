@@ -184,3 +184,71 @@ export function assemblePrompt(parts: PromptParts): AssembledPrompt {
 
   return { messages, assembly };
 }
+
+// ---- safe structured logging of prompt composition ------------------------
+//
+// NEVER put section content here — only its name, source, and length. Raw
+// text (diff, PR body, specs, skills, ...) belongs solely in the persisted,
+// access-controlled `PromptAssembly` run trace, never in a log line that may
+// be mirrored to stdout/an aggregator or streamed live over SSE.
+
+export interface PromptSectionSummary {
+  /** Section name, matching the prompt's own `## Heading` naming. */
+  section: string;
+  /** Where this section's content originates from — never the content itself. */
+  source: string;
+  /** Exact character length of the (already truncated/wrapped) section text. */
+  chars: number;
+  /**
+   * Rough chars/4 estimate — NOT a real tokenizer count. Real tokensIn/
+   * tokensOut come from the LLM response after the call and are logged
+   * separately; this exists only for pre-call prompt-composition visibility.
+   */
+  estTokens: number;
+}
+
+/** chars/4 heuristic. Deliberately not a real tokenizer — see `PromptSectionSummary.estTokens`. */
+export function estimateTokens(chars: number): number {
+  return Math.ceil(chars / 4);
+}
+
+function summarizeSection(
+  section: string,
+  source: string,
+  text: string | null | undefined,
+): PromptSectionSummary | undefined {
+  if (!text) return undefined;
+  return { section, source, chars: text.length, estTokens: estimateTokens(text.length) };
+}
+
+/**
+ * Safe, structured metadata about an already-assembled prompt: which
+ * sections are present, where each came from, and how long it is (chars +
+ * a rough token estimate) — nothing more. This is the ONLY form prompt
+ * composition should ever take in a stdout/SSE log line; pass the result
+ * straight into a log call's `data`, never the `assembly` object itself.
+ */
+export function summarizePromptAssembly(
+  assembly: PromptAssembly,
+  extra: { diffChars?: number } = {},
+): PromptSectionSummary[] {
+  const entries = [
+    summarizeSection('system', 'agent-system-prompt', assembly.system),
+    summarizeSection('skills', 'skill-library', assembly.skills),
+    summarizeSection('memory', 'curated-memory', assembly.memory),
+    summarizeSection('specs', 'project-context', assembly.specs),
+    summarizeSection('callers', 'repo-intel-callers', assembly.callers),
+    summarizeSection('repo_map', 'repo-intel-map', assembly.repo_map),
+    summarizeSection('pr_description', 'pr-body', assembly.pr_description),
+    summarizeSection('intent', 'intent-layer', assembly.intent),
+    extra.diffChars != null
+      ? ({
+          section: 'diff',
+          source: 'diff-loader',
+          chars: extra.diffChars,
+          estTokens: estimateTokens(extra.diffChars),
+        } satisfies PromptSectionSummary)
+      : undefined,
+  ];
+  return entries.filter((e): e is PromptSectionSummary => e != null);
+}
