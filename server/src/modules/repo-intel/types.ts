@@ -163,6 +163,17 @@ export interface RepoIntel {
   getUnresolvedReferences(repoId: string, files: string[]): Promise<RefRow[]>;
   /** Top-N file paths by rank, filtered of tests/configs. */
   getConventionSamples(repoId: string, n: number): Promise<string[]>;
+  /**
+   * Like `getConventionSamples`, but reserves an even split of `n` across
+   * every language present in the repo (`repo_index_state.languages`)
+   * before falling back to global top-rank fill for leftover slots — closes
+   * the gap where a structurally more central language's files crowd a
+   * less-central one entirely out of the sample in a mixed-language repo.
+   * See Phase 7.3 of docs/go-language-support-plan.md. Degrades to plain
+   * `getConventionSamples` for a single-language (or undetected-language)
+   * repo, where stratification is a no-op anyway.
+   */
+  getConventionSamplesStratified(repoId: string, n: number): Promise<string[]>;
   /** One file's content from the repo's clone, or null if absent/unindexed. */
   getFileContent(repoId: string, file: string): Promise<string | null>;
 

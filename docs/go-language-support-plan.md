@@ -486,3 +486,443 @@ kind of cross-cutting piece a phase-by-phase, file-by-file plan can miss,
 because it isn't "a new language file," it's an existing file whose
 implicit language assumption only breaks once a second language actually
 exercises it.
+
+## Phase 7 — Conventions Extractor: multi-language support (planned)
+
+**Status: not started.** Prompted by the observation that the Conventions
+Extractor (`server/src/modules/conventions/`, shipped by
+[conventions-extractor-plan.md](conventions-extractor-plan.md) after Phase
+0-6 above were already done) surfaces conventions only from JavaScript/
+TypeScript files, even on repos where Go support is fully indexed. This is
+exactly the "a consumer built above the dispatch layer doesn't
+automatically inherit language support" lesson from the Phase 6 audit
+above, playing out a second time in a different module.
+
+### Root cause (verified against the actual code, not assumed)
+
+The Conventions module was built without threading through the language
+registry (`server/src/modules/repo-intel/languages/index.ts`) that Phase 0
+above already established as "the single source of truth" for what
+languages this codebase indexes. It re-invented a private, JS/TS-only
+allowlist instead — the exact mistake Phase 0's own doc-comment warns
+about ("Replaces what used to be three independently maintained copies of
+the same allowlist... the risk this closes"), just in a module that didn't
+exist yet when that warning was written.
+
+Two independent gaps, of very different severity:
+
+1. **The deterministic config-derived pool (`origin: 'config'`,
+   Decision 10 in the original plan) is 100% JS/TS-tooling-specific, with
+   zero Go equivalent.** `CONFIG_FILE_CANDIDATES`
+   (`server/src/modules/conventions/constants.ts:12-24`) lists only
+   `tsconfig.json`/`.eslintrc*`/`prettier*` filenames; `parseConfigFile`
+   (`helpers.ts:370-382`) dispatches only to
+   `parseTsconfigStrictness`/`parseEslintRules`/`parsePrettierConfig`. For
+   a Go repo, none of these files exist, so this pool — the
+   highest-quality one: no model call, can't hallucinate, always lands as
+   `status: 'accepted'`, `confidence: 1.0` — produces exactly **zero**
+   candidates, every scan, unconditionally. Since this pool is also the
+   *fastest to appear* on a first scan (no LLM round-trip), it's plausibly
+   why the Extractor "looks" JS-only even before considering the model
+   pool at all.
+2. **The model-driven pool (`origin: 'model'`) is mechanically
+   language-agnostic already, but has three real gaps, not one:**
+   - `getConventionSamples`/`getTopFilesByRank`
+     (`server/src/modules/repo-intel/service.ts:665-698`) samples the
+     top-N files by PageRank with no per-language quota. `computeFileRank`
+     (`pipeline/rank.ts:25-70`) does give every indexed file — including
+     isolated Go files with no import edges — a rank row (PageRank's
+     uniform floor), so Go files aren't *excluded*, but in a **mixed**
+     TS+Go repo they can still be crowded out of the top
+     `SAMPLE_FILE_COUNT = 12` (`constants.ts:9`) if TS/JS files are
+     structurally more central. This is the same class of problem the
+     original plan already flagged generically ("Product improvement idea
+     3: stratified sampling... can starve whole categories") — that idea
+     predates `repo_index_state.languages` (Phase 5 above) and was never
+     extended to *language* as a stratification axis.
+   - The extraction prompt itself (`service.ts`'s `proposeRawCandidates`,
+     `service.ts:156-189`) is already language-neutral text — no JS-specific
+     wording — so in a **Go-only** repo this pool should, in principle,
+     already surface Go conventions from raw `.go` file content handed to
+     the model. **This is unverified, not confirmed broken**: unlike the
+     indexer (`astgrep-go.test.ts`, `repo-intel-go.it.test.ts`,
+     `repo-intel-phantom-gate.test.ts`), the conventions module has zero
+     test coverage against any Go fixture — `conventions.test.ts`/
+     `conventions.it.test.ts` only exercise TS/JS content. Given the Phase
+     6 audit above found a real bug hiding behind exactly this kind of
+     untested assumption (the phantom-globals allowlist), this needs an
+     empirical check, not a guess, before deciding whether Phase 7.3 below
+     is "add a test" or "add a test and fix a bug."
+   - `JUNK_PATH_PATTERNS` (`repo-intel/service.ts:755-770`), which filters
+     sample candidates, encodes JS/TS test-file conventions only
+     (`'.test.'`, `'vitest.'`, `'jest.'`) — Go's `_test.go` suffix doesn't
+     match any of those substrings, so Go test files are **not** excluded
+     from convention sampling today, unlike TS/JS test files. Needs an
+     empirical check against a real Go repo's ranked paths (does this
+     actually happen, and does it produce bad candidates) before deciding
+     how to fix it.
+3. **Structural: there is nowhere to record which language a candidate
+   came from, even once 1-2 are fixed.** Neither `ConventionCandidate`
+   (contracts) nor the `conventions` table
+   (`server/src/db/schema/knowledge.ts:31-50`) has a `language` column —
+   unlike `repo_index_state.languages` (Phase 5 above), which exists for
+   exactly this kind of informational/filtering use. Without it: the UI
+   can't badge or filter by language, and the quality plan's
+   ([conventions-extractor-quality-plan.md](conventions-extractor-quality-plan.md))
+   Phase 1 accept-rate mining can't break results down by language the way
+   it already does by `origin`×`category`.
+
+### Sub-phases
+
+**7.1 — Reuse the Phase 0 language registry instead of a private
+allowlist.** Introduce a per-language "convention pack" — same shape as
+Phase 1's `astgrep/langs/{typescript,go}.ts` split — e.g.
+`server/src/modules/conventions/langs/{typescript,go}.ts`, each exporting
+`configFileCandidates: readonly string[]` + `parseConfigFile(path,
+content): ConfigCandidateDraft[]`. A new `conventions/langs/index.ts`
+assembles the flat probe list from all registered packs and dispatches
+`parseConfigFile` by filename, keyed off the same
+`server/src/modules/repo-intel/languages/index.ts` registry Phase 0
+built — not a second, independently-grown list. `service.ts`'s `extract()`
+(`service.ts:75-98`) loops the assembled list instead of the current flat
+`CONFIG_FILE_CANDIDATES` constant.
+
+**7.2 — Go config-derived candidate pool**, parallel to TS's
+eslint/tsconfig/prettier trio:
+- `go.mod` — module path + the `go 1.x` directive (language-version
+  assumption, analogous to a `tsconfig.json` strictness flag). Reuse the
+  line-anchored `module <path>` regex reader `GoDepGraph.buildEdges`
+  already has (`server/src/adapters/depgraph/go.ts:83` area) rather than
+  writing a second `go.mod` parser.
+- `.golangci.yml`/`.golangci.yaml`/`.golangci.toml` — enabled linters
+  under golangci-lint's config → one candidate per enabled linter,
+  analogous to an enforced ESLint rule. Needs a category map
+  (`GOLANGCI_LINT_CATEGORY_MAP`, mirroring `ESLINT_RULE_CATEGORY_MAP` at
+  `constants.ts:31-44`): `errcheck`→`error-handling`, `gosec`→`security`,
+  `revive`/`stylecheck`→`naming`, `depguard`→`imports`, unmapped →
+  `formatting`, same "unmapped falls back to formatting" rule as today.
+- **gofmt is a real edge case, not a straightforward port**: Go formatting
+  is not configurable the way Prettier is — `gofmt`-compliance is a fixed
+  house convention with **no config file to point evidence at**, which
+  breaks Decision 10's invariant that a config-origin candidate's
+  "evidence" *is* the config file it was parsed from. Needs an explicit
+  decision (Open Questions below) before building — this doc doesn't
+  presume gofmt should auto-emit a candidate at all.
+- **New dependency needed for YAML**: confirmed via `grep` that no
+  `yaml`/`js-yaml` package is imported anywhere in `server/src` today (the
+  repo-wide "never require()/eval() a config" rule from Decision 4 in
+  `docs/skills-feature-plan.md` doesn't forbid a real YAML *parser* — it
+  forbids executing JS as code — but this is still a new dependency,
+  flagged for the same scrutiny Decision 10 gave the JSON/regex-only
+  approach for JS configs). Alternative: a minimal regex-based
+  `key: value` line extractor (same spirit as `parseSimpleKeyValueBlock`,
+  `helpers.ts:319-332`) if golangci-lint's config shape is simple enough
+  to avoid a real YAML parser — worth checking against a few real
+  `.golangci.yml` files before picking.
+
+**7.3 — Stratify the model pool's sampling by language, and add the first
+Go test.** Extend `getTopFilesByRank`/add a `getConventionSamplesStratified`
+variant (`repo-intel/service.ts`) that reserves sample slots per language
+present in `repo_index_state.languages` (read via the already-existing
+`getIndexState(repoId)`, `service.ts:218`) before falling back to global
+top-rank fill — concretely scoping the original plan's "Product
+improvement idea 3" to a language axis using infrastructure (Phase 5's
+`languages` column) that didn't exist when that idea was first written.
+Then add `server/test/conventions-go.it.test.ts` (mirroring
+`repo-intel-go.it.test.ts`'s fixture pattern): run `ConventionsService.
+extract()` against a real Go fixture repo and assert `origin: 'model'`
+candidates are actually produced from `.go` sample content — the first
+test coverage this path has ever had for a non-TS/JS language, needed to
+confirm the "should already work" claim above rather than assume it.
+
+**7.4 — Thread `language` through the data model, UI, and the quality
+report.** Add `language: string | null` to the `ConventionCandidate`
+contract (both vendor copies) and a matching `conventions.language`
+column, derived in code from `evidence_path` via the existing
+`languageIdForFile()` (`repo-intel/languages/index.ts:39`) at insert time
+for *both* pools — never asked of the model, same "don't trust the model
+for anything code can derive" principle as Decision 1's line-number
+computation. `ConventionCandidateCard` gets a language badge next to the
+existing origin badge; the conventions list gets a language filter
+alongside the existing status/category filters
+(`GET /repos/:id/conventions` gains a `language` query param, mirroring
+the existing `status`/`category` filter shape in `repository.ts`'s
+`list()`). The quality plan's Phase 1 accept-rate report
+([conventions-extractor-quality-plan.md](conventions-extractor-quality-plan.md))
+gets a `language` breakdown dimension alongside its existing `origin`×
+`category` one.
+
+**7.5 — Close the `_test.go` junk-path gap, and document the pack contract
+for the next language.** Once 7.3's empirical check confirms whether Go
+test files are actually leaking into samples as false "house style"
+evidence, fix `isJunkPath`/`JUNK_PATH_PATTERNS`
+(`repo-intel/service.ts:755-775`) — either add a `_test.go`-aware pattern,
+or (more correct, and more scalable per the "any future language" part of
+this ask) delegate "is this a test file" to a per-language predicate
+alongside the Phase 0 registry, since junk-path detection is itself
+currently only ever validated against JS/TS conventions. **The
+`add-language-support` skill update is explicitly deferred to after this
+phase ships** — same sequencing this doc's own header used ("distilled
+into that skill" only after the Go implementation was real and audited),
+not before: once 7.1-7.4 land and are audited the way Phase 6 above
+audited the astgrep work, fold the "every consumer of the language
+registry needs an explicit per-language pack, not just the indexer" lesson
+into that skill so a 3rd language (Rust, Python, ...) gets the Conventions
+pack for free instead of rediscovering this gap a third time.
+
+### Open questions
+
+- **gofmt's fileless "convention"** — skip it entirely for v1 (Go's
+  formatting rule is arguably out of scope for a *house*-convention
+  extractor, since it's a language-wide standard, not something this repo
+  chose), or introduce a new `origin: 'convention'` (distinct from
+  `'model'`/`'config'`) for language-inherent rules with no backing file,
+  pointing evidence at `go.mod` as a proxy anchor? Not decided — affects
+  the `ConventionOrigin` enum (a schema change) if the second option is
+  picked.
+- **YAML parsing** — pull in a real `yaml`/`js-yaml` dependency, or hand-roll
+  a minimal regex extractor for golangci-lint's specific config shape (no
+  new dependency, consistent with this module's existing "regex over
+  flat JS/MJS configs" approach for the same reason)? Needs a look at a
+  few real `.golangci.yml` files' structure before deciding.
+- **Stratified sampling's slot math** — how many of the 12 samples get
+  reserved per language vs. left for global top-rank fill, and what
+  happens with 3+ languages present at once (even split, or weighted by
+  each language's share of indexed files)? Not decided.
+- **Backfill** — existing `conventions` rows (from repos already scanned
+  under the old JS-only code) will have `language: null` after 7.4's
+  migration; is a one-time backfill pass (derive `language` from
+  `evidence_path` for existing rows) worth writing, or is it fine to leave
+  historical rows unbadged and only badge new scans going forward? Given
+  the table is per-workspace and Re-scan already exists as a user-
+  triggered action, leaning toward "leave historical rows as-is," but
+  flagging since it wasn't a deliberate call yet.
+
+### Testing plan (additive to the existing suite)
+
+- `server/test/conventions.test.ts` — new fixture-based unit tests for
+  `parseGoModDirectives`/`parseGolangciLint` (fixture `go.mod`/
+  `.golangci.yml` in, expected `origin: 'config'` candidates with correct
+  category/line numbers out), mirroring the existing
+  `parseTsconfigStrictness`/`parseEslintRules`/`parsePrettierConfig`
+  coverage.
+- `server/test/conventions-go.it.test.ts` (new, Phase 7.3) — real Go
+  fixture through `extract()`, asserting both pools produce Go candidates
+  where expected.
+- `server/test/conventions.test.ts` — stratified-sampling unit test (mixed
+  language file/rank fixture in, assert both languages represented in the
+  output sample list).
+- `client` — `ConventionCandidateCard.test.tsx` gains a language-badge
+  assertion; conventions page test gains a language-filter case.
+
+### Suggested build order
+
+1. 7.1 (registry plumbing — no behavior change yet, `parseConfigFile`
+   dispatch becomes pack-based but TS/JS packs are ported 1:1 first, so
+   existing tests keep passing unmodified as a correctness check on the
+   refactor itself).
+2. 7.3's empirical checks (Go-sample-already-works? test-file-leak?) —
+   cheap to run, and their answers change the scope of 7.2/7.5.
+3. 7.2 (Go config pool) + its unit tests.
+4. 7.3's stratified sampling + its it.test.
+5. 7.4 (language column + UI + quality report) — last, since it's additive
+   and doesn't block 7.1-7.3 from being independently useful.
+6. 7.5 (junk-path fix, once its empirical check from step 2 is in) +
+   fold lessons into `add-language-support`.
+
+## Implementation notes — Phase 7.1 + 7.3's empirical checks (this iteration)
+
+**Status: 7.1 done. 7.3's empirical checks done — both open questions
+resolved with real answers, not assumptions.**
+
+**7.1** landed as planned: `server/src/modules/conventions/langs/{types,shared,typescript}.ts`
++ a thin `langs/index.ts` dispatcher, `constants.ts`/`helpers.ts` reduced to
+genuinely language-agnostic content, `service.ts` calls
+`allConfigFileCandidates()`/`parseConfigFile()` from the new module. Zero
+behavior change, confirmed by the full 259-test unit suite passing with only
+`conventions.test.ts`'s import paths touched.
+
+**7.3's empirical checks** — new `server/test/conventions-go.it.test.ts`,
+using a REAL (non-`FakeRepoIntel`) `repoIntel` for the first time in this
+module's test suite, run against a real Go fixture indexed via
+`runFullIndex` (same fixture-generation pattern as
+`repo-intel-go.it.test.ts`). This mattered because `conventions.it.test.ts`'s
+existing `FakeRepoIntel.getConventionSamples()` returns whatever the test
+hardcodes — it was never actually exercising the real
+`getConventionSamples` → `getTopFilesByRank` → `isJunkPath` pipeline this
+plan's root-cause analysis reasoned about from reading the code alone.
+Both predictions confirmed, empirically:
+
+1. **The model pool already works on Go — no bug, as predicted.** The real
+   `getConventionSamples(repoId, 12)` returns `main.go` from the fixture,
+   and a full `POST /repos/:id/conventions/extract` round-trip (real
+   `repoIntel`, mocked LLM/git/github) produces a verified `origin: 'model'`
+   candidate whose evidence resolves against the real Go file content. Confirms
+   Decision 10-era code (the evidence-verification algorithm, the extraction
+   prompt) needed zero changes to work for Go — the gap was always the
+   config-derived pool (7.2) and sampling/filtering (7.3/7.5), never this path.
+2. **The `_test.go` leak is real, not a theoretical worry.** `main_test.go`
+   appears in `getConventionSamples`'s real output alongside `main.go` —
+   `JUNK_PATH_PATTERNS`'s `.test.`/`vitest.`/`jest.` patterns genuinely never
+   match Go's `_test.go` suffix. One test in the new file
+   (`'KNOWN GAP (Phase 7.5): _test.go is not excluded from convention
+   sampling'`) pins this as today's actual behavior with a comment pointing
+   at the fix, rather than silently accepting it — flip its assertion when
+   Phase 7.5 lands.
+
+Both of Phase 7.5's questions are now answered ("is this real" — yes) so
+that phase is ready to build without a further empirical gate; 7.2 (Go
+config pool) still needs the Open Questions below resolved first (YAML
+dependency choice, gofmt handling) before its parser code is written.
+
+## Implementation notes — Phase 7.5, 7.2, 7.3 (this iteration, continued)
+
+**Status: 7.5 done. 7.2 done (both open questions resolved with the user:
+skip gofmt for v1, add a real `yaml` dependency rather than hand-roll a
+regex extractor). 7.3 done.**
+
+**7.5** — `isTestFile?(file: string)` added to `LanguageDef`
+(`repo-intel/languages/index.ts`), with Go's entry set to
+`file.endsWith('_test.go')`; a new `isLanguageTestFile()` dispatches through
+the existing `languageIdForFile` lookup (same shape as
+`PHANTOM_GLOBALS_BY_LANGUAGE`). `isJunkPath` (`repo-intel/service.ts`) now
+checks it after the generic `JUNK_PATH_PATTERNS` substrings. Chosen over a
+one-off `_test.go` substring pattern specifically for the "any future
+language" part of this ask — a 3rd language with its own non-dot test-file
+convention registers its own predicate instead of growing `isJunkPath`
+again. `conventions-go.it.test.ts`'s previously-pinned KNOWN GAP test now
+asserts the fixed behavior.
+
+**7.2** — new `server/src/modules/conventions/langs/go.ts`:
+`parseGoModDirectives` (the `go 1.x` version directive → one
+`'type-safety'` candidate; no module-path candidate — a module path is an
+identifier, not a house convention) and `parseGolangciLint` (`linters.
+enable` list → one candidate per enabled linter, via a
+`GOLANGCI_LINT_CATEGORY_MAP` mirroring `ESLINT_RULE_CATEGORY_MAP`). Real
+YAML parsing via the new `yaml` npm dependency (added to `server/
+package.json`, no native/postinstall build-script approval needed) — the
+user's call, reasoning that golangci-lint configs use real YAML features a
+flat-object regex extractor (this module's existing approach for JS
+configs) would likely mis-parse. `.golangci.toml` intentionally not probed
+(YAML only, per the same decision) and gofmt intentionally has no
+candidate at all (no config file exists to anchor its evidence to, which
+would've broken every other config-origin candidate's "evidence IS the
+config file" invariant — the user's call, also reasoned as arguably out of
+scope since gofmt is a language-wide standard, not a house choice).
+
+**7.3** — two deliverables, one algorithmic and one about test design:
+- `stratifyByLanguage` (new `repo-intel/pipeline/sample.ts`) is a **pure**
+  function (ranked paths in, reservation math out) rather than the N+1-
+  DB-round-trip version first sketched — mirrors `pipeline/rank.ts`'s
+  existing split of pure PageRank computation out of its DB-reading
+  service wrapper, and makes the reservation math hermetically unit-
+  testable (`repo-intel-sample.test.ts`) without depending on real
+  PageRank tie-breaking. `RepoIntelService.getConventionSamplesStratified`
+  does one `getRankedPaths` fetch + one `getIndexState` call and delegates.
+  `ConventionsService.extract()` now calls this instead of plain
+  `getConventionSamples`.
+- **Real bug found while building the DB-backed wiring test, unrelated to
+  Phase 7 but worth recording**: `DepCruiseGraph.buildEdges`
+  (`server/src/adapters/depgraph/index.ts`) silently returns **zero edges**
+  for any fixture rooted under `os.tmpdir()` on macOS. `/tmp` and `/var`
+  are themselves symlinks to `/private/tmp`/`/private/var` on macOS;
+  dependency-cruiser's resolver realpath's a dependency's *resolved* path
+  but not the *entry* file paths passed into `cruise()`, so `toRel(root,
+  dep.resolved)` produces a long `../../private/...` escape that never
+  matches `fileSet`, and every edge is dropped as "not a local file" —
+  with no error surfaced (the adapter's own try/catch is designed to
+  degrade silently on a broken tsconfig, which makes this failure mode
+  doubly invisible). No existing test caught this because no test exercised
+  the real `DepCruiseGraph` against a real on-disk fixture before now —
+  `depgraph-go.test.ts` only covers `GoDepGraph` (its own hand-rolled
+  resolver, unaffected), and `indexer-pipeline.test.ts`'s in-memory stub
+  replaces `depgraph` entirely (`buildEdges: async () => []`). Worked
+  around here by seeding `file_rank`/`repo_index_state` rows directly in
+  `repo-intel-sample.it.test.ts` rather than depending on a real
+  `runFullIndex` + dependency-cruiser pass — kept the fix itself **out of
+  scope** for this iteration (a TS/JS depgraph correctness bug, not a
+  multi-language-conventions concern) rather than folding an unrelated fix
+  into this PR; worth its own follow-up.
+
+Tests this iteration: `repo-intel-sample.test.ts` (hermetic, 5 cases
+including the crowd-out scenario), `repo-intel-sample.it.test.ts` (3 cases,
+real Postgres, proves the `getIndexState`/`getRankedPaths` wiring),
+`conventions.test.ts` gained `parseGoModDirectives`/`parseGolangciLint`
+coverage, `conventions-go.it.test.ts` gained a config-pool case, `languages.
+test.ts` gained `isLanguageTestFile` coverage, `repo-intel-facade-degraded.
+test.ts` gained a `getConventionSamplesStratified` degraded-state case.
+Full suite: 277 unit + 62 integration tests green.
+
+## Implementation notes — Phase 7.4 (this iteration, continued)
+
+**Status: done.** Threaded `language` through the data model, both server
+and client, end to end.
+
+**Schema/contracts**: `conventions.language` (nullable `text`, migration
+`0015_wandering_jackpot.sql` — a clean single-`ADD COLUMN`, no interactive
+`drizzle-kit generate` prompt since nothing was dropped/renamed alongside
+it, unlike migration `0014`'s gotcha). `ConventionCandidate.language` and
+`PluginConvention.language` (both `z.string().nullish()`) added to **both**
+vendor copies (`server/src/vendor/shared`, `client/src/vendor/shared`) per
+this repo's non-default hand-copy convention — confirmed the two copies'
+`ConventionCandidate`/`ConventionOrigin` blocks were still byte-identical
+before editing (the two files have DRIFTED elsewhere, pre-existing and
+unrelated — e.g. client is missing `AgentVersion`/`AgentVersionConfig` —
+left untouched, out of scope here).
+
+**Derivation — two different helpers for two different pools, not one.**
+The naive approach (`languageIdForFile(evidence_path)` for every candidate)
+is wrong for the config pool: `languageIdForFile` resolves by SOURCE-file
+extension (`.ts`, `.go`), but config filenames (`tsconfig.json`, `go.mod`,
+`.golangci.yml`) have no registered source extension, so it would return
+`null` for every config-derived candidate — silently defeating Phase 7.4
+for the pool where it matters most (config candidates are the
+highest-confidence ones). Fixed with a second helper,
+`languageForConfigFile` (`conventions/langs/index.ts`), which returns
+whichever pack's `id` matched the config filename (the same dispatch
+`parseConfigFile` already does) instead of re-deriving from an extension
+that isn't there. `origin: 'model'` candidates use plain `languageIdForFile`
+(their `evidence_path` values ARE real indexed source files, so this is
+the correct and sufficient derivation). Both computed server-side in
+`ConventionsService.extract()`, never asked of the model or the parser —
+same "don't trust anything code can derive" principle as Decision 1's
+line-number computation.
+
+**API**: `GET /repos/:id/conventions` gained a `language` query param
+(`ListConventionsQuery`/`ListConventionsFilters`), mirroring the existing
+`status`/`category` filter shape.
+
+**Client UI**: `ConventionCandidateCard` gets a language badge (reusing the
+existing `s.badge` color-pill primitive, same as the origin badge) via a
+small local `LANGUAGE_LABEL` map — no server-only `repo-intel/languages`
+module to import client-side, so this mirrors the file's own existing
+`CATEGORY_COLOR` local-map pattern. The conventions list page gets a
+language filter, but **not** by wiring a query param through
+`useConventions` — that hook (and this whole page) has no status/category
+filter UI either despite the API already supporting both, so "alongside
+the existing filters" (the plan's original phrasing) didn't describe a
+real pattern to extend. Built instead as view-only client-side filtering
+(a small toggle-button row, mirroring the toolbar's existing `Button`
+group rather than pulling in `Dropdown` for 2 options) over the
+already-fetched list; `acceptedIds`/`deselectAll`/the counter stay scoped
+to the full repo-wide set regardless of the filter, so filtering never
+changes what "accepted" means or what a "Create skill" click bundles — only
+what's currently rendered. The filter row itself only renders when 2+
+languages are actually present, same reasoning already established for
+this codebase's repo switcher (no control for a choice of one).
+
+**Quality report**: no code changes — `docs/conventions-extractor-quality-plan.md`'s
+Phase 1 accept-rate report was already flagged as "not decided"
+infrastructure (ad-hoc script vs. a route vs. a manual check), so there
+was nothing shipped yet to add a `language` breakdown dimension to. The
+underlying data (`conventions.language`, populated on every future scan)
+is now there for whichever shape that report takes later.
+
+Tests: `conventions.test.ts` gained `toConventionDto` language-mapping
+cases (present + null) and `languageForConfigFile` coverage;
+`conventions.it.test.ts`/`conventions-go.it.test.ts` gained `language`
+assertions on real extracted candidates (`'typescript'`/`'go'`
+respectively); `ConventionCandidateCard.test.tsx` gained badge cases
+(mapped label, unmapped-id fallback, absent-language no-badge). Full
+suite: server 281 unit + 62 integration, client 121 — all green; both
+packages typecheck clean; `next build` succeeds.

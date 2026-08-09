@@ -3,6 +3,7 @@ import {
   languageIdForFile,
   languagesPresent,
   labelForLanguageId,
+  isLanguageTestFile,
   SUPPORTED_EXT,
   LANGUAGES,
 } from '../src/modules/repo-intel/languages/index.js';
@@ -52,6 +53,27 @@ describe('labelForLanguageId', () => {
 
   it('falls back to the id itself for an unknown id', () => {
     expect(labelForLanguageId('rust')).toBe('rust');
+  });
+});
+
+describe('isLanguageTestFile', () => {
+  it('recognizes Go\'s colocated _test.go suffix', () => {
+    expect(isLanguageTestFile('internal/util/util_test.go')).toBe(true);
+    expect(isLanguageTestFile('main_test.go')).toBe(true);
+  });
+
+  it('does not flag an ordinary Go file', () => {
+    expect(isLanguageTestFile('main.go')).toBe(false);
+    // A file merely containing "test" isn't the suffix convention.
+    expect(isLanguageTestFile('testutil.go')).toBe(false);
+  });
+
+  it('returns false for TS/JS files — their test-file convention is caught by JUNK_PATH_PATTERNS instead', () => {
+    expect(isLanguageTestFile('src/api/users.test.ts')).toBe(false);
+  });
+
+  it('returns false for an unrecognized extension', () => {
+    expect(isLanguageTestFile('README.md')).toBe(false);
   });
 });
 

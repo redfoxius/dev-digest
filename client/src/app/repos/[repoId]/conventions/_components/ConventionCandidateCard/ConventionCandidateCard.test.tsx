@@ -42,6 +42,21 @@ describe("ConventionCandidateCard", () => {
     expect(screen.getByText("From config")).toBeInTheDocument();
   });
 
+  it("shows a language badge with the human-readable label when language is set", () => {
+    renderWithIntl(<ConventionCandidateCard c={{ ...CANDIDATE, language: "go" }} />);
+    expect(screen.getByText("Go")).toBeInTheDocument();
+  });
+
+  it("falls back to the raw id for an unmapped language", () => {
+    renderWithIntl(<ConventionCandidateCard c={{ ...CANDIDATE, language: "rust" }} />);
+    expect(screen.getByText("rust")).toBeInTheDocument();
+  });
+
+  it("renders no language badge for a pre-Phase-7.4 candidate with no language", () => {
+    renderWithIntl(<ConventionCandidateCard c={CANDIDATE} />);
+    expect(screen.queryByText("TypeScript/JavaScript")).not.toBeInTheDocument();
+  });
+
   // Hard acceptance criterion: evidence must click through to the real
   // GitHub blob at the right line range, via the same githubBlobUrl() helper
   // FindingCard already uses.

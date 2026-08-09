@@ -4,12 +4,15 @@ import {
   findEvidenceLineRange,
   slugifyRule,
   buildSkillBody,
+  toConventionDto,
+} from '../src/modules/conventions/helpers.js';
+import { parseConfigFile, languageForConfigFile } from '../src/modules/conventions/langs/index.js';
+import {
   parseTsconfigStrictness,
   parseEslintRules,
   parsePrettierConfig,
-  parseConfigFile,
-  toConventionDto,
-} from '../src/modules/conventions/helpers.js';
+} from '../src/modules/conventions/langs/typescript.js';
+import { parseGoModDirectives, parseGolangciLint } from '../src/modules/conventions/langs/go.js';
 import { dedupKey } from '../src/modules/conventions/repository.js';
 import type { ConventionCandidate } from '@devdigest/shared';
 import type { ConventionRow } from '../src/db/rows.js';
@@ -110,7 +113,7 @@ describe('buildSkillBody', () => {
 });
 
 describe('toConventionDto', () => {
-  it('maps a DB row to the public candidate shape', () => {
+  it('maps a DB row to the public candidate shape, including language', () => {
     const row = {
       id: 'c1',
       workspaceId: 'w1',
@@ -124,6 +127,7 @@ describe('toConventionDto', () => {
       confidence: 0.5,
       status: 'pending',
       origin: 'model',
+      language: 'typescript',
     } as unknown as ConventionRow;
     expect(toConventionDto(row)).toEqual({
       id: 'c1',
@@ -136,7 +140,25 @@ describe('toConventionDto', () => {
       confidence: 0.5,
       status: 'pending',
       origin: 'model',
+      language: 'typescript',
     });
+  });
+
+  it('maps a null language (pre-Phase-7.4 row) to null, not undefined', () => {
+    const row = {
+      id: 'c1',
+      rule: 'Rule text',
+      category: 'naming',
+      evidencePath: 'a.ts',
+      evidenceSnippet: 'code',
+      evidenceLineStart: 1,
+      evidenceLineEnd: 2,
+      confidence: 0.5,
+      status: 'pending',
+      origin: 'model',
+      language: null,
+    } as unknown as ConventionRow;
+    expect(toConventionDto(row).language).toBeNull();
   });
 });
 
@@ -223,6 +245,20 @@ describe('parseEslintRules', () => {
   it('returns [] when there is no rules block at all', () => {
     expect(parseEslintRules('export default [];', 'eslint.config.js')).toEqual([]);
   });
+
+  it('falls back to formatting for a rule name that collides with an inherited Object.prototype member', () => {
+    // Same class of bug as parseGolangciLint's equivalent test — a plain
+    // `map[ruleName]` lookup with no own-property guard would resolve
+    // 'constructor' to the inherited Object constructor instead of
+    // falling through to '?? formatting'.
+    const content = JSON.stringify({ rules: { constructor: 'error', toString: 'error' } });
+    const out = parseEslintRules(content, '.eslintrc.json');
+    expect(out.length).toBe(2);
+    for (const c of out) {
+      expect(c.category).toBe('formatting');
+      expect(typeof c.category).toBe('string');
+    }
+  });
 });
 
 describe('parsePrettierConfig', () => {
@@ -255,7 +291,100 @@ describe('parseConfigFile (dispatch by filename)', () => {
     expect(out[0]?.category).toBe('type-safety');
   });
 
+  it('routes go.mod to the Go directive parser', () => {
+    const out = parseConfigFile('go.mod', 'module example.com/greeter\n\ngo 1.22\n');
+    expect(out[0]?.category).toBe('type-safety');
+    expect(out[0]?.rule).toContain('1.22');
+  });
+
+  it('routes .golangci.yml to the golangci-lint parser', () => {
+    const out = parseConfigFile('.golangci.yml', 'linters:\n  enable:\n    - errcheck\n');
+    expect(out[0]?.category).toBe('error-handling');
+  });
+
   it('returns [] for an unrecognized filename', () => {
     expect(parseConfigFile('README.md', '# hi')).toEqual([]);
+  });
+});
+
+describe('languageForConfigFile', () => {
+  it('resolves TS/JS config filenames to "typescript"', () => {
+    expect(languageForConfigFile('tsconfig.json')).toBe('typescript');
+    expect(languageForConfigFile('.eslintrc.json')).toBe('typescript');
+    expect(languageForConfigFile('.prettierrc')).toBe('typescript');
+  });
+
+  it('resolves Go config filenames to "go"', () => {
+    expect(languageForConfigFile('go.mod')).toBe('go');
+    expect(languageForConfigFile('.golangci.yml')).toBe('go');
+  });
+
+  it('returns null for an unrecognized filename', () => {
+    expect(languageForConfigFile('README.md')).toBeNull();
+  });
+});
+
+describe('parseGoModDirectives', () => {
+  it('emits one type-safety candidate for the go directive, with the right line number', () => {
+    const content = 'module example.com/greeter\n\ngo 1.22\n\nrequire (\n\tfoo v1.0.0\n)\n';
+    const out = parseGoModDirectives(content, 'go.mod');
+    expect(out.length).toBe(1);
+    expect(out[0]!.category).toBe('type-safety');
+    expect(out[0]!.confidence).toBe(1);
+    expect(out[0]!.rule).toContain('Go 1.22');
+    expect(out[0]!.evidence_line_start).toBe(3);
+    expect(out[0]!.evidence_snippet).toBe('go 1.22');
+  });
+
+  it('returns [] when go.mod has no go directive', () => {
+    expect(parseGoModDirectives('module example.com/greeter\n', 'go.mod')).toEqual([]);
+  });
+
+  it('returns [] for empty content without throwing', () => {
+    expect(parseGoModDirectives('', 'go.mod')).toEqual([]);
+  });
+});
+
+describe('parseGolangciLint', () => {
+  it('emits one candidate per enabled linter, mapped to its category', () => {
+    const content = ['linters:', '  enable:', '    - errcheck', '    - gosec', '    - revive'].join('\n');
+    const out = parseGolangciLint(content, '.golangci.yml');
+    const byName = new Map(out.map((c) => [c.rule, c]));
+    expect(out.length).toBe(3);
+    expect([...byName.values()].find((c) => c.rule.includes('errcheck'))?.category).toBe('error-handling');
+    expect([...byName.values()].find((c) => c.rule.includes('gosec'))?.category).toBe('security');
+    expect([...byName.values()].find((c) => c.rule.includes('revive'))?.category).toBe('naming');
+    // Line numbers point at the actual list entry, not always line 1.
+    for (const c of out) expect(c.evidence_line_start).toBeGreaterThan(0);
+  });
+
+  it('falls back to formatting for an unmapped linter name', () => {
+    const content = 'linters:\n  enable:\n    - whitespace\n';
+    const out = parseGolangciLint(content, '.golangci.yml');
+    expect(out[0]?.category).toBe('formatting');
+  });
+
+  it('returns [] when there is no linters.enable list', () => {
+    expect(parseGolangciLint('linters:\n  disable-all: true\n', '.golangci.yml')).toEqual([]);
+    expect(parseGolangciLint('run:\n  timeout: 5m\n', '.golangci.yml')).toEqual([]);
+  });
+
+  it('falls back to formatting for a linter name that collides with an inherited Object.prototype member', () => {
+    // A plain `map[name]` bracket lookup with no own-property guard would
+    // resolve 'constructor' to the inherited Object constructor function
+    // instead of falling through to the '?? formatting' default — a real
+    // bug found by pr-self-review's security skill on this PR. Names like
+    // this come straight from repo-controlled .golangci.yml content.
+    const content = 'linters:\n  enable:\n    - constructor\n    - toString\n    - hasOwnProperty\n';
+    const out = parseGolangciLint(content, '.golangci.yml');
+    expect(out.length).toBe(3);
+    for (const c of out) {
+      expect(c.category).toBe('formatting');
+      expect(typeof c.category).toBe('string');
+    }
+  });
+
+  it('returns [] for invalid YAML without throwing', () => {
+    expect(parseGolangciLint(':\n  - not: [valid\n', '.golangci.yml')).toEqual([]);
   });
 });
