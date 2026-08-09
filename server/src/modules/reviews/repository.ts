@@ -39,6 +39,12 @@ export class ReviewRepository {
     return pullRepo.getPrFiles(this.db, prId);
   }
 
+  /** Commit shas/messages for a PR (persisted on PR sync) — one of the Intent
+   *  Layer's indirect-signal data sources (`modules/intent/service.ts`). */
+  getPrCommits(prId: string): Promise<(typeof t.prCommits.$inferSelect)[]> {
+    return pullRepo.getPrCommits(this.db, prId);
+  }
+
   // ---- reviews + findings -------------------------------------------------
 
   insertReview(values: {

@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { pgTable, uuid, text, integer, jsonb, timestamp, doublePrecision } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, integer, jsonb, timestamp, doublePrecision, boolean, check } from 'drizzle-orm/pg-core';
 import { now } from './_shared';
 import { workspaces } from './core';
 import { pullRequests } from './pulls';
@@ -45,16 +45,39 @@ export const findings = pgTable('findings', {
   trifectaComponents: jsonb('trifecta_components').$type<string[]>(),
   acceptedAt: timestamp('accepted_at', { withTimezone: true }),
   dismissedAt: timestamp('dismissed_at', { withTimezone: true }),
+  /** Intent Layer — set by the reviewing LLM itself, only when a derived PR
+   *  intent was injected into its prompt; null otherwise (no intent, or a
+   *  Finding producer other than the main reviewer, e.g. lethal-trifecta). */
+  inScope: boolean('in_scope'),
 });
 
-export const prIntent = pgTable('pr_intent', {
-  prId: uuid('pr_id')
-    .primaryKey()
-    .references(() => pullRequests.id, { onDelete: 'cascade' }),
-  intent: text('intent').notNull(),
-  inScope: jsonb('in_scope').$type<string[]>().notNull().default(sql`'[]'::jsonb`),
-  outOfScope: jsonb('out_of_scope').$type<string[]>().notNull().default(sql`'[]'::jsonb`),
-});
+export const prIntent = pgTable(
+  'pr_intent',
+  {
+    prId: uuid('pr_id')
+      .primaryKey()
+      .references(() => pullRequests.id, { onDelete: 'cascade' }),
+    intent: text('intent').notNull(),
+    inScope: jsonb('in_scope').$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+    outOfScope: jsonb('out_of_scope').$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+    /** Server-side-clamped, model-self-reported confidence (0-1) — audit/log
+     *  mechanism only, never rendered as a % in the UI. */
+    confidence: doublePrecision('confidence').notNull(),
+    /** Which data sources actually backed the derivation — a closed enum so
+     *  the UI can render a fixed qualitative badge without string matching. */
+    evidenceTier: text('evidence_tier', {
+      enum: ['direct', 'ticket_only', 'indirect_only'],
+    }).notNull(),
+    /** Audit trail of resolved (and explicitly-failed) data sources, e.g.
+     *  ["pr_description", "linked_issue#42", "spec:https://...",
+     *  "spec_link_unreachable:https://...", "branch_name", "commit_messages",
+     *  "changed_paths", "hunk_headers"]. */
+    sources: jsonb('sources').$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+  },
+  (t) => ({
+    confidenceRange: check('pr_intent_confidence_range', sql`${t.confidence} >= 0 AND ${t.confidence} <= 1`),
+  }),
+);
 
 export const prBrief = pgTable('pr_brief', {
   prId: uuid('pr_id')

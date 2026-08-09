@@ -15,5 +15,21 @@
     "blame": "blame",
     "noHistory": "No history available for this line.",
     "noCommits": "No commits found for this line."
+  },
+  "intentCard": {
+    "deriving": "Deriving…",
+    "rederive": "Re-derive",
+    "derive": "Derive intent",
+    "loadError": "Couldn't load intent",
+    "loadErrorBody": "Failed to load the derived intent for this PR.",
+    "empty": "No intent has been derived for this PR yet. Click \"Derive intent\" to summarize what this PR is trying to accomplish before reviewing it.",
+    "inScope": "In scope",
+    "outOfScope": "Out of scope",
+    "noneStated": "(none stated)",
+    "evidence": {
+      "direct": "Backed by the PR description and/or a linked spec/ticket",
+      "ticket_only": "Inferred from a linked issue/ticket only — no PR description",
+      "indirect_only": "Inferred from branch/commits/file names only — low confidence"
+    }
   }
 }

@@ -120,6 +120,13 @@
       "when": 1786275718956,
       "tag": "0016_add_agent_run_skills",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1786305089252,
+      "tag": "0017_simple_violations",
+      "breakpoints": true
     }
   ]
 }

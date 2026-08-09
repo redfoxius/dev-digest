@@ -1,12 +1,27 @@
 import type { Container } from '../../platform/container.js';
-import type { FindingActionKind, RunEventKind, RunTrace } from '@devdigest/shared';
-import { AppError, NotFoundError } from '../../platform/errors.js';
+import type { FindingActionKind, PrIntentRecord, RunEventKind, RunTrace } from '@devdigest/shared';
+import { AppError, ExternalServiceError, NotFoundError } from '../../platform/errors.js';
 import type { AgentRow } from '../../db/rows.js';
+import type { IntentLog } from '../intent/types.js';
 import { ReviewRepository } from './repository.js';
 import { type ReviewDto, type ReviewDtoFinding } from './helpers.js';
 import { ReviewRunExecutor, type Logger } from './run-executor.js';
+import { loadDiff } from './diff-loader.js';
 import { actOnFinding as actOnFindingImpl } from './findings.js';
 import { reviewToDto } from './helpers.js';
+
+/** Adapts the pino-compatible `Logger` ((obj, msg) shape) to the Intent
+ *  Layer's minimal `IntentLog` ((msg, data) shape) — the manual re-derive
+ *  path has no SSE run/trace to fan a `RunLogger` into, so it forwards
+ *  straight to Fastify's `app.log` instead. */
+function toIntentLog(logger?: Logger): IntentLog {
+  if (!logger) return { tool: () => undefined, info: () => undefined, error: () => undefined };
+  return {
+    tool: (msg, data) => logger.debug(data ?? {}, msg),
+    info: (msg, data) => logger.info(data ?? {}, msg),
+    error: (msg, data) => logger.error(data ?? {}, msg),
+  };
+}
 
 // Re-export DTO types + converters for backward-compatible imports from
 // './service.js' (these previously lived here; logic now in ./helpers.ts).
@@ -182,5 +197,43 @@ export class ReviewService {
 
   async getRunTrace(runId: string): Promise<RunTrace | undefined> {
     return this.repo.getRunTrace(runId);
+  }
+
+  // ===========================================================================
+  // Intent Layer
+  // ===========================================================================
+
+  /** Thin read passthrough — `null` before any derivation has run. */
+  async getIntent(workspaceId: string, prId: string): Promise<PrIntentRecord | null> {
+    const pull = await this.repo.getPull(workspaceId, prId);
+    if (!pull) throw new NotFoundError('Pull request not found');
+    const intent = await this.repo.getIntent(prId);
+    return intent ? { pr_id: prId, ...intent } : null;
+  }
+
+  /**
+   * Manual re-derivation — independent of running a full review. Synchronous
+   * (single cheap-model call, no SSE run stream, no agent_runs/RunTrace row —
+   * lighter than a review run, matching the Conventions "Rescan" precedent).
+   * Unlike the automatic (batch) path, a total failure here surfaces as a
+   * real 5xx: the user clicked an explicit action and should see it failed.
+   */
+  async deriveIntent(workspaceId: string, prId: string, logger?: Logger): Promise<PrIntentRecord> {
+    const pull = await this.repo.getPull(workspaceId, prId);
+    if (!pull) throw new NotFoundError('Pull request not found');
+    const repo = await this.repo.getRepo(pull.repoId);
+    if (!repo) throw new NotFoundError('Repo not found');
+    const diff = await loadDiff(this.container, this.repo, workspaceId, pull, repo);
+    const intent = await this.container.intentDeriver.derive({
+      workspaceId,
+      pull,
+      repo,
+      diff,
+      log: toIntentLog(logger),
+    });
+    if (!intent) {
+      throw new ExternalServiceError('Failed to derive PR intent — see server logs for details');
+    }
+    return { pr_id: prId, ...intent };
   }
 }

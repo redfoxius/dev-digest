@@ -131,6 +131,23 @@ export default async function reviewsRoutes(appBase: FastifyInstance) {
     return service.reviewsForPull(workspaceId, req.params.id);
   });
 
+  // ---- Intent Layer ---------------------------------------------------------
+  // GET  /pulls/:id/intent         → persisted PrIntentRecord | null (never derived)
+  // POST /pulls/:id/intent/derive  → manual re-derivation (independent of a review run)
+  app.get('/pulls/:id/intent', { schema: { params: IdParams } }, async (req) => {
+    const { workspaceId } = await getContext(container, req);
+    return service.getIntent(workspaceId, req.params.id);
+  });
+
+  app.post(
+    '/pulls/:id/intent/derive',
+    { schema: { params: IdParams }, config: { rateLimit: { max: 10, timeWindow: '1 minute' } } },
+    async (req) => {
+      const { workspaceId } = await getContext(container, req);
+      return service.deriveIntent(workspaceId, req.params.id, req.log);
+    },
+  );
+
   // ---- Delete a whole review run (one agent's pass) + its findings --------
   app.delete('/reviews/:id', { schema: { params: IdParams } }, async (req) => {
     const { workspaceId } = await getContext(container, req);

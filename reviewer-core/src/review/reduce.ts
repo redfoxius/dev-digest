@@ -29,6 +29,42 @@ export function scoreFromFindings(findings: Finding[]): number {
   return Math.max(0, Math.min(100, 100 - penalty));
 }
 
+/** Severity rank for scope-filter tie-breaking (highest wins). */
+const SEVERITY_RANK: Record<Finding['severity'], number> = {
+  CRITICAL: 2,
+  WARNING: 1,
+  SUGGESTION: 0,
+};
+
+/**
+ * Intent Layer — deterministic scope filtering, pure (findings in, findings
+ * out), same "determinism-over-model-self-report" philosophy as
+ * `scoreFromFindings` above. Called from `reviewPullRequest()` after the
+ * citation-grounding gate, and only when intent was actually provided.
+ *
+ * Safety-critical kinds (secret_leak, lethal_trifecta, phantom, hook) always
+ * pass through regardless of declared scope — only ordinary 'finding'-kind
+ * findings are scope-filtered. Every in-scope finding is kept; AT MOST ONE
+ * out-of-scope finding is preserved — the highest severity (CRITICAL >
+ * WARNING > SUGGESTION), ties broken by higher confidence, then first-seen —
+ * so a genuinely serious issue outside the PR's stated bounds isn't silently
+ * dropped, per the spec's "one signal is preserved" requirement.
+ */
+export function filterByScope(findings: Finding[]): { kept: Finding[]; dropped: Finding[] } {
+  const scoreable = findings.filter((f) => (f.kind ?? 'finding') === 'finding');
+  const exempt = findings.filter((f) => (f.kind ?? 'finding') !== 'finding');
+  const inScope = scoreable.filter((f) => f.in_scope !== false);
+  const outOfScope = scoreable.filter((f) => f.in_scope === false);
+
+  const bestOutOfScope = [...outOfScope].sort(
+    (a, b) => SEVERITY_RANK[b.severity] - SEVERITY_RANK[a.severity] || b.confidence - a.confidence,
+  )[0];
+
+  const kept = [...exempt, ...inScope, ...(bestOutOfScope ? [bestOutOfScope] : [])];
+  const dropped = outOfScope.filter((f) => f !== bestOutOfScope);
+  return { kept, dropped };
+}
+
 /** Verdict severity order for the reduce step (worst verdict wins). */
 const VERDICT_RANK: Record<string, number> = {
   request_changes: 2,

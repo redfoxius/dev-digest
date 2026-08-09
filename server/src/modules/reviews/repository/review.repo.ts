@@ -50,6 +50,9 @@ export async function insertFindings(
         confidence: f.confidence,
         kind: f.kind ?? 'finding',
         trifectaComponents: f.trifecta_components ?? null,
+        // Intent Layer — set by the reviewing LLM itself only when intent was
+        // injected into its prompt; null otherwise (`f.in_scope` is `.nullish()`).
+        inScope: f.in_scope ?? null,
       })),
     )
     .returning();

@@ -35,6 +35,22 @@ export function wrapUntrusted(label: string, content: string): string {
 
 /** Cap the PR description so a huge author body can't blow the token budget. */
 const MAX_PR_DESCRIPTION_CHARS = 4000;
+/** Cap the derived-intent text — smaller than the PR description cap since
+ *  intent+scope is already a compact, LLM-authored summary, not raw prose. */
+const MAX_INTENT_CHARS = 1500;
+
+/**
+ * The TRUSTED scope-tagging instruction appended right after the wrapped
+ * `## Derived intent` block (own paragraph, OUTSIDE `<untrusted>` — this is
+ * server-authored framing, not PR/spec content, same reasoning as why the
+ * `## Derived intent` heading itself is trusted while its contents aren't).
+ * Only rendered when `parts.intent` is present.
+ */
+const SCOPE_TAGGING_INSTRUCTION =
+  "For each finding you report, set `in_scope` to `false` only if it is clearly about code " +
+  "entirely outside the PR's stated scope above; otherwise `true`. When the intent above is " +
+  'low-confidence (see its evidence tier), be conservative — only mark something out of scope ' +
+  "if you're genuinely confident it's unrelated to what this PR is doing.";
 
 export interface PromptParts {
   /** Agent's system prompt (trusted). */
@@ -73,6 +89,17 @@ export interface PromptParts {
    * undefined → section omitted.
    */
   prDescription?: string;
+  /**
+   * Derived PR intent/scope (Intent Layer) — an already-rendered text block
+   * (composed server-side by `renderIntentText`, NOT here). Untrusted —
+   * derivation reads author-controlled PR/spec content — delimiter-wrapped.
+   * Rendered as `## Derived intent`, right after `## PR description` and
+   * before `## Skills / rules`, so the model sees "what the PR claims" then
+   * "what we inferred" before anything else. Empty/undefined → section
+   * omitted (no behavior change — a review run without intent is identical
+   * to the pre-Intent-Layer prompt).
+   */
+  intent?: string;
   /** The unified diff / user task (untrusted content). */
   diff: string;
   /** Optional task framing line, e.g. "Review PR #482 '…'". */
@@ -110,10 +137,18 @@ export function assemblePrompt(parts: PromptParts): AssembledPrompt {
       ? parts.prDescription.slice(0, MAX_PR_DESCRIPTION_CHARS)
       : undefined;
 
+  const intent =
+    parts.intent && parts.intent.trim().length > 0 ? parts.intent.slice(0, MAX_INTENT_CHARS) : undefined;
+
   const userSections: string[] = [];
   if (parts.task) userSections.push(parts.task);
   if (prDescription) {
     userSections.push(`## PR description\n${wrapUntrusted('pr-description', prDescription)}`);
+  }
+  if (intent) {
+    userSections.push(
+      `## Derived intent\n${wrapUntrusted('derived-intent', intent)}\n\n${SCOPE_TAGGING_INSTRUCTION}`,
+    );
   }
   if (skillsBlock) userSections.push(`## Skills / rules\n${skillsBlock}`);
   if (memoryBlock) userSections.push(`## Relevant memory\n${memoryBlock}`);
@@ -143,6 +178,7 @@ export function assemblePrompt(parts: PromptParts): AssembledPrompt {
     callers: parts.callers ?? null,
     repo_map: parts.repoMap ?? null,
     pr_description: prDescription ?? null,
+    intent: intent ?? null,
     user,
   };
 
