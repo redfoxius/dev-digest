@@ -9,7 +9,7 @@ import type {
 import { Review as ReviewSchema } from '@devdigest/shared';
 import { assemblePrompt } from '../prompt.js';
 import { groundFindings, groundingSummary } from '../grounding.js';
-import { reduceReviews, scoreFromFindings, sliceDiff } from './reduce.js';
+import { filterByScope, reduceReviews, scoreFromFindings, sliceDiff } from './reduce.js';
 
 /**
  * reviewPullRequest — the review engine entry point.
@@ -71,6 +71,15 @@ export interface ReviewInput {
   /** PR author's description/body (untrusted; truncated + delimiter-wrapped in
       the prompt). Empty/undefined → section omitted. */
   prDescription?: string;
+  /**
+   * Derived PR intent/scope (Intent Layer) — an already-rendered text block;
+   * caller (server) derives it, this engine only threads it into the prompt
+   * and, when present, deterministically filters findings by the model's own
+   * `in_scope` self-tag after grounding. Empty/undefined → both the prompt
+   * section AND scope filtering are skipped (identical to pre-Intent-Layer
+   * behavior).
+   */
+  intent?: string;
   /** Task framing line, e.g. "Review PR #482 …". */
   task?: string;
   /** Override the structured-output retry budget. */
@@ -135,6 +144,7 @@ export async function reviewPullRequest(input: ReviewInput): Promise<ReviewOutco
     callers: input.callers,
     repoMap: input.repoMap,
     prDescription: input.prDescription,
+    intent: input.intent,
     task: input.task,
   };
 
@@ -201,13 +211,33 @@ export async function reviewPullRequest(input: ReviewInput): Promise<ReviewOutco
   }
   emit('result', `Citation grounding: ${grounding}`);
 
-  // Score is derived from the findings that SURVIVED grounding (not the model's
-  // self-reported number, and not the pre-grounding set) so the score, the
-  // findings list, and the deterministic event always agree.
+  // Intent Layer — deterministic scope filtering, AFTER grounding, BEFORE
+  // scoring, and ONLY when intent was actually provided (no intent → no
+  // declared scope → skip entirely, so a review run without intent behaves
+  // exactly as it did before this feature). Reuses the existing `dropped`
+  // field rather than adding a parallel one.
+  let finalFindings = ground.kept;
+  let dropped = ground.dropped;
+  if (input.intent) {
+    const scoped = filterByScope(finalFindings);
+    if (scoped.dropped.length > 0) {
+      emit('info', `Scope filter: kept ${scoped.kept.length}, dropped ${scoped.dropped.length} out-of-scope finding(s)`);
+      for (const f of scoped.dropped) {
+        emit('info', `scope filter dropped "${f.title}": outside the PR's stated scope`);
+      }
+    }
+    dropped = [...dropped, ...scoped.dropped.map((finding) => ({ finding, reason: "outside the PR's stated scope" }))];
+    finalFindings = scoped.kept;
+  }
+
+  // Score is derived from the findings that SURVIVED grounding + scope
+  // filtering (not the model's self-reported number, and not the
+  // pre-grounding set) so the score, the findings list, and the
+  // deterministic event always agree.
   return {
-    review: { ...merged, findings: ground.kept, score: scoreFromFindings(ground.kept) },
+    review: { ...merged, findings: finalFindings, score: scoreFromFindings(finalFindings) },
     grounding,
-    dropped: ground.dropped,
+    dropped,
     mode,
     assembly,
     chunks: chunks.map((c) => ({ label: c.label })),

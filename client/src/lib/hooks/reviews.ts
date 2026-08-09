@@ -8,6 +8,7 @@ import { api, API_BASE } from "../api";
 import { notify } from "../toast";
 import type {
   FindingActionKind,
+  PrIntentRecord,
   PrReviewComment,
   ReviewRecord,
   ReviewRunResponse,
@@ -53,6 +54,26 @@ export function usePrReviews(prId: string | null | undefined, enabled = true) {
     queryKey: ["reviews", prId],
     queryFn: () => api.get<ReviewRecord[]>(`/pulls/${prId}/reviews`),
     enabled: !!prId && enabled,
+  });
+}
+
+// ---- Intent Layer ----
+/** Persisted PR intent, or `null` if never derived. */
+export function usePrIntent(prId: string | null | undefined) {
+  return useQuery({
+    queryKey: ["pr-intent", prId],
+    queryFn: () => api.get<PrIntentRecord | null>(`/pulls/${prId}/intent`),
+    enabled: !!prId,
+  });
+}
+
+/** Manual re-derivation — independent of running a full review (models the
+   Conventions "Rescan" mutation pattern, `lib/hooks/conventions.ts`). */
+export function useDeriveIntent(prId: string | null | undefined) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post<PrIntentRecord>(`/pulls/${prId}/intent/derive`),
+    onSuccess: (data) => qc.setQueryData(["pr-intent", prId], data),
   });
 }
 

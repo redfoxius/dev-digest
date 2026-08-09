@@ -17,6 +17,17 @@ workflow and quality bar.
 
 ## Codebase Patterns
 
+- 2026-08-09 — `filterByScope`'s (`review/reduce.ts`) "preserve the
+  highest-severity out-of-scope finding, ties broken by confidence then
+  first-seen" rule gets "first-seen" for free by relying on
+  `Array.prototype.sort` being a STABLE sort (guaranteed by spec since
+  ES2019 / Node ≥12) — no explicit index is carried through the sort to
+  break ties manually. Don't "fix" this by adding a manual stable-sort
+  wrapper or an index tie-break; the built-in `sort()` is already stable in
+  every runtime this package targets, and adding one would be unnecessary
+  complexity for a non-bug. (`reviewer-core/src/review/reduce.ts` —
+  `filterByScope`)
+
 ## Tool & Library Notes
 
 - 2026-08-05 — `OpenRouterProvider`'s constructor passes `timeout: 90_000` to

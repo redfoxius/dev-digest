@@ -5,7 +5,7 @@ import { waitForPrRuns } from './helpers/runs.js';
 import { buildApp } from '../src/app.js';
 import { loadConfig } from '../src/platform/config.js';
 import { seed } from '../src/db/seed.js';
-import { MockLLMProvider, MockEmbedder, MockGitClient } from '../src/adapters/mocks.js';
+import { MockLLMProvider, MockEmbedder, MockGitClient, MockIntentDeriver } from '../src/adapters/mocks.js';
 import * as t from '../src/db/schema.js';
 import { eq } from 'drizzle-orm';
 import type {
@@ -227,6 +227,7 @@ d('A2 reviews + agents (Testcontainers pg)', () => {
       db: pg.handle.db,
       overrides: {
         embedder: new MockEmbedder(),
+        intentDeriver: new MockIntentDeriver(undefined),
         git: new MockGitClient({ diff: DIFF }),
         llm: {
           [provider]: new MockLLMProvider(provider, { structured }),
@@ -480,6 +481,7 @@ d('A2 reviews + agents (Testcontainers pg)', () => {
       db: pg.handle.db,
       overrides: {
         embedder: new MockEmbedder(),
+        intentDeriver: new MockIntentDeriver(undefined),
         git: new MockGitClient({ diff: DIFF }),
         llm: {
           openai: new PerAgentMockLLM({
@@ -563,6 +565,7 @@ d('A2 reviews + agents (Testcontainers pg)', () => {
       db: pg.handle.db,
       overrides: {
         embedder: new MockEmbedder(),
+        intentDeriver: new MockIntentDeriver(undefined),
         git: new MockGitClient({ diff: DIFF }),
         llm: { openai: llm },
       },
