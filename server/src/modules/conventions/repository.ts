@@ -25,6 +25,9 @@ export interface InsertConvention {
   confidence: number;
   status: ConventionStatus;
   origin: ConventionOrigin;
+  /** Language id, derived by the caller from `evidencePath` (Phase 7.4,
+   *  docs/go-language-support-plan.md) — never asked of the model. */
+  language?: string | null;
 }
 
 export interface UpdateConventionPatch {
@@ -36,6 +39,7 @@ export interface UpdateConventionPatch {
 export interface ListConventionsFilters {
   status?: ConventionStatus;
   category?: ConventionCategory;
+  language?: string;
 }
 
 /** Normalized dedup key for re-scan: same rule text + same evidence file
@@ -55,6 +59,7 @@ export class ConventionsRepository {
     const conditions = [eq(t.conventions.workspaceId, workspaceId), eq(t.conventions.repoId, repoId)];
     if (filters.status !== undefined) conditions.push(eq(t.conventions.status, filters.status));
     if (filters.category !== undefined) conditions.push(eq(t.conventions.category, filters.category));
+    if (filters.language !== undefined) conditions.push(eq(t.conventions.language, filters.language));
     return this.db
       .select()
       .from(t.conventions)
@@ -106,6 +111,7 @@ export class ConventionsRepository {
           confidence: r.confidence,
           status: r.status,
           origin: r.origin,
+          language: r.language ?? null,
         })),
       )
       .returning();

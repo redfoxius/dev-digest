@@ -47,4 +47,9 @@ export const conventions = pgTable('conventions', {
   origin: text('origin', { enum: ['model', 'config'] })
     .notNull()
     .default('model'),
+  // Phase 7.4, docs/go-language-support-plan.md: derived in code from
+  // evidence_path via languageIdForFile() at insert time, never asked of
+  // the model — nullable because pre-Phase-7.4 rows (and any future
+  // evidence_path outside the language registry) have no derivable value.
+  language: text('language'),
 });

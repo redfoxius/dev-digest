@@ -65,6 +65,9 @@ export const PluginConvention = z.object({
   evidence_snippet: z.string().nullish(),
   confidence: z.number().nullish(),
   origin: ConventionOrigin.nullish(),
+  // Phase 7.4, docs/go-language-support-plan.md — round-trip symmetry with
+  // ConventionCandidate.language (knowledge.ts).
+  language: z.string().nullish(),
   accepted: z.boolean(),
 });
 export type PluginConvention = z.infer<typeof PluginConvention>;

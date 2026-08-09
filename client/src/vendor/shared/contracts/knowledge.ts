@@ -204,8 +204,10 @@ export const ConventionStatus = z.enum(['pending', 'accepted', 'rejected']);
 export type ConventionStatus = z.infer<typeof ConventionStatus>;
 
 /** 'model' = LLM-proposed, verified against the repo's clone before it can
- *  exist at all. 'config' = parsed deterministically from eslint/tsconfig/
- *  prettier — no model call, can't hallucinate, skips verification. */
+ *  exist at all. 'config' = parsed deterministically per-language (TS/JS's
+ *  eslint/tsconfig/prettier, Go's go.mod/golangci-lint — see
+ *  `server/src/modules/conventions/langs/`) — no model call, can't
+ *  hallucinate, skips verification. */
 export const ConventionOrigin = z.enum(['model', 'config']);
 export type ConventionOrigin = z.infer<typeof ConventionOrigin>;
 
@@ -220,6 +222,12 @@ export const ConventionCandidate = z.object({
   confidence: z.number().min(0).max(1),
   status: ConventionStatus,
   origin: ConventionOrigin,
+  /** Language id (matches `repo-intel/languages/index.ts`'s registry, e.g.
+   *  'typescript'/'go'), derived in code from `evidence_path` — never
+   *  asked of the model. Nullish for rows scanned before this field existed
+   *  (Phase 7.4, docs/go-language-support-plan.md) and for any evidence
+   *  path outside the registry. */
+  language: z.string().nullish(),
 });
 export type ConventionCandidate = z.infer<typeof ConventionCandidate>;
 
