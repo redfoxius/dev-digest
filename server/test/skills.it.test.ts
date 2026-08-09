@@ -5,6 +5,7 @@ import { buildApp } from '../src/app.js';
 import { loadConfig } from '../src/platform/config.js';
 import { seed } from '../src/db/seed.js';
 import { MockGitClient, MockGitHubClient } from '../src/adapters/mocks.js';
+import * as t from '../src/db/schema.js';
 
 // `HttpUrlFetcher` (the real adapter, used here — not `MockUrlFetcher`) calls
 // undici's own `fetch`, not `globalThis.fetch` (Node's global fetch rejects a
@@ -278,6 +279,199 @@ d('/skills', () => {
       url: '/skills/community/does-not-exist/import',
     });
     expect(unknown.statusCode).toBe(404);
+
+    await app.close();
+  });
+});
+
+/**
+ * `GET /skills/:id/stats` (Stats tab — docs/skills-feature-plan.md#stats-tab
+ * --addendum). Runs/findings have no public "create" endpoint (they're only
+ * ever produced by an actual review) — seeded directly via `t.*` inserts,
+ * same precedent as `repo-intel-sample.it.test.ts`.
+ */
+d('GET /skills/:id/stats', () => {
+  let pg: PgFixture;
+  let workspaceId: string;
+  let repoId: string;
+  let prId: string;
+
+  beforeAll(async () => {
+    pg = await startPg();
+    ({ workspaceId } = await seed(pg.handle.db));
+
+    const [repo] = await pg.handle.db
+      .insert(t.repos)
+      .values({ workspaceId, owner: 'acme', name: 'stats-fixture', fullName: 'acme/stats-fixture' })
+      .returning();
+    repoId = repo!.id;
+
+    const [pr] = await pg.handle.db
+      .insert(t.pullRequests)
+      .values({
+        workspaceId,
+        repoId,
+        number: 1,
+        title: 'Fixture PR',
+        author: 'fixture',
+        branch: 'feat/x',
+        base: 'main',
+        headSha: 'deadbeef',
+      })
+      .returning();
+    prId = pr!.id;
+  });
+  afterAll(async () => {
+    await pg?.stop();
+  });
+
+  function makeApp() {
+    const config = loadConfig({ ...process.env, NODE_ENV: 'test' } as NodeJS.ProcessEnv);
+    return buildApp({
+      config,
+      db: pg.handle.db,
+      overrides: { git: new MockGitClient(), github: new MockGitHubClient() },
+    });
+  }
+
+  /** One agent_runs row (+ optional agent_run_skills link + a review with
+   *  findings), all workspace/pr-scoped, at a caller-chosen `ranAt`. */
+  async function seedRun(opts: {
+    agentId: string;
+    skillId?: string;
+    ranAt: Date;
+    findings?: { category: string; acceptedAt?: Date; dismissedAt?: Date }[];
+  }) {
+    const [run] = await pg.handle.db
+      .insert(t.agentRuns)
+      .values({ workspaceId, agentId: opts.agentId, prId, ranAt: opts.ranAt, status: 'done' })
+      .returning();
+    const runId = run!.id;
+
+    if (opts.skillId) {
+      await pg.handle.db.insert(t.agentRunSkills).values({ runId, skillId: opts.skillId });
+    }
+    if (opts.findings?.length) {
+      const [review] = await pg.handle.db
+        .insert(t.reviews)
+        .values({ workspaceId, prId, agentId: opts.agentId, runId, kind: 'review' })
+        .returning();
+      await pg.handle.db.insert(t.findings).values(
+        opts.findings.map((f) => ({
+          reviewId: review!.id,
+          file: 'src/x.ts',
+          startLine: 1,
+          endLine: 1,
+          severity: 'WARNING',
+          category: f.category,
+          title: 'Fixture finding',
+          rationale: 'Fixture rationale',
+          confidence: 0.8,
+          acceptedAt: f.acceptedAt ?? null,
+          dismissedAt: f.dismissedAt ?? null,
+        })),
+      );
+    }
+    return runId;
+  }
+
+  it('a skill linked to no agent returns zeros/nulls, not a crash', async () => {
+    const app = await makeApp();
+    const skill = (
+      await app.inject({
+        method: 'POST',
+        url: '/skills',
+        payload: { name: 'Unlinked skill', type: 'custom', body: '# Unlinked' },
+      })
+    ).json();
+
+    const res = await app.inject({ method: 'GET', url: `/skills/${skill.id}/stats` });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({
+      used_by: 0,
+      pull_frequency: null,
+      accept_rate: null,
+      findings_count: 0,
+      agents_using_this_skill: [],
+      findings_by_category: [],
+    });
+    await app.close();
+  });
+
+  it('404s for an unknown skill', async () => {
+    const app = await makeApp();
+    const ghost = '00000000-0000-0000-0000-000000000000';
+    expect((await app.inject({ method: 'GET', url: `/skills/${ghost}/stats` })).statusCode).toBe(404);
+    await app.close();
+  });
+
+  it('computes used_by, windowed pull_frequency/accept_rate, and findings_by_category', async () => {
+    const app = await makeApp();
+    const skill = (
+      await app.inject({
+        method: 'POST',
+        url: '/skills',
+        payload: { name: 'Breaking-change rule', type: 'convention', body: '# Breaking change' },
+      })
+    ).json();
+    const agent = (
+      await app.inject({
+        method: 'POST',
+        url: '/agents',
+        payload: {
+          name: 'API Contract Reviewer (stats fixture)',
+          provider: 'openrouter',
+          model: 'deepseek/deepseek-v4-flash',
+          system_prompt: 'Flag breaking API changes.',
+        },
+      })
+    ).json();
+    // PATCH (not the bulk POST, which defaults a brand-new link's `enabled`
+    // to false — reorder semantics) both attaches and enables in one call,
+    // matching the Agent Editor Skills-tab checkbox's "toggle to attach".
+    await app.inject({
+      method: 'PATCH',
+      url: `/agents/${agent.id}/skills/${skill.id}`,
+      payload: { enabled: true },
+    });
+
+    const now = new Date();
+    const outsideWindow = new Date(Date.now() - 40 * 24 * 60 * 60 * 1000);
+
+    // Eligible run #1 (this skill attached, inside window): 1 accepted + 1
+    // dismissed "security" finding, 1 undecided "bug" finding.
+    await seedRun({
+      agentId: agent.id,
+      skillId: skill.id,
+      ranAt: now,
+      findings: [
+        { category: 'security', acceptedAt: now },
+        { category: 'security', dismissedAt: now },
+        { category: 'bug' },
+      ],
+    });
+    // A second run by the SAME agent, inside window, but this skill was NOT
+    // attached — counts toward the pull_frequency denominator, not the
+    // numerator.
+    await seedRun({ agentId: agent.id, ranAt: now });
+    // Eligible run outside the 30-day window — excluded entirely.
+    await seedRun({ agentId: agent.id, skillId: skill.id, ranAt: outsideWindow, findings: [{ category: 'perf' }] });
+
+    const res = await app.inject({ method: 'GET', url: `/skills/${skill.id}/stats?days=30` });
+    expect(res.statusCode).toBe(200);
+    const stats = res.json();
+
+    expect(stats.used_by).toBe(1);
+    expect(stats.agents_using_this_skill).toEqual([{ agent_id: agent.id, agent_name: agent.name }]);
+    expect(stats.pull_frequency).toBe(0.5); // 1 eligible / 2 total runs in window
+    expect(stats.accept_rate).toBe(0.5); // 1 accepted / (1 accepted + 1 dismissed)
+    expect(stats.findings_count).toBe(3); // outside-window run's finding excluded
+    expect(stats.findings_by_category.sort((a: { category: string }, b: { category: string }) =>
+      a.category.localeCompare(b.category),
+    )).toEqual([
+      { category: 'bug', count: 1 },
+      { category: 'security', count: 2 },
+    ]);
 
     await app.close();
   });

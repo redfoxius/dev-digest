@@ -28,6 +28,7 @@ const CommunityNameParams = z.object({ name: z.string().min(1) });
  *   GET    /skills/:id/versions             → version history (newest first)
  *   GET    /skills/:id/versions/:version    → one version snapshot
  *   POST   /skills/:id/versions/:version/restore → restore (creates a NEW version)
+ *   GET    /skills/:id/stats                → Stats tab (used_by, pull frequency, accept rate, findings)
  *   POST   /skills/import/file/preview      → multipart upload → ImportCandidate preview
  *   POST   /skills/import/file/confirm      → persists (source: manual, enabled: true)
  *   POST   /skills/import/url/preview       → fetch URL server-side → ImportCandidate preview
@@ -57,6 +58,8 @@ const RestoreVersionBody = z
   .transform((v) => v ?? {});
 
 const UrlImportBody = z.object({ url: z.string().url() });
+
+const StatsQuery = z.object({ days: z.coerce.number().int().positive().max(365).default(30) });
 
 /** The candidate an import-confirm endpoint accepts back — the (possibly
  *  user-edited) `ImportCandidate` preview, plus the extraction-only
@@ -219,6 +222,17 @@ export default async function skillsRoutes(appBase: FastifyInstance) {
       );
       if (!skill) throw new NotFoundError('Skill or version not found');
       return skill;
+    },
+  );
+
+  app.get(
+    '/skills/:id/stats',
+    { schema: { params: IdParams, querystring: StatsQuery } },
+    async (req) => {
+      const { workspaceId } = await getContext(app.container, req);
+      const stats = await service.getStats(workspaceId, req.params.id, req.query.days);
+      if (!stats) throw new NotFoundError('Skill not found');
+      return stats;
     },
   );
 }

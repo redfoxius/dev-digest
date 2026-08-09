@@ -149,6 +149,31 @@ export const SkillVersion = z.object({
 });
 export type SkillVersion = z.infer<typeof SkillVersion>;
 
+// ---- Skill stats (Stats tab — docs/skills-feature-plan.md#stats-tab--addendum) ----
+export const SkillStatsAgent = z.object({
+  agent_id: z.string(),
+  agent_name: z.string(),
+});
+export type SkillStatsAgent = z.infer<typeof SkillStatsAgent>;
+
+export const SkillStatsCategory = z.object({
+  category: z.string(),
+  count: z.number().int(),
+});
+export type SkillStatsCategory = z.infer<typeof SkillStatsCategory>;
+
+export const SkillStats = z.object({
+  used_by: z.number().int(),
+  /** 0..1, eligible runs / all runs by agents this skill is linked to, in the window. Null when the denominator is 0. */
+  pull_frequency: z.number().nullable(),
+  /** 0..1, accepted / (accepted+dismissed) findings from eligible runs, in the window. Null when the denominator is 0. */
+  accept_rate: z.number().nullable(),
+  findings_count: z.number().int(),
+  agents_using_this_skill: z.array(SkillStatsAgent),
+  findings_by_category: z.array(SkillStatsCategory),
+});
+export type SkillStats = z.infer<typeof SkillStats>;
+
 export const CreateSkillBody = z.object({
   name: z.string().min(1),
   description: z.string().optional(),

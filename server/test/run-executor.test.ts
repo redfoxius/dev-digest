@@ -59,7 +59,13 @@ function linkedSkillRow(body: string, order: number, linkEnabled: boolean, skill
 
 describe('ReviewRunExecutor — Agent Skills resolution', () => {
   let linkedSkills: ReturnType<typeof vi.fn>;
-  let repo: { insertReview: ReturnType<typeof vi.fn>; insertFindings: ReturnType<typeof vi.fn>; completeAgentRun: ReturnType<typeof vi.fn>; saveRunTrace: ReturnType<typeof vi.fn> };
+  let repo: {
+    insertReview: ReturnType<typeof vi.fn>;
+    insertFindings: ReturnType<typeof vi.fn>;
+    completeAgentRun: ReturnType<typeof vi.fn>;
+    saveRunTrace: ReturnType<typeof vi.fn>;
+    recordRunSkills: ReturnType<typeof vi.fn>;
+  };
   let agents: { linkedSkills: ReturnType<typeof vi.fn> };
   let container: { runBus: RunBus; llm: ReturnType<typeof vi.fn> };
   let executor: InstanceType<typeof ReviewRunExecutor>;
@@ -97,6 +103,7 @@ describe('ReviewRunExecutor — Agent Skills resolution', () => {
       insertFindings: vi.fn().mockResolvedValue([]),
       completeAgentRun: vi.fn().mockResolvedValue(undefined),
       saveRunTrace: vi.fn().mockResolvedValue(undefined),
+      recordRunSkills: vi.fn().mockResolvedValue(undefined),
     };
     container = {
       runBus: new RunBus(),
@@ -156,6 +163,26 @@ describe('ReviewRunExecutor — Agent Skills resolution', () => {
 
     const messages = container.runBus.buffer(runId).map((e) => e.msg);
     expect(messages).toContain('skills: 2 attached');
+  });
+
+  it('records the resolved skill ids for the Stats tab (agent_run_skills), excluding disabled links/skills', async () => {
+    linkedSkills.mockResolvedValue([
+      linkedSkillRow('BODY-1', 0, true, true),
+      linkedSkillRow('BODY-DISABLED-LINK', 1, false, true),
+      linkedSkillRow('BODY-2', 2, true, true),
+    ]);
+
+    await runOneAgent(agentFixture());
+
+    expect(repo.recordRunSkills).toHaveBeenCalledWith(runId, ['skill-0', 'skill-2']);
+  });
+
+  it('does not call recordRunSkills when nothing resolves', async () => {
+    linkedSkills.mockResolvedValue([]);
+
+    await runOneAgent(agentFixture());
+
+    expect(repo.recordRunSkills).not.toHaveBeenCalled();
   });
 
   it('omits the `skills` key entirely (not an empty array) when nothing resolves', async () => {

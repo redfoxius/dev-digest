@@ -181,7 +181,41 @@ workflow and quality bar.
   (`server/src/modules/repo-intel/pipeline/sample.ts`,
   `server/src/modules/repo-intel/service.ts:getConventionSamplesStratified`)
 
+- 2026-08-09 — `reviews.runId` (`server/src/db/schema/reviews.ts:19`) is a
+  plain `uuid` column with NO foreign-key reference to `agent_runs.id`
+  (comment at `run.repo.ts:73-77` already flags this for `deleteAgentRun`'s
+  manual cascade). Building `SkillsRepository.getStats`'s findings-by-
+  category query (joining `agent_run_skills` → `agent_runs` for the window
+  filter → `reviews` via `reviews.runId` → `findings`) means that join has
+  no referential-integrity guarantee — an orphaned/stale `reviews.runId`
+  would silently produce no rows rather than a DB-level error. Any new
+  query joining through `reviews.runId` should assume the same.
+  (`server/src/modules/skills/repository.ts:getStats`)
+
+- 2026-08-09 — `POST /agents/:id/skills {skill_ids}` (the bulk reorder/
+  replace endpoint) and `PATCH /agents/:id/skills/:skillId {enabled}` are
+  NOT interchangeable for "attach a skill enabled" despite both mutating
+  the same `agent_skills` link: the bulk POST defaults a BRAND-NEW skill_id
+  in the list to `enabled: false` (`agents/repository.ts:299`, preserving
+  existing links' enabled state via `enabledById` — reorder semantics), while
+  only PATCH both attaches AND sets `enabled: true` in one call ("toggle to
+  attach", `agents/repository.ts:307-`). A `skills.it.test.ts` stats fixture
+  first tried the bulk POST to link+enable a skill for a control-experiment
+  seed and got `used_by: 0` — silently wrong, not an error — until switched
+  to PATCH.
+  (`server/src/modules/agents/repository.ts:287-305`,
+  `server/test/skills.it.test.ts:GET /skills/:id/stats`)
+
 ## Tool & Library Notes
+
+- 2026-08-09 — `test/skills.test.ts`'s shared `makeFakeDb` chain (queue-based
+  fake `Db`) had no `innerJoin`/`leftJoin`/`groupBy` no-op methods before
+  `SkillsRepository.getStats` — every prior `SkillsRepository` query was a
+  plain `select().from().where()`. Any new join-based repository method unit
+  -tested through this fake needs those three added to the chain object
+  (they're no-ops; the fake resolves purely from the queued-result array
+  order, not real SQL), or `.innerJoin is not a function` fails immediately.
+  (`server/test/skills.test.ts:makeFakeDb` chain object)
 
 - 2026-08-09 — `DepCruiseGraph.buildEdges`
   (`server/src/adapters/depgraph/index.ts`) silently returns ZERO edges for

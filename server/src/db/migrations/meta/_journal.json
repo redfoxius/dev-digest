@@ -113,6 +113,13 @@
       "when": 1786262523030,
       "tag": "0015_wandering_jackpot",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1786275718956,
+      "tag": "0016_add_agent_run_skills",
+      "breakpoints": true
     }
   ]
 }
