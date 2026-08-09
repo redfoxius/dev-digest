@@ -15,6 +15,12 @@ See [conventions-extractor-plan.md](conventions-extractor-plan.md) for the
 feature's original build plan (status: code complete) — this plan doesn't
 redo that scoping, only adds a quality layer on top.
 
+**Related:** the Extractor today only ever produces JS/TS candidates — see
+Phase 7 of [go-language-support-plan.md](go-language-support-plan.md#phase-7--conventions-extractor-multi-language-support-planned)
+for the root-cause analysis and multi-language upgrade plan (status: not
+started). Once that ships, this doc's Phase 1 accept-rate report should
+gain a `language` breakdown dimension alongside `origin`×`category`.
+
 **No eval harness exists on this branch.** A statistics-grade one does exist
 on other lesson branches in this repo (`feat(evals): statistics-grade harness
 eval package`, `feat(evals): OpenRouter engine`, etc. — see `git log --all

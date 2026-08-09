@@ -1,5 +1,12 @@
 # Conventions Extractor + API Contract Reviewer — feature plan
 
+**Related:** this feature is currently JS/TS-only in practice (Decision 10's
+config-derived pool has no non-JS equivalent, and the model-derived pool is
+untested against other languages) — see Phase 7 of
+[go-language-support-plan.md](go-language-support-plan.md#phase-7--conventions-extractor-multi-language-support-planned)
+for the analysis and a Go-first, extensible-to-any-language upgrade plan
+(status: not started).
+
 **Status:** code complete for the Conventions Extractor feature itself —
 foundation (migration `0014`, schema, contracts, `repoIntel.getFileContent`),
 the server `conventions` module (extract pipeline, config parsers, evidence
