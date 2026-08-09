@@ -195,6 +195,20 @@ export async function completeAgentRun(
     .where(eq(t.agentRuns.id, runId));
 }
 
+/**
+ * Record which skills were actually resolved/attached for this run — feeds
+ * the Skill Editor's Stats tab (`agent_run_skills` has no other writer).
+ * Called at resolution time, before the LLM call, independent of whether the
+ * run later succeeds or fails.
+ */
+export async function recordRunSkills(db: Db, runId: string, skillIds: string[]): Promise<void> {
+  if (skillIds.length === 0) return;
+  await db
+    .insert(t.agentRunSkills)
+    .values(skillIds.map((skillId) => ({ runId, skillId })))
+    .onConflictDoNothing();
+}
+
 /** Persist the WHOLE run log as ONE document. PK = runId → agent_runs. */
 export async function saveRunTrace(db: Db, runId: string, trace: RunTrace): Promise<void> {
   await db

@@ -165,6 +165,18 @@ workflow and quality bar.
   common case for a cheap model on a small PR, so don't assume it's rare.
   (`client/src/lib/format.ts:10`)
 
+- 2026-08-09 — `Donut` (`src/vendor/ui/charts/Donut.tsx:49-51`) unconditionally
+  formats each segment's value via `.toFixed(2)`, regardless of `valuePrefix`.
+  It was built for money (`$4.20`); passing `valuePrefix=""` for an integer
+  metric (e.g. a findings-by-category count) still renders `"3.00"`, not
+  `"3"` — there's no integer/decimals prop. Building `SkillStatsTab`'s
+  findings-by-category donut hit this; accepted as a known cosmetic quirk
+  per the course-scope "reuse as-is" call rather than touching the shared
+  chart primitive for one caller. Worth fixing (an optional `decimals` prop)
+  if a second integer-metric donut shows up.
+  (`client/src/vendor/ui/charts/Donut.tsx:49-51`,
+  `client/src/app/skills/_components/SkillDetail/_components/SkillStatsTab/SkillStatsTab.tsx`)
+
 ## Recurring Errors & Fixes
 
 - 2026-08-06 — `SkillsTab.tsx` destructured only `data`/`isLoading` from its

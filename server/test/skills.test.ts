@@ -64,6 +64,15 @@ function makeFakeDb(queue: unknown[]): { db: Db; calls: FakeCall[] } {
       orderBy() {
         return c;
       },
+      groupBy() {
+        return c;
+      },
+      innerJoin() {
+        return c;
+      },
+      leftJoin() {
+        return c;
+      },
       values(payload: unknown) {
         call.payload = payload;
         return c;
@@ -385,6 +394,69 @@ describe('SkillsRepository — list / getById / deleteById / listVersions / getV
 
     const { db: db2 } = makeFakeDb([[versions[1]]]);
     expect(await new SkillsRepository(db2).getVersion('skill-1', 1)).toEqual(versions[1]);
+  });
+});
+
+// ---- SkillsService.getStats (Stats tab — docs/skills-feature-plan.md#stats-tab--addendum) --
+
+describe('SkillsService.getStats', () => {
+  it('returns undefined (→ 404) when the skill is not in this workspace', async () => {
+    const { db } = makeFakeDb([[]]);
+    const service = new SkillsService({ db } as unknown as Container);
+    expect(await service.getStats('ws-1', 'missing-skill', 30)).toBeUndefined();
+  });
+
+  it('shapes used_by/pull_frequency/accept_rate/findings from the three queries', async () => {
+    const skill = skillRow({ id: 'skill-1' });
+    const agentRows = [
+      { agentId: 'agent-1', agentName: 'API Contract Reviewer' },
+      { agentId: 'agent-2', agentName: 'Test Quality Reviewer' },
+    ];
+    const runsAgg = [{ total: 4, eligible: 2 }];
+    const findingsRows = [
+      { category: 'security', acceptedAt: new Date('2026-01-02'), dismissedAt: null },
+      { category: 'security', acceptedAt: null, dismissedAt: new Date('2026-01-03') },
+      { category: 'bug', acceptedAt: null, dismissedAt: null },
+    ];
+
+    // Order: service.getById, then repository.getStats's three queries
+    // (agentRows, runsAgg, findingsRows).
+    const { db } = makeFakeDb([[skill], agentRows, runsAgg, findingsRows]);
+    const service = new SkillsService({ db } as unknown as Container);
+
+    const stats = await service.getStats('ws-1', 'skill-1', 30);
+
+    expect(stats).toEqual({
+      used_by: 2,
+      pull_frequency: 0.5,
+      accept_rate: 0.5,
+      findings_count: 3,
+      agents_using_this_skill: [
+        { agent_id: 'agent-1', agent_name: 'API Contract Reviewer' },
+        { agent_id: 'agent-2', agent_name: 'Test Quality Reviewer' },
+      ],
+      findings_by_category: [
+        { category: 'security', count: 2 },
+        { category: 'bug', count: 1 },
+      ],
+    });
+  });
+
+  it('returns nulls/zeros (not a crash) when the skill is linked to no agent', async () => {
+    const skill = skillRow({ id: 'skill-1' });
+    // getById, then repository.getStats's agentRows query only — no
+    // runs/findings queries fire when there are no agents to aggregate over.
+    const { db } = makeFakeDb([[skill], []]);
+    const service = new SkillsService({ db } as unknown as Container);
+
+    expect(await service.getStats('ws-1', 'skill-1', 30)).toEqual({
+      used_by: 0,
+      pull_frequency: null,
+      accept_rate: null,
+      findings_count: 0,
+      agents_using_this_skill: [],
+      findings_by_category: [],
+    });
   });
 });
 

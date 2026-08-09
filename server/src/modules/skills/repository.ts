@@ -1,7 +1,7 @@
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, sql } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
 import * as t from '../../db/schema.js';
-import type { SkillSource, SkillType } from '@devdigest/shared';
+import type { SkillSource, SkillStats, SkillType } from '@devdigest/shared';
 import { DEFAULT_SKILL_DESCRIPTION, INITIAL_SKILL_VERSION } from './constants.js';
 import { defaultUpdateSummary, isSkillConfigChange } from './helpers.js';
 
@@ -182,5 +182,102 @@ export class SkillsRepository {
       .from(t.skillVersions)
       .where(and(eq(t.skillVersions.skillId, skillId), eq(t.skillVersions.version, version)));
     return row;
+  }
+
+  // ---- Stats tab (docs/skills-feature-plan.md#stats-tab--addendum) --------
+
+  /**
+   * `used_by`/`agents_using_this_skill` are current-state snapshots (live
+   * `agent_skills` links); `pull_frequency`/`accept_rate`/`findings_*` are
+   * windowed over the last `days`. Three focused queries — agents, a
+   * runs aggregate (total vs. this-skill-attached, via one grouped
+   * LEFT JOIN), and a findings aggregate — not N-per-row.
+   */
+  async getStats(workspaceId: string, skillId: string, days: number): Promise<SkillStats> {
+    const agentRows = await this.db
+      .select({ agentId: t.agents.id, agentName: t.agents.name })
+      .from(t.agentSkills)
+      .innerJoin(t.agents, eq(t.agentSkills.agentId, t.agents.id))
+      .where(
+        and(
+          eq(t.agentSkills.skillId, skillId),
+          eq(t.agentSkills.enabled, true),
+          eq(t.agents.workspaceId, workspaceId),
+        ),
+      );
+    const agentIds = agentRows.map((r) => r.agentId);
+
+    if (agentIds.length === 0) {
+      return {
+        used_by: 0,
+        pull_frequency: null,
+        accept_rate: null,
+        findings_count: 0,
+        agents_using_this_skill: [],
+        findings_by_category: [],
+      };
+    }
+
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+    const [runsAgg] = await this.db
+      .select({
+        total: sql<number>`count(distinct ${t.agentRuns.id})`,
+        eligible: sql<number>`count(distinct ${t.agentRunSkills.runId})`,
+      })
+      .from(t.agentRuns)
+      .leftJoin(
+        t.agentRunSkills,
+        and(eq(t.agentRunSkills.runId, t.agentRuns.id), eq(t.agentRunSkills.skillId, skillId)),
+      )
+      .where(
+        and(
+          inArray(t.agentRuns.agentId, agentIds),
+          eq(t.agentRuns.workspaceId, workspaceId),
+          gte(t.agentRuns.ranAt, since),
+        ),
+      );
+    const totalRuns = Number(runsAgg?.total ?? 0);
+    const eligibleRuns = Number(runsAgg?.eligible ?? 0);
+
+    const findingsRows = await this.db
+      .select({
+        category: t.findings.category,
+        acceptedAt: t.findings.acceptedAt,
+        dismissedAt: t.findings.dismissedAt,
+      })
+      .from(t.agentRunSkills)
+      .innerJoin(t.agentRuns, eq(t.agentRuns.id, t.agentRunSkills.runId))
+      .innerJoin(t.reviews, eq(t.reviews.runId, t.agentRunSkills.runId))
+      .innerJoin(t.findings, eq(t.findings.reviewId, t.reviews.id))
+      .where(
+        and(
+          eq(t.agentRunSkills.skillId, skillId),
+          eq(t.agentRuns.workspaceId, workspaceId),
+          gte(t.agentRuns.ranAt, since),
+        ),
+      );
+
+    const categoryCounts = new Map<string, number>();
+    let accepted = 0;
+    let decided = 0;
+    for (const f of findingsRows) {
+      categoryCounts.set(f.category, (categoryCounts.get(f.category) ?? 0) + 1);
+      if (f.acceptedAt) {
+        accepted++;
+        decided++;
+      } else if (f.dismissedAt) {
+        decided++;
+      }
+    }
+
+    return {
+      used_by: agentRows.length,
+      pull_frequency: totalRuns > 0 ? eligibleRuns / totalRuns : null,
+      accept_rate: decided > 0 ? accepted / decided : null,
+      findings_count: findingsRows.length,
+      agents_using_this_skill: agentRows.map((r) => ({ agent_id: r.agentId, agent_name: r.agentName })),
+      findings_by_category: [...categoryCounts.entries()].map(([category, count]) => ({ category, count })),
+    };
   }
 }

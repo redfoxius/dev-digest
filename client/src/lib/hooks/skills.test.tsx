@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderHook, waitFor, cleanup } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
-import type { CommunitySkill, Skill, SkillVersion } from "@devdigest/shared";
+import type { CommunitySkill, Skill, SkillStats, SkillVersion } from "@devdigest/shared";
 import {
   useCommunitySkills,
   useCreateSkill,
@@ -17,6 +17,7 @@ import {
   useInstallCommunitySkill,
   useRestoreSkillVersion,
   useSkill,
+  useSkillStats,
   useSkillVersions,
   useSkills,
   useUpdateSkill,
@@ -207,6 +208,52 @@ describe("useSkillVersions / useRestoreSkillVersion", () => {
     expect(init.body).toBeUndefined();
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["skills"] });
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["skill-versions", SKILL.id] });
+  });
+});
+
+describe("useSkillStats", () => {
+  it("stays disabled without an id", () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const { wrapper } = makeWrapper();
+
+    const { result } = renderHook(() => useSkillStats(undefined), { wrapper });
+
+    expect(result.current.fetchStatus).toBe("idle");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("defaults to a 30-day window and fetches GET /skills/:id/stats", async () => {
+    const stats: SkillStats = {
+      used_by: 1,
+      pull_frequency: 0.5,
+      accept_rate: 1,
+      findings_count: 2,
+      agents_using_this_skill: [{ agent_id: "agent-1", agent_name: "API Contract Reviewer" }],
+      findings_by_category: [{ category: "security", count: 2 }],
+    };
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(stats));
+    vi.stubGlobal("fetch", fetchMock);
+    const { wrapper } = makeWrapper();
+
+    const { result } = renderHook(() => useSkillStats("sk1"), { wrapper });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data).toEqual(stats);
+    const [url] = fetchMock.mock.calls[0] as [string];
+    expect(url).toBe("http://localhost:3001/skills/sk1/stats?days=30");
+  });
+
+  it("passes an explicit `days` override through to the querystring", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({}));
+    vi.stubGlobal("fetch", fetchMock);
+    const { wrapper } = makeWrapper();
+
+    renderHook(() => useSkillStats("sk1", 7), { wrapper });
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    const [url] = fetchMock.mock.calls[0] as [string];
+    expect(url).toBe("http://localhost:3001/skills/sk1/stats?days=7");
   });
 });
 
