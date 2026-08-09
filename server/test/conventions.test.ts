@@ -4,12 +4,14 @@ import {
   findEvidenceLineRange,
   slugifyRule,
   buildSkillBody,
+  toConventionDto,
+} from '../src/modules/conventions/helpers.js';
+import { parseConfigFile } from '../src/modules/conventions/langs/index.js';
+import {
   parseTsconfigStrictness,
   parseEslintRules,
   parsePrettierConfig,
-  parseConfigFile,
-  toConventionDto,
-} from '../src/modules/conventions/helpers.js';
+} from '../src/modules/conventions/langs/typescript.js';
 import { dedupKey } from '../src/modules/conventions/repository.js';
 import type { ConventionCandidate } from '@devdigest/shared';
 import type { ConventionRow } from '../src/db/rows.js';
