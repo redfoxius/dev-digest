@@ -208,9 +208,17 @@ export class ReviewRunExecutor {
       // still unvetted is allowed, but it only injects once both are true.
       // Rows come back ordered ascending by `order`, so no extra sort needed.
       const linkedSkills = await this.agents.linkedSkills(agent.id);
-      resolvedSkills = linkedSkills.filter((l) => l.enabled && l.skill.enabled).map((l) => l.skill.body);
-      if (resolvedSkills.length > 0) {
-        runLog.info(`skills: ${resolvedSkills.length} attached`);
+      const attachedSkills = linkedSkills.filter((l) => l.enabled && l.skill.enabled);
+      resolvedSkills = attachedSkills.map((l) => l.skill.body);
+      if (attachedSkills.length > 0) {
+        runLog.info(`skills: ${attachedSkills.length} attached`);
+        // Recorded regardless of this run's eventual outcome — "this skill
+        // was attached for this run" feeds the Stats tab's pull-frequency
+        // denominator (docs/skills-feature-plan.md#stats-tab--addendum).
+        await this.repo.recordRunSkills(
+          runId,
+          attachedSkills.map((l) => l.skill.id),
+        );
       }
 
       const task = taskLine(pull) + rankNote;

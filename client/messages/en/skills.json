@@ -104,6 +104,20 @@
     "nameRequired": "Name is required.",
     "bodyRequired": "Body is required."
   },
+  "stats": {
+    "usedBy": "Used by",
+    "agents": "agents",
+    "pullFrequency": "Pull frequency",
+    "acceptRate": "Accept rate",
+    "findings30d": "Findings (30d)",
+    "agentsUsingThisSkill": "Agents using this skill",
+    "findingsByCategory": "Findings by category",
+    "open": "Open",
+    "noAgents": "Not linked to any agent yet.",
+    "noFindings": "No findings from this skill's runs yet.",
+    "noData": "No usage data yet — stats populate once this skill is attached to a run.",
+    "loadError": "Could not load this skill's stats."
+  },
   "preview": {
     "untrustedBadge": "untrusted source",
     "enabled": "Enabled",

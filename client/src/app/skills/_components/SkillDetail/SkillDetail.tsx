@@ -10,6 +10,7 @@ import { EmptyState, Tabs } from "@devdigest/ui";
 import type { Skill } from "@devdigest/shared";
 import { ConfigTab } from "./_components/ConfigTab";
 import { PreviewTab } from "./_components/PreviewTab";
+import { SkillStatsTab } from "./_components/SkillStatsTab";
 import { VersionsTab } from "./_components/VersionsTab";
 import { TABS } from "./constants";
 import { s } from "./styles";
@@ -51,13 +52,7 @@ export function SkillDetail({
             body="Skill-level eval cases are a separate, not-yet-built feature (owner_kind: 'skill')."
           />
         )}
-        {activeTab === "stats" && (
-          <EmptyState
-            icon="BarChart"
-            title="Stats"
-            body="Performance analytics for skills is a separate, not-yet-built feature."
-          />
-        )}
+        {activeTab === "stats" && <SkillStatsTab skill={skill} />}
         {activeTab === "versions" && <VersionsTab skill={skill} />}
       </div>
     </div>

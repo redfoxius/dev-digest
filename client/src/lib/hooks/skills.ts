@@ -15,6 +15,7 @@ import type {
   ImportCandidate,
   Skill,
   SkillSource,
+  SkillStats,
   SkillType,
   SkillVersion,
   UpdateSkillBody,
@@ -139,6 +140,21 @@ export function useRestoreSkillVersion() {
       qc.setQueryData(["skill", data.id], data);
       qc.invalidateQueries({ queryKey: ["skill-versions", data.id] });
     },
+  });
+}
+
+// ---- stats --------------------------------------------------------------
+
+/** Stats tab: used_by/agents_using_this_skill (live snapshot) plus
+   pull-frequency/accept-rate/findings-by-category over a rolling `days`
+   window (default 30, matches the server's default). Skills with no runs
+   yet return zeros/nulls, not an error — see
+   docs/skills-feature-plan.md#stats-tab--addendum. */
+export function useSkillStats(id: string | null | undefined, days?: number) {
+  return useQuery({
+    queryKey: ["skill-stats", id, days ?? 30],
+    queryFn: () => api.get<SkillStats>(`/skills/${id}/stats?days=${days ?? 30}`),
+    enabled: !!id,
   });
 }
 
