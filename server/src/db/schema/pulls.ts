@@ -44,13 +44,20 @@ export const prFiles = pgTable('pr_files', {
   patch: text('patch'),
 });
 
-export const prCommits = pgTable('pr_commits', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  prId: uuid('pr_id')
-    .notNull()
-    .references(() => pullRequests.id, { onDelete: 'cascade' }),
-  sha: text('sha').notNull(),
-  message: text('message').notNull(),
-  author: text('author').notNull(),
-  committedAt: timestamp('committed_at', { withTimezone: true }),
-});
+export const prCommits = pgTable(
+  'pr_commits',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    prId: uuid('pr_id')
+      .notNull()
+      .references(() => pullRequests.id, { onDelete: 'cascade' }),
+    sha: text('sha').notNull(),
+    message: text('message').notNull(),
+    author: text('author').notNull(),
+    committedAt: timestamp('committed_at', { withTimezone: true }),
+  },
+  (t) => ({
+    // getPrCommits (intent derivation, every automatic + manual re-derive) filters by pr_id.
+    prIdIdx: index('pr_commits_pr_id_idx').on(t.prId),
+  }),
+);

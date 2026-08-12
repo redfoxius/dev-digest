@@ -61,13 +61,20 @@ export const prIntent = pgTable(
     inScope: jsonb('in_scope').$type<string[]>().notNull().default(sql`'[]'::jsonb`),
     outOfScope: jsonb('out_of_scope').$type<string[]>().notNull().default(sql`'[]'::jsonb`),
     /** Server-side-clamped, model-self-reported confidence (0-1) — audit/log
-     *  mechanism only, never rendered as a % in the UI. */
-    confidence: doublePrecision('confidence').notNull(),
+     *  mechanism only, never rendered as a % in the UI. Every write via
+     *  `upsertIntent` sets this explicitly; the default only exists so this
+     *  NOT NULL column is never added to a populated table without a
+     *  fallback (paired the same way `sources` already is below). */
+    confidence: doublePrecision('confidence').notNull().default(0),
     /** Which data sources actually backed the derivation — a closed enum so
-     *  the UI can render a fixed qualitative badge without string matching. */
+     *  the UI can render a fixed qualitative badge without string matching.
+     *  Defaults to the lowest-trust tier for the same NOT-NULL-safety reason
+     *  as `confidence` above — real writes always set this explicitly. */
     evidenceTier: text('evidence_tier', {
       enum: ['direct', 'ticket_only', 'indirect_only'],
-    }).notNull(),
+    })
+      .notNull()
+      .default('indirect_only'),
     /** Audit trail of resolved (and explicitly-failed) data sources, e.g.
      *  ["pr_description", "linked_issue#42", "spec:https://...",
      *  "spec_link_unreachable:https://...", "branch_name", "commit_messages",
