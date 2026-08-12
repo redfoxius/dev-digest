@@ -1,4 +1,4 @@
-import type { ChatMessage, PromptAssembly } from '@devdigest/shared';
+import type { ChatMessage, Intent, PromptAssembly } from '@devdigest/shared';
 
 /**
  * Prompt assembly + prompt-injection hardening.
@@ -91,8 +91,8 @@ export interface PromptParts {
   prDescription?: string;
   /**
    * Derived PR intent/scope (Intent Layer) — an already-rendered text block
-   * (composed server-side by `renderIntentText`, NOT here). Untrusted —
-   * derivation reads author-controlled PR/spec content — delimiter-wrapped.
+   * (composed by `renderIntentText`, below). Untrusted — derivation reads
+   * author-controlled PR/spec content — delimiter-wrapped.
    * Rendered as `## Derived intent`, right after `## PR description` and
    * before `## Skills / rules`, so the model sees "what the PR claims" then
    * "what we inferred" before anything else. Empty/undefined → section
@@ -251,4 +251,30 @@ export function summarizePromptAssembly(
       : undefined,
   ];
   return entries.filter((e): e is PromptSectionSummary => e != null);
+}
+
+/** Qualitative (never numeric) evidence-tier framing shown both in the prompt
+ *  and — via the client's copy of this same wording — the Intent Layer's UI
+ *  badge. Deliberately no confidence percentage: the model/user need "trust
+ *  this less", not a fake-precise number. */
+const EVIDENCE_TIER_LABEL: Record<Intent['evidence_tier'], string> = {
+  direct: 'backed by the PR description and/or a linked spec/ticket',
+  ticket_only: 'inferred from a linked issue/ticket only — no PR description',
+  indirect_only: 'inferred from branch/commits/file names only — low confidence',
+};
+
+/** Render a derived `Intent` into the compact, LLM-authored-summary text
+ *  block that becomes `PromptParts.intent` (above). Pure (no DB/FS/network) —
+ *  reviewer-core owns rendering because it already owns the `## Derived
+ *  intent` prompt section this feeds; the server only supplies the derived
+ *  `Intent` value. No numeric confidence anywhere in this text — qualitative
+ *  framing only. */
+export function renderIntentText(intent: Intent): string {
+  const bullets = (items: string[]) => (items.length > 0 ? items.map((s) => `- ${s}`).join('\n') : '(none stated)');
+  return [
+    `Intent: ${intent.intent}`,
+    `In scope:\n${bullets(intent.in_scope)}`,
+    `Out of scope:\n${bullets(intent.out_of_scope)}`,
+    `Evidence: ${EVIDENCE_TIER_LABEL[intent.evidence_tier]}`,
+  ].join('\n');
 }

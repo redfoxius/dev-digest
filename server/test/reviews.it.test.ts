@@ -619,4 +619,39 @@ d('A2 reviews + agents (Testcontainers pg)', () => {
 
     await app.close();
   });
+
+  it('Intent Layer routes satisfy their new response schema: GET accepts null, POST accepts a derived Intent', async () => {
+    const app = await buildApp({
+      config: config(),
+      db: pg.handle.db,
+      overrides: {
+        embedder: new MockEmbedder(),
+        intentDeriver: new MockIntentDeriver(), // default fixture (defined)
+        git: new MockGitClient({ diff: DIFF }),
+        llm: { openai: new MockLLMProvider('openai', { structured: REVIEW_FIXTURE }) },
+      },
+    });
+    const { pr } = await setupRepoAndPr(pg.handle.db, workspaceId);
+
+    // Before any derivation: PrIntentRecord.nullable() must accept `null`.
+    const before = await app.inject({ method: 'GET', url: `/pulls/${pr.id}/intent` });
+    expect(before.statusCode).toBe(200);
+    expect(before.json()).toBeNull();
+
+    // Derive: response must satisfy PrIntentRecord's response schema (not just
+    // the TS return type) — this is what a schema/service-shape mismatch would
+    // actually 500 on, since no test previously exercised these two routes.
+    // (MockIntentDeriver doesn't replicate the real IntentDeriverService's
+    // internal upsertIntent call — a GET-after-derive round-trip isn't
+    // testable through this mock; that's a mock-fidelity gap, not something
+    // this fix touches.)
+    const derived = await app.inject({ method: 'POST', url: `/pulls/${pr.id}/intent/derive` });
+    expect(derived.statusCode).toBe(200);
+    const derivedBody = derived.json();
+    expect(derivedBody.pr_id).toBe(pr.id);
+    expect(derivedBody.intent).toEqual(expect.any(String));
+    expect(derivedBody.evidence_tier).toEqual(expect.any(String));
+
+    await app.close();
+  });
 });

@@ -52,8 +52,8 @@ const ALLOWED_SPEC_CONTENT_TYPE_RE = /\btext\/(plain|markdown|html)\b/i;
  *  server-side from which sources actually resolved, not model output). */
 const IntentDerivation = z.object({
   intent: z.string().min(1).max(MAX_INTENT_CHARS),
-  in_scope: z.array(z.string().max(MAX_SCOPE_ITEM_CHARS)).max(MAX_SCOPE_ITEMS),
-  out_of_scope: z.array(z.string().max(MAX_SCOPE_ITEM_CHARS)).max(MAX_SCOPE_ITEMS),
+  in_scope: z.array(z.string().min(1).max(MAX_SCOPE_ITEM_CHARS)).max(MAX_SCOPE_ITEMS),
+  out_of_scope: z.array(z.string().min(1).max(MAX_SCOPE_ITEM_CHARS)).max(MAX_SCOPE_ITEMS),
   confidence: z.number().min(0).max(1),
 });
 type IntentDerivation = z.infer<typeof IntentDerivation>;
