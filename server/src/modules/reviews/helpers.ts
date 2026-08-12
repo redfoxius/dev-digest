@@ -117,8 +117,3 @@ export function buildStackFraming(changedFiles: string[]): string | undefined {
   const stacks = labels.length > 3 ? 'multiple languages' : labels.join(', ');
   return `# Languages in this diff\nThis diff touches: ${stacks}. Judge the code by that language's own idioms and conventions — do not assume any other runtime or stack unless the diff itself shows it.`;
 }
-
-// renderIntentText moved to @devdigest/reviewer-core/prompt.ts — pure Intent
-// rendering belongs with the `## Derived intent` prompt section it feeds
-// (onion-architecture finding on PR #15), not the server.
-export { renderIntentText } from '@devdigest/reviewer-core';
