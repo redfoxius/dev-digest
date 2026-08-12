@@ -36,6 +36,14 @@ const TIER_CONFIDENCE_CEILING: Record<EvidenceTier, number> = {
 const MAX_SPEC_BYTES = 300 * 1024;
 const SPEC_BODY_READ_TIMEOUT_MS = 10_000;
 
+/** The classifier is prompted for "a concise 1-3 sentence summary" (`intent`)
+ *  and "short bullet phrases" (`in_scope`/`out_of_scope`) — these bound an
+ *  untrusted LLM response well above that expected shape, not at it, so a
+ *  malformed/oversized completion 422s instead of persisting unbounded text. */
+const MAX_INTENT_CHARS = 2000;
+const MAX_SCOPE_ITEMS = 20;
+const MAX_SCOPE_ITEM_CHARS = 200;
+
 const BINARY_EXT_RE = /\.(png|jpe?g|gif|webp|svg|ico|pdf|zip|tar|gz|mp4|mov|mp3)(\?|#|$)/i;
 const ALLOWED_SPEC_CONTENT_TYPE_RE = /\btext\/(plain|markdown|html)\b/i;
 
@@ -43,9 +51,9 @@ const ALLOWED_SPEC_CONTENT_TYPE_RE = /\btext\/(plain|markdown|html)\b/i;
  *  persisted `Intent` contract (`evidence_tier`/`sources` are computed
  *  server-side from which sources actually resolved, not model output). */
 const IntentDerivation = z.object({
-  intent: z.string(),
-  in_scope: z.array(z.string()),
-  out_of_scope: z.array(z.string()),
+  intent: z.string().min(1).max(MAX_INTENT_CHARS),
+  in_scope: z.array(z.string().max(MAX_SCOPE_ITEM_CHARS)).max(MAX_SCOPE_ITEMS),
+  out_of_scope: z.array(z.string().max(MAX_SCOPE_ITEM_CHARS)).max(MAX_SCOPE_ITEMS),
   confidence: z.number().min(0).max(1),
 });
 type IntentDerivation = z.infer<typeof IntentDerivation>;
