@@ -148,6 +148,13 @@
       "when": 1786565228010,
       "tag": "0020_eager_rhino",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1786566054934,
+      "tag": "0021_lame_solo",
+      "breakpoints": true
     }
   ]
 }
