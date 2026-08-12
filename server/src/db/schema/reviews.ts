@@ -76,6 +76,10 @@ export const prIntent = pgTable(
   },
   (t) => ({
     confidenceRange: check('pr_intent_confidence_range', sql`${t.confidence} >= 0 AND ${t.confidence} <= 1`),
+    evidenceTierValues: check(
+      'pr_intent_evidence_tier_values',
+      sql`${t.evidenceTier} IN ('direct', 'ticket_only', 'indirect_only')`,
+    ),
   }),
 );
 
