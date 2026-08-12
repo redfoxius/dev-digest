@@ -2,7 +2,7 @@
  * Pure helpers for the review service (side-effect free; operate purely on
  * their arguments — no DB / network / `this`).
  */
-import type { Finding, Intent } from '@devdigest/shared';
+import type { Finding } from '@devdigest/shared';
 import type { FindingRow, PullRow, ReviewRow } from './repository.js';
 import { languageIdForFile, labelForLanguageId } from '../repo-intel/languages/index.js';
 
@@ -118,27 +118,7 @@ export function buildStackFraming(changedFiles: string[]): string | undefined {
   return `# Languages in this diff\nThis diff touches: ${stacks}. Judge the code by that language's own idioms and conventions — do not assume any other runtime or stack unless the diff itself shows it.`;
 }
 
-/** Qualitative (never numeric) evidence-tier framing shown both in the prompt
- *  and — via the client's copy of this same wording — the Intent Layer's UI
- *  badge. Deliberately no confidence percentage: the model/user need "trust
- *  this less", not a fake-precise number. */
-const EVIDENCE_TIER_LABEL: Record<Intent['evidence_tier'], string> = {
-  direct: 'backed by the PR description and/or a linked spec/ticket',
-  ticket_only: 'inferred from a linked issue/ticket only — no PR description',
-  indirect_only: 'inferred from branch/commits/file names only — low confidence',
-};
-
-/** Render a derived `Intent` into the compact, LLM-authored-summary text
- *  block that becomes `ReviewInput.intent` → `PromptParts.intent`. Composed
- *  HERE (server-side), not in reviewer-core — reviewer-core only wraps an
- *  already-rendered string into the `## Derived intent` prompt section. No
- *  numeric confidence anywhere in this text — qualitative framing only. */
-export function renderIntentText(intent: Intent): string {
-  const bullets = (items: string[]) => (items.length > 0 ? items.map((s) => `- ${s}`).join('\n') : '(none stated)');
-  return [
-    `Intent: ${intent.intent}`,
-    `In scope:\n${bullets(intent.in_scope)}`,
-    `Out of scope:\n${bullets(intent.out_of_scope)}`,
-    `Evidence: ${EVIDENCE_TIER_LABEL[intent.evidence_tier]}`,
-  ].join('\n');
-}
+// renderIntentText moved to @devdigest/reviewer-core/prompt.ts — pure Intent
+// rendering belongs with the `## Derived intent` prompt section it feeds
+// (onion-architecture finding on PR #15), not the server.
+export { renderIntentText } from '@devdigest/reviewer-core';
