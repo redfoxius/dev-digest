@@ -257,19 +257,20 @@ export async function reviewPullRequest(input: ReviewInput): Promise<ReviewOutco
   // Intent Layer — deterministic scope filtering, AFTER grounding, BEFORE
   // scoring, and ONLY when intent was actually provided (no intent → no
   // declared scope → skip entirely, so a review run without intent behaves
-  // exactly as it did before this feature). Reuses the existing `dropped`
-  // field rather than adding a parallel one.
+  // exactly as it did before this feature). Advisory, not a drop: every
+  // out-of-scope finding survives into `finalFindings` one severity rank
+  // softer, so it's still persisted and visible — see filterByScope's
+  // docstring for why an unconditional drop was rejected.
   let finalFindings = ground.kept;
-  let dropped = ground.dropped;
+  const dropped = ground.dropped;
   if (input.intent) {
     const scoped = filterByScope(finalFindings);
-    if (scoped.dropped.length > 0) {
-      emit('info', `Scope filter: kept ${scoped.kept.length}, dropped ${scoped.dropped.length} out-of-scope finding(s)`);
-      for (const f of scoped.dropped) {
-        emit('info', `scope filter dropped "${f.title}": outside the PR's stated scope`);
+    if (scoped.downgraded.length > 0) {
+      emit('info', `Scope filter: softened ${scoped.downgraded.length} out-of-scope finding(s) by one severity rank`);
+      for (const f of scoped.downgraded) {
+        emit('info', `scope filter downgraded "${f.title}" to ${f.severity}: outside the PR's stated scope`);
       }
     }
-    dropped = [...dropped, ...scoped.dropped.map((finding) => ({ finding, reason: "outside the PR's stated scope" }))];
     finalFindings = scoped.kept;
   }
 

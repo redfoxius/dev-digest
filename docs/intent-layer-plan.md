@@ -397,5 +397,15 @@ Two gaps identified, both unrelated to the tests-deferred decision:
 
 ### Deferred to a later iteration
 
-- New test files for `modules/intent/`, `filterByScope()`, `IntentCard`, and the two new routes — including the two Risks-section-recommended regression tests above.
+- New test files for `modules/intent/`, `filterByScope()` (added post-review, see below), `IntentCard`, and the two new routes.
 - `pr-self-review` (light or full) — runs once a PR is opened, per this repo's session protocol; not applicable to an uncommitted local diff.
+
+### Post-review fixes (PR #15, `pr-self-review` light mode)
+
+`pr-self-review` ran against the opened PR and found 2 CRITICAL + several WARNING/SUGGESTION issues across `drizzle-orm-patterns`, `postgresql-table-design`, `zod`, and `security`. Both CRITICALs were fixed and independently re-verified (evidence_tier now has a DB `CHECK` via migration `0018`; the classifier's zod schema now bounds `intent`/`in_scope`/`out_of_scope` length). The three WARNINGs were fixed next:
+
+1. **Missing index on `pr_commits.pr_id`** (`drizzle-orm-patterns`) — added `pr_commits_pr_id_idx` (migration `0019`); `getPrCommits` runs on every intent derivation.
+2. **`confidence`/`evidence_tier` added `NOT NULL` with no `DEFAULT`** (`postgresql-table-design`) — one reviewer round proposed escalating this to CRITICAL citing a pre-existing writer, which turned out to be a misread of this same PR's own commit as "already merged" (verified false via `git grep`/`git log`: `upsertIntent` had zero callers before this PR). Kept at WARNING and fixed forward-safely: migration `0017` (already pushed) was left untouched rather than rewritten, and migration `0019` adds `ALTER COLUMN ... SET DEFAULT` (`confidence` → `0`, `evidence_tier` → `'indirect_only'`) so the pattern now matches the sibling `sources` column.
+3. **Scope-filter could silently drop a genuine finding** (`security`) — this is exactly the failure mode flagged in this plan's own §9 Risks ("a plausible failure mode is the model marking a real defect out-of-scope, silently dropping it") and §"Ambiguities" (model self-judgment for scope-filtering may be wrong), never fully closed by the original "at most one, highest-severity, preserved" design. **Behavior change**: `filterByScope()` (`reviewer-core/src/review/reduce.ts`) no longer drops any out-of-scope finding — every one is kept, softened by exactly one severity rank (`CRITICAL→WARNING→SUGGESTION`, floored at `SUGGESTION`). A crafted PR description can now only understate a finding's severity, never erase it from the persisted findings list. `run.ts`'s `filterByScope` call site and the `dropped` bookkeeping were updated to match (`{ kept, downgraded }` instead of `{ kept, dropped }`); 4 new tests added in `reviewer-core/test/reduce.test.ts` (previously the only file with zero coverage for this reducer) pin the new behavior, including the two Risks-section-recommended regression tests (a CRITICAL out-of-scope finding survives, safety-critical kinds pass through untouched).
+
+Verification re-run after all fixes: `pnpm typecheck` clean in `server`/`reviewer-core`; `server` unit (29 files, 288 tests) + integration (12 files, 65 tests, real Postgres via testcontainers — migrations `0018`/`0019` applied fresh in that run) all green; `reviewer-core` (4 files, 30 tests, +4 new) green.
