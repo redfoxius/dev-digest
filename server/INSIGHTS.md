@@ -290,6 +290,36 @@ workflow and quality bar.
   dropped/renamed in the same diff.
   (`server/src/db/migrations/0017_simple_violations.sql`)
 
+- 2026-08-14 — Smart Diff Phase 5's plan text specified `Review.file_summaries`
+  as a bare `z.array(...).optional()`, but running the unit suite surfaced a
+  real (not hypothetical) warning from `toJsonSchema`
+  (`reviewer-core/src/llm/structured.ts`, backed by OpenAI's
+  `zodResponseFormat`): "uses `.optional()` without `.nullable()` which is not
+  supported by the API... will become an error in a future version of the
+  SDK." Every other optional field on `Finding`/`Review` in this same file
+  (`suggestion`, `kind`, `trifecta_components`, `evidence`, `in_scope`) is
+  already `.nullish()` for exactly this reason — a plan-specified `.optional()`
+  on a field destined for LLM structured output should be treated as
+  presumptively wrong until checked against this file's own established
+  convention; running the unit suite (not just `pnpm typecheck`, which stays
+  silent) is what actually surfaces the warning.
+  (`server/src/vendor/shared/contracts/findings.ts` — `Review.file_summaries`,
+  `server/test/prompt-structured.test.ts`)
+
+- 2026-08-14 — Growing `ReviewRepository.getLatestReviewBatchFindings` (the
+  batch-key algorithm documented in the 2026-08-14 entry above) to ALSO serve
+  Smart Diff Phase 5's `getFileSummariesForReviews` required changing its
+  return shape from `FindingRow[]` to `{ reviewIds: string[]; findings:
+  FindingRow[] }`, not adding a second exported function that re-runs the same
+  batch-key query — a file summary can legitimately exist for a review with
+  ZERO findings (an agent that approved with nothing to report), so deriving
+  "the latest batch's review ids" from `findings[].reviewId` would silently
+  drop that review's summaries. Confirmed safe to change the signature
+  because a grep showed exactly one consumer (`smart-diff/service.ts`) existed
+  before this session.
+  (`server/src/modules/reviews/repository/review.repo.ts:getLatestReviewBatchFindings`,
+  `server/src/modules/smart-diff/service.ts`)
+
 ## Tool & Library Notes
 
 - 2026-08-13 — `server/src/adapters/llm/openai.ts:15` and `anthropic.ts:16`'s

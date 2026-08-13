@@ -12,6 +12,7 @@ import * as t from './schema.js';
 export type AgentRow = typeof t.agents.$inferSelect;
 export type AgentVersionRow = typeof t.agentVersions.$inferSelect;
 export type FindingRow = typeof t.findings.$inferSelect;
+export type FileSummaryRow = typeof t.reviewFileSummaries.$inferSelect;
 export type PullRow = typeof t.pullRequests.$inferSelect;
 export type AgentRunRow = typeof t.agentRuns.$inferSelect;
 export type SkillRow = typeof t.skills.$inferSelect;

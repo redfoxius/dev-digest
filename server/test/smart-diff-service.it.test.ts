@@ -258,6 +258,60 @@ d('SmartDiffService.getSmartDiff — real DB-backed wiring (Testcontainers pg)',
     expect(result.split_suggestion).toEqual({ too_big: false, total_lines: 5, proposed_splits: [] });
   });
 
+  it(
+    'populates pseudocode_summary from review_file_summaries scoped to the ' +
+      'SAME latest-batch review ids findings are scoped to (Phase 5)',
+    async () => {
+      const { pr } = await setupRepoAndPr(pg.handle.db, workspaceId, 903);
+      await pg.handle.db.insert(t.prFiles).values([
+        { prId: pr.id, path: 'src/service.ts', additions: 10, deletions: 0 },
+        { prId: pr.id, path: 'src/other.ts', additions: 5, deletions: 0 },
+      ]);
+
+      // ---- an OLDER, separate (non-batched) review — its file summary must
+      // NOT surface, same "latest batch only" rule findings already follow.
+      const [olderReview] = await pg.handle.db
+        .insert(t.reviews)
+        .values({
+          workspaceId,
+          prId: pr.id,
+          kind: 'review',
+          createdAt: new Date('2026-01-01T00:00:00Z'),
+        })
+        .returning();
+      await pg.handle.db.insert(t.reviewFileSummaries).values({
+        reviewId: olderReview!.id,
+        file: 'src/service.ts',
+        summary: 'STALE — from an older, non-latest review batch.',
+      });
+
+      // ---- the latest (single-review) batch — has a summary for one file
+      // only; the other changed file has none and must stay `null`.
+      const [latestReview] = await pg.handle.db
+        .insert(t.reviews)
+        .values({
+          workspaceId,
+          prId: pr.id,
+          kind: 'review',
+          createdAt: new Date('2026-02-01T00:00:00Z'),
+        })
+        .returning();
+      await pg.handle.db.insert(t.reviewFileSummaries).values({
+        reviewId: latestReview!.id,
+        file: 'src/service.ts',
+        summary: 'Handles the core service logic for this PR.',
+      });
+
+      const result = await service.getSmartDiff(workspaceId, pr.id);
+      const core = result.groups.find((g) => g.role === 'core')!;
+      const serviceTs = core.files.find((f) => f.path === 'src/service.ts')!;
+      const otherTs = core.files.find((f) => f.path === 'src/other.ts')!;
+
+      expect(serviceTs.pseudocode_summary).toBe('Handles the core service logic for this PR.');
+      expect(otherTs.pseudocode_summary).toBeNull();
+    },
+  );
+
   it('throws NotFoundError for a PR outside the workspace', async () => {
     const { pr } = await setupRepoAndPr(pg.handle.db, workspaceId, 902);
     await expect(service.getSmartDiff('00000000-0000-0000-0000-000000000000', pr.id)).rejects.toThrow(

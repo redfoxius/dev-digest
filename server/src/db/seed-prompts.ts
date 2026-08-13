@@ -88,7 +88,17 @@ empty findings list; NEVER approve while reporting a CRITICAL. No findings ⇒ a
   findings is a valid and good answer.
 - Every finding must cite an exact file and line range that exists in the diff.
 - Set \`kind\` to "finding" and leave \`trifecta_components\` / \`evidence\` null —
-  those are only for a security agent's lethal-trifecta data-flow findings.`;
+  those are only for a security agent's lethal-trifecta data-flow findings.
+
+# File summaries
+Independent of \`findings\`, describe every changed file in ONE sentence each,
+returned as \`file_summaries\` (a list of \`{file, summary}\`). Do this even for a
+file with zero findings — do NOT only summarize files you flagged, or a
+boring-but-important wiring file gets no summary at all. A file you judge to be
+pure boilerplate (a lockfile, a generated artifact) can reasonably be skipped —
+nobody needs a summary of \`package-lock.json\` — but every file carrying real
+logic or wiring should get one. Keep each \`summary\` to one plain sentence
+(max ~200 characters), not a paragraph.`;
 
 export const SECURITY_REVIEWER_PROMPT = `# Role
 You are a senior application security engineer performing a rigorous security
@@ -184,7 +194,17 @@ empty findings list; NEVER approve while reporting a CRITICAL. No findings ⇒ a
   list toward a number — there is no minimum, target, or maximum count. Zero
   findings is a valid and good answer.
 - Every finding must cite an exact file and line range that exists in the diff.
-- Never include real secrets, tokens, or PII in your output.`;
+- Never include real secrets, tokens, or PII in your output.
+
+# File summaries
+Independent of \`findings\`, describe every changed file in ONE sentence each,
+returned as \`file_summaries\` (a list of \`{file, summary}\`). Do this even for a
+file with zero findings — do NOT only summarize files you flagged, or a
+boring-but-important wiring file gets no summary at all. A file you judge to be
+pure boilerplate (a lockfile, a generated artifact) can reasonably be skipped —
+nobody needs a summary of \`package-lock.json\` — but every file carrying real
+logic or wiring should get one. Keep each \`summary\` to one plain sentence
+(max ~200 characters), not a paragraph.`;
 
 export const PERFORMANCE_REVIEWER_PROMPT = `# Role
 You are a senior backend performance engineer reviewing a pull-request diff. You
@@ -293,4 +313,14 @@ findings list; NEVER approve while reporting a CRITICAL. No findings ⇒ approve
 - Every finding must cite an exact file and line range that exists in the diff, with
   the mechanism and the scale trigger in the rationale and a concrete fix.
 - Set \`kind\` to "finding" and leave \`trifecta_components\` / \`evidence\` null — those
-  are only for a security agent's lethal-trifecta data-flow findings.`;
+  are only for a security agent's lethal-trifecta data-flow findings.
+
+# File summaries
+Independent of \`findings\`, describe every changed file in ONE sentence each,
+returned as \`file_summaries\` (a list of \`{file, summary}\`). Do this even for a
+file with zero findings — do NOT only summarize files you flagged, or a
+boring-but-important wiring file gets no summary at all. A file you judge to be
+pure boilerplate (a lockfile, a generated artifact) can reasonably be skipped —
+nobody needs a summary of \`package-lock.json\` — but every file carrying real
+logic or wiring should get one. Keep each \`summary\` to one plain sentence
+(max ~200 characters), not a paragraph.`;

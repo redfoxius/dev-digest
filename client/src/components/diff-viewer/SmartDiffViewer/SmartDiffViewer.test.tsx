@@ -27,12 +27,17 @@ const PATCH_BIGCORE = "@@ -8,1 +10,3 @@\n+added line 10\n+added line 11\n+added 
 const PATCH_WIRING = "@@ -1,1 +1,1 @@\n+export default {}\n";
 // A "boilerplate" lockfile WITH a finding — must still default collapsed.
 const PATCH_LOCKFILE = "@@ -1,1 +1,1 @@\n+{}\n";
+// A "core" file with NO findings and a diff past AUTO_EXPAND_MAX_LINES — the
+// only fixture that defaults COLLAPSED while still carrying a
+// pseudocode_summary, needed to prove the Summary Chip renders collapsed.
+const PATCH_BIGLOGIC = "@@ -20,1 +20,1 @@\n+recompute invoice total\n";
 
 const FILES: PrFile[] = [
   { path: "src/api/handler.ts", additions: 3, deletions: 1, patch: PATCH_HANDLER },
   { path: "src/api/bigcore.ts", additions: 150, deletions: 100, patch: PATCH_BIGCORE },
   { path: "vite.config.ts", additions: 5, deletions: 2, patch: PATCH_WIRING },
   { path: "package-lock.json", additions: 1, deletions: 1, patch: PATCH_LOCKFILE },
+  { path: "src/billing/biglogic.ts", additions: 150, deletions: 100, patch: PATCH_BIGLOGIC },
 ];
 
 const SMART_DIFF: SmartDiff = {
@@ -42,7 +47,7 @@ const SMART_DIFF: SmartDiff = {
       files: [
         {
           path: "src/api/handler.ts",
-          pseudocode_summary: null,
+          pseudocode_summary: "Handles incoming API requests and dispatches them to services.",
           additions: 3,
           deletions: 1,
           findings_count: 2,
@@ -63,6 +68,14 @@ const SMART_DIFF: SmartDiff = {
             { line: 12, severity: "WARNING" },
           ],
         },
+        {
+          path: "src/billing/biglogic.ts",
+          pseudocode_summary: "Recomputes the invoice total whenever a line item changes.",
+          additions: 150,
+          deletions: 100,
+          findings_count: 0,
+          finding_lines: [],
+        },
       ],
     },
     {
@@ -70,7 +83,7 @@ const SMART_DIFF: SmartDiff = {
       files: [
         {
           path: "vite.config.ts",
-          pseudocode_summary: null,
+          pseudocode_summary: "Configures the Vite build and dev server.",
           additions: 5,
           deletions: 2,
           findings_count: 0,
@@ -216,5 +229,43 @@ describe("SmartDiffViewer — click-to-scroll", () => {
     fireEvent.click(within(row).getByText("1 findings"));
 
     expect(window.HTMLElement.prototype.scrollIntoView).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("SmartDiffViewer — pseudocode_summary (Phase 5)", () => {
+  it("shows the Summary Chip on a file's header even while collapsed, and the \"What this does\" text once opened", () => {
+    const { container } = renderViewer();
+    // src/billing/biglogic.ts: core, zero findings, diff past
+    // AUTO_EXPAND_MAX_LINES — the one fixture that defaults COLLAPSED while
+    // still carrying a non-null pseudocode_summary.
+    const row = fileRow(container, "src/billing/biglogic.ts");
+
+    // Collapsed by default — the Summary Chip is still visible on the header
+    // row, but the "What this does" text (rendered only when open) isn't.
+    expect(within(row).getByText("Summary")).toBeInTheDocument();
+    expect(within(row).queryByText(/Recomputes the invoice total/)).not.toBeInTheDocument();
+
+    // Open the card — the text block now appears right below the header.
+    fireEvent.click(within(row).getByText("src/billing/biglogic.ts"));
+    expect(within(row).getByText(/What this does:/)).toBeInTheDocument();
+    expect(within(row).getByText(/Recomputes the invoice total/)).toBeInTheDocument();
+  });
+
+  it("a file with no pseudocode_summary shows neither the Summary Chip nor the text block", () => {
+    const { container } = renderViewer();
+    fireEvent.click(screen.getByRole("button", { name: /^Boilerplate\b/i }));
+    const row = fileRow(container, "package-lock.json");
+
+    expect(within(row).queryByText("Summary")).not.toBeInTheDocument();
+    expect(within(row).queryByText(/What this does:/)).not.toBeInTheDocument();
+  });
+
+  it("a file with BOTH findings and a summary shows both Chips side by side in the header", () => {
+    const { container } = renderViewer();
+    const row = fileRow(container, "src/api/handler.ts");
+
+    expect(within(row).getByText("2 findings")).toBeInTheDocument();
+    expect(within(row).getByText("Summary")).toBeInTheDocument();
+    expect(within(row).getByText(/Handles incoming API requests/)).toBeInTheDocument();
   });
 });

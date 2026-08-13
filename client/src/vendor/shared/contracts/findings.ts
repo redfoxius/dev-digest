@@ -71,6 +71,17 @@ export const Finding = z.object({
 });
 export type Finding = z.infer<typeof Finding>;
 
+/**
+ * One-sentence, deterministic-per-file summary emitted alongside `findings`
+ * by the SAME review LLM call — no separate call. Consumed by Smart Diff's
+ * `pseudocode_summary` (`smart-diff/service.ts`), never produced by it.
+ */
+export const FileSummary = z.object({
+  file: z.string(),
+  summary: z.string().max(200),
+});
+export type FileSummary = z.infer<typeof FileSummary>;
+
 /** Review — the consolidated structured output of a single agent run. */
 export const Review = z.object({
   verdict: Verdict,
@@ -84,6 +95,20 @@ export const Review = z.object({
       'Overall PR quality from 0 to 100, where HIGHER is better. 90–100 = no or only trivial issues (approve); 60–89 = minor suggestions; 30–59 = warnings worth addressing; 0–29 = critical problems. Must be consistent with `findings`: if there are no findings, the score is 90 or above.',
     ),
   findings: z.array(Finding),
+  /**
+   * One sentence per changed file describing what it does, independent of
+   * whether it has findings — otherwise the model would naturally only
+   * describe flagged files. `.nullish()` (NOT `.optional()` alone, NOT
+   * `.default([])`): most existing Review producers/fixtures predate this
+   * field and a default would force every literal to add it for no benefit,
+   * same reasoning as `Finding.in_scope` above — but ALSO, concretely,
+   * `toJsonSchema` (`reviewer-core/src/llm/structured.ts`, backed by OpenAI's
+   * `zodResponseFormat`) warns "uses `.optional()` without `.nullable()`
+   * which is not supported by the API... will become an error in a future
+   * version of the SDK" for a bare `.optional()` array field — every other
+   * optional field on `Finding` already avoids this by being `.nullish()`.
+   */
+  file_summaries: z.array(FileSummary).nullish(),
 });
 export type Review = z.infer<typeof Review>;
 

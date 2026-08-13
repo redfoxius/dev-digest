@@ -38,6 +38,7 @@ export function FileCard({
   scrollToLine,
   findingSeverityByLine,
   headerRight,
+  pseudocodeSummary,
 }: {
   file: PrFile;
   commenting?: DiffCommentApi;
@@ -53,8 +54,14 @@ export function FileCard({
    *  Chip) — click events inside it are stopped from bubbling to the header's
    *  own open/close toggle. */
   headerRight?: React.ReactNode;
+  /** Smart Diff's per-file "what this does" one-liner (Phase 5) — rendered
+   *  as a text block right below the header, only while the card is open.
+   *  Additive/no-op when omitted, same as this component's other Smart-Diff
+   *  props. */
+  pseudocodeSummary?: string | null;
 }) {
   const t = useTranslations("shell");
+  const tPrReview = useTranslations("prReview");
   const [open, setOpen] = React.useState(
     defaultOpen ?? (file.additions ?? 0) + (file.deletions ?? 0) <= AUTO_EXPAND_MAX_LINES
   );
@@ -120,6 +127,11 @@ export function FileCard({
       </div>
       {open && (
         <div style={s.fileBody}>
+          {pseudocodeSummary != null && (
+            <div style={s.pseudocodeSummary}>
+              <strong>{tPrReview("smartDiff.whatThisDoes")}</strong> {pseudocodeSummary}
+            </div>
+          )}
           {lines.length === 0 ? (
             <div style={s.noDiff}>{t("diffViewer.noDiffText")}</div>
           ) : (

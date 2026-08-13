@@ -1,6 +1,6 @@
 # Smart Diff — classifier + route + `SmartDiffViewer`
 
-**Status:** in progress — Phases 1-4 implemented and tested. Phase 1
+**Status:** in progress — Phases 1-5 implemented and tested. Phase 1
 (classifier) + Phase 2 (`GET /pulls/:id/smart-diff`):
 `server/src/modules/smart-diff/{constants,classifier,service}.ts`, contract
 change in both `brief.ts` copies, unit + `.it.test.ts` suites green, manually
@@ -14,7 +14,21 @@ is now reachable in the app; typecheck + full client suite (138/138) green,
 boilerplate collapsed, scroll works) has not actually been done yet** —
 `claude-in-chrome`'s browser extension wasn't connected when this phase
 landed. Do this manual check before considering Phase 4 fully done, not just
-code-reviewed. Phases 5-6 not started.
+code-reviewed. Phase 5 (`pseudocode_summary`): `Review.file_summaries` (both
+`findings.ts` vendor copies, shipped as `.nullish()` not the plan's literal
+`.optional()` — a bare `.optional()` array field triggers a real
+`toJsonSchema`/OpenAI `zodResponseFormat` warning that "will become an error
+in a future SDK version"), all three seeded reviewer prompts
+(`server/src/db/seed-prompts.ts`) instructed to emit it, new
+`review_file_summaries` table + migration `0023_icy_photon.sql`,
+`ReviewRepository.insertFileSummaries`/`getFileSummariesForReviews` (the
+latter reusing the SAME `reviewIds` `getLatestReviewBatchFindings` already
+computes, not a second "latest batch" query), wired through
+`run-executor.ts` and `SmartDiffService`, and rendered in `SmartDiffViewer`/
+`FileCard` (a header Chip + an open-state "What this does:" text block).
+Server unit (303) + integration (70, incl. a new Phase 5 case) green,
+migration applied to local dev Postgres; client typecheck + full suite
+(141/141, incl. 3 new Phase 5 cases) green. Phase 6 not started.
 
 ## Context
 
