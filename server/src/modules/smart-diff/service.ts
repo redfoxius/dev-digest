@@ -20,10 +20,11 @@ const SEVERITY_RANK: Record<Severity, number> = {
 /**
  * Smart Diff (Phase 2 of docs/smart-diff-plan.md) — deterministic, no-LLM
  * composition of a PR's changed files (classified by `classifyFile`, Phase 1)
- * with its latest review batch's findings. Never calls `container.llm` —
- * `pseudocode_summary` stays `null` (LLM-authored, Phase 5) and
- * `proposed_splits` stays `[]` (import-graph clustering, Phase 6), both by
- * design this phase, not left half-done.
+ * with its latest review batch's findings and (Phase 5) per-file summaries.
+ * Never calls `container.llm` itself — `pseudocode_summary` is read from
+ * `review_file_summaries`, a byproduct of the Run Review LLM call persisted
+ * elsewhere (`run-executor.ts`), and `proposed_splits` stays `[]`
+ * (import-graph clustering, Phase 6, not yet implemented).
  */
 export class SmartDiffService {
   constructor(private container: Container) {}
@@ -32,10 +33,13 @@ export class SmartDiffService {
     const pull = await this.container.reviewRepo.getPull(workspaceId, prId);
     if (!pull) throw new NotFoundError('Pull request not found');
 
-    const [files, findings] = await Promise.all([
+    const [files, { reviewIds, findings }] = await Promise.all([
       this.container.reviewRepo.getPrFiles(prId),
       this.container.reviewRepo.getLatestReviewBatchFindings(prId),
     ]);
+    // Reuses the SAME reviewIds the findings query above was scoped to — no
+    // second "latest batch" computation.
+    const summaries = await this.container.reviewRepo.getFileSummariesForReviews(reviewIds);
 
     const findingsByFile = new Map<string, FindingRow[]>();
     for (const f of findings) {
@@ -44,13 +48,18 @@ export class SmartDiffService {
       else findingsByFile.set(f.file, [f]);
     }
 
+    const summaryByFile = new Map<string, string>();
+    for (const s of summaries) {
+      summaryByFile.set(s.file, s.summary);
+    }
+
     const filesByRole = new Map<SmartDiffRole, SmartDiffFile[]>();
     for (const file of files) {
       const role = classifyFile(file);
       const fileFindings = findingsByFile.get(file.path) ?? [];
       const smartDiffFile: SmartDiffFile = {
         path: file.path,
-        pseudocode_summary: null,
+        pseudocode_summary: summaryByFile.get(file.path) ?? null,
         additions: file.additions,
         deletions: file.deletions,
         finding_lines: buildFindingLines(fileFindings),

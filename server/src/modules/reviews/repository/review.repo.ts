@@ -1,8 +1,8 @@
 import { and, desc, eq, inArray, isNull } from 'drizzle-orm';
 import type { Db } from '../../../db/client.js';
 import * as t from '../../../db/schema.js';
-import type { Finding } from '@devdigest/shared';
-import type { FindingRow, PullRow } from '../../../db/rows.js';
+import type { Finding, FileSummary } from '@devdigest/shared';
+import type { FindingRow, FileSummaryRow, PullRow } from '../../../db/rows.js';
 
 export type ReviewRow = typeof t.reviews.$inferSelect;
 
@@ -59,6 +59,28 @@ export async function insertFindings(
   return rows;
 }
 
+/** Persist a review's per-file summaries (`Review.file_summaries`), a
+ *  byproduct of the same LLM call that produces `findings` — see
+ *  Phase 5 of `docs/smart-diff-plan.md`. No-op on an empty/absent list. */
+export async function insertFileSummaries(
+  db: Db,
+  reviewId: string,
+  summaries: FileSummary[],
+): Promise<FileSummaryRow[]> {
+  if (summaries.length === 0) return [];
+  const rows = await db
+    .insert(t.reviewFileSummaries)
+    .values(
+      summaries.map((s) => ({
+        reviewId,
+        file: s.file,
+        summary: s.summary,
+      })),
+    )
+    .returning();
+  return rows;
+}
+
 /** Reviews for a PR (newest first), each with its findings. */
 export async function reviewsForPull(
   db: Db,
@@ -79,18 +101,24 @@ export async function reviewsForPull(
 }
 
 /**
- * Findings from the PR's LATEST review batch only — one `POST /pulls/:id/review`
- * action may fan out to several agents sharing `agent_runs.multi_agent_run_id`
- * (a batch), not a single review row. Re-derives the same batch-key algorithm
- * already inlined in `pulls/routes.ts` (`batchKey = review.runId →
- * agentRuns.multiAgentRunId ?? review.id`; rows ordered newest-first; the
- * first batch key seen pins "the latest batch"), scoped to one `prId` instead
- * of the bulk multi-PR list version — used by Smart Diff (Phase 2) to badge
- * finding lines without duplicating that computation. Excludes dismissed
- * findings (`dismissed_at IS NULL`); an accepted-but-not-dismissed finding is
- * still included (accepted ≠ resolved). Empty array before any review has run.
+ * Findings + the underlying review-id set from the PR's LATEST review batch
+ * only — one `POST /pulls/:id/review` action may fan out to several agents
+ * sharing `agent_runs.multi_agent_run_id` (a batch), not a single review row.
+ * Re-derives the same batch-key algorithm already inlined in
+ * `pulls/routes.ts` (`batchKey = review.runId → agentRuns.multiAgentRunId ??
+ * review.id`; rows ordered newest-first; the first batch key seen pins "the
+ * latest batch"), scoped to one `prId` instead of the bulk multi-PR list
+ * version. `reviewIds` is returned alongside `findings` (not recomputed a
+ * second time) so Smart Diff (Phase 5) can scope `getFileSummariesForReviews`
+ * to the IDENTICAL batch findings were scoped to. Excludes dismissed
+ * findings (`dismissed_at IS NULL`) from `findings`; an accepted-but-not-
+ * dismissed finding is still included (accepted ≠ resolved). Both empty
+ * before any review has run.
  */
-export async function getLatestReviewBatchFindings(db: Db, prId: string): Promise<FindingRow[]> {
+export async function getLatestReviewBatchFindings(
+  db: Db,
+  prId: string,
+): Promise<{ reviewIds: string[]; findings: FindingRow[] }> {
   const reviewRows = await db
     .select({
       id: t.reviews.id,
@@ -103,18 +131,37 @@ export async function getLatestReviewBatchFindings(db: Db, prId: string): Promis
     .orderBy(desc(t.reviews.createdAt));
 
   let latestBatchKey: string | undefined;
-  const latestReviewIds: string[] = [];
+  const reviewIds: string[] = [];
   for (const rv of reviewRows) {
     const batchKey = rv.runId ? (rv.multiAgentRunId ?? rv.runId) : rv.id;
     if (latestBatchKey === undefined) latestBatchKey = batchKey;
-    if (batchKey === latestBatchKey) latestReviewIds.push(rv.id);
+    if (batchKey === latestBatchKey) reviewIds.push(rv.id);
   }
-  if (latestReviewIds.length === 0) return [];
+  if (reviewIds.length === 0) return { reviewIds: [], findings: [] };
 
-  return db
+  const findings = await db
     .select()
     .from(t.findings)
-    .where(and(inArray(t.findings.reviewId, latestReviewIds), isNull(t.findings.dismissedAt)));
+    .where(and(inArray(t.findings.reviewId, reviewIds), isNull(t.findings.dismissedAt)));
+  return { reviewIds, findings };
+}
+
+/**
+ * File summaries for a given set of review ids — scoped to the SAME
+ * `reviewIds` `getLatestReviewBatchFindings` already computed for a PR's
+ * latest review batch (Smart Diff, Phase 5); callers must not recompute
+ * "latest batch" a second time. No filtering beyond `reviewId` membership —
+ * unlike findings, a file summary has no dismissed/accepted state.
+ */
+export async function getFileSummariesForReviews(
+  db: Db,
+  reviewIds: string[],
+): Promise<FileSummaryRow[]> {
+  if (reviewIds.length === 0) return [];
+  return db
+    .select()
+    .from(t.reviewFileSummaries)
+    .where(inArray(t.reviewFileSummaries.reviewId, reviewIds));
 }
 
 export async function getReview(db: Db, reviewId: string): Promise<ReviewRow | undefined> {

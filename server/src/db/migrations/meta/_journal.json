@@ -162,6 +162,13 @@
       "when": 1786653725737,
       "tag": "0022_fixed_old_lace",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1786660671614,
+      "tag": "0023_icy_photon",
+      "breakpoints": true
     }
   ]
 }

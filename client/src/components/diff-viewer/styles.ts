@@ -42,6 +42,14 @@ export const s = {
     color: "var(--text-muted)",
     textAlign: "center",
   } satisfies CSSProperties,
+  /** Smart Diff's "What this does: …" text (Phase 5), shown once a FileCard
+   *  is open, right below the header, before the code lines. */
+  pseudocodeSummary: {
+    padding: "8px 18px",
+    fontSize: 13,
+    color: "var(--text-secondary)",
+    borderBottom: "1px solid var(--border)",
+  } satisfies CSSProperties,
   hunk: {
     fontSize: 12,
     lineHeight: "20px",

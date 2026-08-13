@@ -4,9 +4,13 @@
    order the server already returns them, reusing FileCard for each file's
    collapsible patch view.
 
-   Not in this phase: rendering `pseudocode_summary` (Phase 5) or any
-   `split_suggestion` UI (Phase 6) — the server always returns `null`/`[]`
-   for those fields until then. */
+   Phase 5 — `pseudocode_summary` renders in TWO spots: a "Summary" Chip on
+   the file's header row (visible collapsed, alongside the findings Chip in
+   the same `headerRight` slot) and the "What this does: …" text block
+   FileCard itself renders below its header once open.
+
+   Not in this phase: `split_suggestion` UI (Phase 6) — the server always
+   returns `[]` for `proposed_splits` until then. */
 "use client";
 
 import React from "react";
@@ -98,6 +102,15 @@ export function SmartDiffViewer({
                       {t("verdict.findingsCount", { count: file.findings_count })}
                     </Chip>
                   );
+                  const summaryChip = file.pseudocode_summary != null && (
+                    <Chip icon="Info">{t("smartDiff.summaryLabel")}</Chip>
+                  );
+                  const headerRight = (findingsChip || summaryChip) && (
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                      {findingsChip}
+                      {summaryChip}
+                    </span>
+                  );
                   return (
                     <FileCard
                       key={file.path}
@@ -106,7 +119,8 @@ export function SmartDiffViewer({
                       defaultOpen={defaultOpen}
                       scrollToLine={scrollToLine}
                       findingSeverityByLine={findingSeverityByLine}
-                      headerRight={findingsChip || undefined}
+                      headerRight={headerRight || undefined}
+                      pseudocodeSummary={file.pseudocode_summary}
                     />
                   );
                 })}

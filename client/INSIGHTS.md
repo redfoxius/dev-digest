@@ -235,6 +235,40 @@ workflow and quality bar.
   (`client/src/components/diff-viewer/FileCard/FileCard.tsx:52`,
   `client/src/components/diff-viewer/SmartDiffViewer/SmartDiffViewer.test.tsx`)
 
+- 2026-08-14 — Smart Diff Phase 5 added a SECOND unconditional
+  `useTranslations` call to `FileCard` (`useTranslations("prReview")`, for the
+  "What this does:" label) alongside its pre-existing `useTranslations("shell")`
+  — confirming the 2026-08-14 entry above generalizes to "every namespace a
+  descendant unconditionally calls," not just one. This one broke a
+  pre-existing test that predates `FileCard` even having a `prReview`
+  dependency: `src/test/smoke.test.tsx`'s `DiffViewer` smoke test only
+  supplied `{ shell: ... }` and had been passing fine for months, but started
+  logging (not throwing — `next-intl`'s dev-mode `IntlError` for a MISSING
+  namespace is a console.error, not a thrown exception, so the test still
+  went green) a `MISSING_MESSAGE: Could not resolve 'prReview'` on every run.
+  A green test suite is not proof a `useTranslations` addition to a shared
+  component is namespace-complete — grep `stderr` in Vitest's own output
+  (not just the pass/fail count) after adding a new `useTranslations` call to
+  a component with existing consumers.
+  (`client/src/components/diff-viewer/FileCard/FileCard.tsx` — `tPrReview`,
+  `client/src/test/smoke.test.tsx`)
+
+- 2026-08-14 — RTL's `getByText` is SAFE to use with a regex against one half
+  of a "Label: value" string split across sibling nodes (e.g. `<div><strong>
+  What this does:</strong> {summary}</div>`), with NO ambiguous double-match,
+  because RTL's default `getNodeText` only concatenates a node's OWN DIRECT
+  text-node children — NOT full `node.textContent` (which would include the
+  `<strong>`'s nested text too). Verified empirically: `getByText(/What this
+  does:/)` matches only the `<strong>`, and `getByText(/Recomputes the
+  invoice/)` matches only the parent `<div>` (its own direct text nodes,
+  excluding the `<strong>` child) — no "multiple elements found" error either
+  way. Reusable pattern for any future "label prefix + dynamic value" render
+  that needs two independently-queryable assertions without a `data-testid`.
+  (`client/src/components/diff-viewer/FileCard/FileCard.tsx` —
+  `pseudocodeSummary` block; exercised in
+  `client/src/components/diff-viewer/SmartDiffViewer/SmartDiffViewer.test.tsx`
+  — "pseudocode_summary (Phase 5)")
+
 - 2026-08-06 — `Checkbox` (`src/vendor/ui/kit/Checkbox.tsx`) renders as a real
   `<button role="checkbox" aria-checked>` , not an `<input type="checkbox">` —
   in RTL, toggle it with `fireEvent.click(checkbox)` (or userEvent's `.click`),

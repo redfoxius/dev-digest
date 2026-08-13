@@ -45,6 +45,24 @@ describe('AI contracts parse fixtures', () => {
     });
     expect(review.findings).toHaveLength(1);
     expect(review.score).toBe(61);
+    // `file_summaries` (Phase 5 of docs/smart-diff-plan.md) is `.optional()`
+    // — absent here, must not fail parsing.
+    expect(review.file_summaries).toBeUndefined();
+  });
+
+  it('Review with file_summaries (Phase 5 — pseudocode_summary)', () => {
+    const review = Review.parse({
+      verdict: 'approve',
+      summary: 'Looks good.',
+      score: 92,
+      findings: [],
+      file_summaries: [
+        { file: 'src/config.ts', summary: 'Loads and validates environment configuration.' },
+      ],
+    });
+    expect(review.file_summaries).toEqual([
+      { file: 'src/config.ts', summary: 'Loads and validates environment configuration.' },
+    ]);
   });
 
   it('lethal-trifecta Finding variant', () => {
