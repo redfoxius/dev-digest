@@ -59,6 +59,15 @@ export const Finding = z.object({
   // Lethal-trifecta variant fields (present only when kind === 'lethal_trifecta')
   trifecta_components: z.array(TrifectaComponent).nullish(),
   evidence: z.array(TrifectaEvidence).nullish(),
+  /**
+   * Intent Layer — set by the reviewing LLM itself, informed by the injected
+   * `## Derived intent` section, only when intent was provided for this run.
+   * `.nullish()` (NOT `.default()`): most Finding producers (lethal-trifecta/
+   * phantom/hook detectors, any run without intent) legitimately never set
+   * this, and a `.default()` would force every existing Finding literal
+   * (fixtures, other producers) to add it for no benefit.
+   */
+  in_scope: z.boolean().nullish(),
 });
 export type Finding = z.infer<typeof Finding>;
 

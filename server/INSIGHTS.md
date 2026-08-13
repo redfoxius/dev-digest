@@ -206,7 +206,59 @@ workflow and quality bar.
   (`server/src/modules/agents/repository.ts:287-305`,
   `server/test/skills.it.test.ts:GET /skills/:id/stats`)
 
+- 2026-08-09 — Adding a new automatic Container-level capability call site
+  inside `executeRuns()` (Intent Layer's `container.intentDeriver.derive()`,
+  mirroring `repoIntel`) silently makes every EXISTING `*.it.test.ts` that
+  exercises `POST /pulls/:id/review` (here: only `reviews.it.test.ts`, 3
+  `buildApp()` call sites) reach for a REAL network call through whatever
+  concrete adapter the port defaults to — `LocalSecretsProvider` reads the
+  developer's real `~/.devdigest/secrets.json`, and since a real
+  `OPENROUTER_API_KEY` is commonly configured there on a dev machine already
+  used for manual verification (confirmed present on this machine), the
+  integration suite would make real, billed OpenRouter requests with no test
+  asserting on it — and `curl https://openrouter.ai` confirmed real egress is
+  reachable from this environment, so it's not merely theoretical. Fixed by
+  adding `intentDeriver: new MockIntentDeriver(undefined)` alongside the
+  existing `embedder`/`git`/`llm` overrides at each of the 3 sites. Any
+  future port added to a background/automatic call path (not just a route
+  handler reachable only via an explicit new test) needs the SAME audit of
+  pre-existing integration tests that already reach that code path, not just
+  hermeticity for new tests written against the port itself.
+  (`server/test/reviews.it.test.ts` — 3 `overrides` blocks,
+  `server/src/modules/reviews/run-executor.ts` — `executeRuns()`'s
+  `container.intentDeriver.derive()` call before the per-agent loop)
+
+- 2026-08-09 — The `FEATURE_MODELS` non-cheap-default bug (2026-08-07 entry
+  above, for `'conventions'`) also existed for `'review_intent'`
+  (`openai`/`gpt-4.1`) until the Intent Layer feature actually wired a real
+  producer to that slot. Confirms the general warning holds for every
+  currently-unwired `FeatureModelId` slot — `risk_brief` and `conformance`
+  still default to `openai`/`gpt-4.1` too and haven't been checked against
+  their own future feature's cost requirement yet; don't assume either is
+  "already correct" just because it hasn't been flagged. Fixed to
+  `openrouter`/`deepseek/deepseek-v4-flash` in both vendor copies.
+  (`server/src/vendor/shared/contracts/platform.ts:52-57`)
+
+- 2026-08-09 — `pnpm db:generate` also handled a pure-addition diff spanning
+  TWO tables (4 new columns total) plus a NEW `CHECK` constraint
+  (`pr_intent_confidence_range`) in the same migration cleanly, with no
+  interactive prompt — extends the 2026-08-07 addendum (which only confirmed
+  a single-column, single-table case) to confirm a multi-table/multi-column/
+  CHECK-constraint addition is equally safe, as long as nothing is
+  dropped/renamed in the same diff.
+  (`server/src/db/migrations/0017_simple_violations.sql`)
+
 ## Tool & Library Notes
+
+- 2026-08-13 — `server/src/adapters/llm/openai.ts:15` and `anthropic.ts:16`'s
+  `DEFAULT_TIMEOUT` (was 60_000, even shorter than OpenRouter's) bumped to
+  300_000 alongside the same fix in `reviewer-core/src/llm/openrouter.ts` —
+  see that package's `INSIGHTS.md` (2026-08-13 entry) for the full,
+  live-reproduced root cause (a free-tier `review_intent` FeatureModel +
+  the per-attempt abort applying even across retries). Not independently
+  reproduced against these two direct, non-OpenRouter adapters this
+  session — bumped preemptively for consistency; same failure shape is
+  plausible but unconfirmed here.
 
 - 2026-08-09 — `test/skills.test.ts`'s shared `makeFakeDb` chain (queue-based
   fake `Db`) had no `innerJoin`/`leftJoin`/`groupBy` no-op methods before

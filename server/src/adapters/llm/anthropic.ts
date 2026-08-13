@@ -13,7 +13,7 @@ import { toJsonSchema, parseWithRepair } from '../../platform/structured.js';
 import { estimateCost } from './pricing.js';
 import { ExternalServiceError } from '../../platform/errors.js';
 
-const DEFAULT_TIMEOUT = 60_000;
+const DEFAULT_TIMEOUT = 300_000;
 const DEFAULT_MAX_TOKENS = 4096;
 
 /** Anthropic has no embeddings API; embeddings come from the OpenAI Embedder. */

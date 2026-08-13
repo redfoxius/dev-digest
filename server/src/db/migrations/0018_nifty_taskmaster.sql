@@ -1,0 +1,1 @@
+ALTER TABLE "pr_intent" ADD CONSTRAINT "pr_intent_evidence_tier_values" CHECK ("pr_intent"."evidence_tier" IN ('direct', 'ticket_only', 'indirect_only'));

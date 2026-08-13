@@ -32,7 +32,9 @@ import type {
   SecretsProvider,
   SecretKey,
   UrlFetcher,
+  Intent,
 } from '@devdigest/shared';
+import type { DeriveIntentInput, IntentDeriver } from '../modules/intent/types.js';
 import { parseUnifiedDiff } from './git/diff-parser.js';
 
 /**
@@ -337,3 +339,24 @@ export class MockUrlFetcher implements UrlFetcher {
     return this.impl(url);
   }
 }
+
+// ---------- Mock IntentDeriver ----------
+/** Deterministic fake for the Intent Layer — no LLM/GitHub/HTTP calls. Tests
+ *  inject via `ContainerOverrides.intentDeriver`, mirroring `MockUrlFetcher`. */
+export class MockIntentDeriver implements IntentDeriver {
+  public calls: DeriveIntentInput[] = [];
+  constructor(private fixture: Intent | undefined | (() => Intent | undefined) = DEFAULT_MOCK_INTENT) {}
+  async derive(input: DeriveIntentInput): Promise<Intent | undefined> {
+    this.calls.push(input);
+    return typeof this.fixture === 'function' ? this.fixture() : this.fixture;
+  }
+}
+
+const DEFAULT_MOCK_INTENT: Intent = {
+  intent: 'Add rate limiting to public API endpoints.',
+  in_scope: ['Rate limiter middleware', 'Config wiring'],
+  out_of_scope: [],
+  confidence: 0.8,
+  evidence_tier: 'direct',
+  sources: ['pr_description', 'changed_paths', 'hunk_headers', 'branch_name'],
+};

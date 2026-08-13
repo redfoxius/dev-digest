@@ -31,6 +31,8 @@ import { SkillsRepository } from '../modules/skills/repository.js';
 import { RepoRepository } from '../modules/repos/repository.js';
 import type { RepoIntel } from '../modules/repo-intel/types.js';
 import { RepoIntelService } from '../modules/repo-intel/service.js';
+import type { IntentDeriver } from '../modules/intent/types.js';
+import { IntentDeriverService } from '../modules/intent/service.js';
 import type { DepGraph } from '../adapters/depgraph/index.js';
 import { UnionDepGraph } from '../adapters/depgraph/union.js';
 import { type Tokenizer, TiktokenTokenizer } from '../adapters/tokenizer/index.js';
@@ -53,6 +55,8 @@ export interface ContainerOverrides {
   llm?: Partial<Record<'openai' | 'anthropic' | 'openrouter', LLMProvider>>;
   /** repo-intel facade (T1.1+) — tests inject mock RepoIntel implementations. */
   repoIntel?: RepoIntel;
+  /** Intent Layer — tests inject mock IntentDeriver implementations. */
+  intentDeriver?: IntentDeriver;
   /** repo-intel T3 adapters — only the indexer pipeline reads these. */
   depgraph?: DepGraph;
   tokenizer?: Tokenizer;
@@ -82,6 +86,7 @@ export class Container {
   private _skillsRepo?: SkillsRepository;
   private _reposRepo?: RepoRepository;
   private _repoIntel?: RepoIntel;
+  private _intentDeriver?: IntentDeriver;
   private _depgraph?: DepGraph;
   private _tokenizer?: Tokenizer;
   private _priceBook?: PriceBook;
@@ -133,6 +138,19 @@ export class Container {
     if (this.overrides.repoIntel) return this.overrides.repoIntel;
     this._repoIntel ??= new RepoIntelService(this);
     return this._repoIntel;
+  }
+
+  /**
+   * Intent Layer — derives a PR's intent/scope (cheap-model LLM + GitHub +
+   * UrlFetcher + a DB read). Modeled on `repoIntel` above: a cross-module
+   * capability composing several ports, wired here so it stays swappable via
+   * `ContainerOverrides` in unit tests instead of being constructed inline in
+   * `run-executor.ts`/`reviews/service.ts`.
+   */
+  get intentDeriver(): IntentDeriver {
+    if (this.overrides.intentDeriver) return this.overrides.intentDeriver;
+    this._intentDeriver ??= new IntentDeriverService(this);
+    return this._intentDeriver;
   }
 
   /** Import-graph builder (dependency-cruiser). T3 indexer pipeline only. */
