@@ -31,6 +31,9 @@ export const reviews = pgTable(
   (t) => ({
     // reviewsForPull (repository/review.repo.ts) filters by pr_id on every PR page load.
     prIdIdx: index('reviews_pr_id_idx').on(t.prId),
+    // run.repo.ts filters by run_id (deleteAgentRun's cascade) and
+    // skills/repository.ts joins reviews to agent_run_skills on it.
+    runIdIdx: index('reviews_run_id_idx').on(t.runId),
   }),
 );
 
