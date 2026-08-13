@@ -250,6 +250,16 @@ workflow and quality bar.
 
 ## Tool & Library Notes
 
+- 2026-08-13 — `server/src/adapters/llm/openai.ts:15` and `anthropic.ts:16`'s
+  `DEFAULT_TIMEOUT` (was 60_000, even shorter than OpenRouter's) bumped to
+  300_000 alongside the same fix in `reviewer-core/src/llm/openrouter.ts` —
+  see that package's `INSIGHTS.md` (2026-08-13 entry) for the full,
+  live-reproduced root cause (a free-tier `review_intent` FeatureModel +
+  the per-attempt abort applying even across retries). Not independently
+  reproduced against these two direct, non-OpenRouter adapters this
+  session — bumped preemptively for consistency; same failure shape is
+  plausible but unconfirmed here.
+
 - 2026-08-09 — `test/skills.test.ts`'s shared `makeFakeDb` chain (queue-based
   fake `Db`) had no `innerJoin`/`leftJoin`/`groupBy` no-op methods before
   `SkillsRepository.getStats` — every prior `SkillsRepository` query was a
