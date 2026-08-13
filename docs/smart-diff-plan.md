@@ -1,6 +1,9 @@
 # Smart Diff — classifier + route + `SmartDiffViewer`
 
-**Status:** not started
+**Status:** in progress — Phase 1 (classifier) implemented and tested
+(`server/src/modules/smart-diff/{constants,classifier}.ts`,
+`server/test/smart-diff-classifier.test.ts`, 14/14 passing). Phases 2-6 not
+started.
 
 ## Context
 
