@@ -1,12 +1,15 @@
 # Smart Diff — classifier + route + `SmartDiffViewer`
 
-**Status:** in progress — Phase 1 (classifier) and Phase 2
-(`GET /pulls/:id/smart-diff`) implemented and tested
-(`server/src/modules/smart-diff/{constants,classifier,service}.ts`, contract
-change in both `brief.ts` copies, `server/test/smart-diff-classifier.test.ts`
-14/14, `server/test/smart-diff-service.it.test.ts` 3/3 against real Postgres,
-full unit suite 302/302, plus manually verified live against two real PRs
-including the empty-pre-review and 404 cases). Phases 3-6 not started.
+**Status:** in progress — Phases 1-3 implemented and tested. Phase 1
+(classifier) + Phase 2 (`GET /pulls/:id/smart-diff`):
+`server/src/modules/smart-diff/{constants,classifier,service}.ts`, contract
+change in both `brief.ts` copies, unit + `.it.test.ts` suites green, manually
+verified live against two real PRs. Phase 3 (`SmartDiffViewer`):
+`client/src/components/diff-viewer/SmartDiffViewer/`, additive `CodeLine`/
+`FileCard` props (incl. a `headerRight` slot added during review to fix a
+duplicate-file-path render the first draft shipped), 8/8 component tests,
+full client suite 135/135, no consumer yet (that's Phase 4). Phases 4-6 not
+started.
 
 ## Context
 
