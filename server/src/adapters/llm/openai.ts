@@ -12,7 +12,7 @@ import { toJsonSchema, parseWithRepair } from '../../platform/structured.js';
 import { estimateCost } from './pricing.js';
 import { ExternalServiceError } from '../../platform/errors.js';
 
-const DEFAULT_TIMEOUT = 60_000;
+const DEFAULT_TIMEOUT = 300_000;
 const EMBED_MODEL = 'text-embedding-3-small';
 
 /**

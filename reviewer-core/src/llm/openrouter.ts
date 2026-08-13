@@ -48,7 +48,7 @@ export class OpenRouterProvider implements LLMProvider {
     this.id = opts.id ?? 'openrouter';
     this.apiKey = apiKey;
     this.baseURL = opts.baseURL ?? 'https://openrouter.ai/api/v1';
-    this.timeoutMs = opts.timeoutMs ?? 90_000;
+    this.timeoutMs = opts.timeoutMs ?? 300_000;
     this.estimateCost = opts.estimateCost;
     this.client = new OpenAI({
       apiKey,
@@ -90,7 +90,9 @@ export class OpenRouterProvider implements LLMProvider {
         // stack (observed: an actual review stalled 8+ minutes with no error,
         // well past the SDK's documented per-attempt timeout) still needs a
         // hard, enforceable ceiling so the run fails cleanly instead of
-        // blocking the rest of its batch forever.
+        // blocking the rest of its batch forever. 5 minutes (not the earlier
+        // 90s) because slower/free-tier OpenRouter models routinely exceed
+        // 90s and were aborting mid-response instead of just being slow.
         { signal: AbortSignal.timeout(req.timeoutMs ?? this.timeoutMs) },
       );
 
