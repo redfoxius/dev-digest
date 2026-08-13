@@ -1,9 +1,10 @@
 "use client";
 
 import React from "react";
-import { SectionLabel, Button } from "@devdigest/ui";
-import { DiffViewer, type DiffCommentApi } from "@/components/diff-viewer";
+import { SectionLabel, Button, Chip } from "@devdigest/ui";
+import { DiffViewer, SmartDiffViewer, type DiffCommentApi } from "@/components/diff-viewer";
 import { usePrComments, useCreatePrComment } from "@/lib/hooks/reviews";
+import { usePrSmartDiff } from "@/lib/hooks/smart-diff";
 import { notify } from "@/lib/toast";
 import type { PrFile } from "@devdigest/shared";
 
@@ -20,6 +21,17 @@ export function DiffTab({ prId, filesCount, files, canComment }: DiffTabProps) {
   const create = useCreatePrComment(prId);
   // Comments start hidden so the diff is clean by default — toggle to reveal.
   const [showComments, setShowComments] = React.useState(false);
+
+  const { data: smartDiff } = usePrSmartDiff(prId);
+  // While the query is loading, erroring, or the PR has zero files across
+  // every group, there's nothing to group — the toggle stays hidden and this
+  // tab silently falls back to the flat DiffViewer. A broken/slow smart-diff
+  // call must never take down the base "show me the diff" function.
+  const canUseSmartOrder = !!smartDiff?.groups.some((g) => g.files.length > 0);
+  // Same local pattern as showComments above — plain useState, no URL
+  // persistence, resets on reload.
+  const [smartOrder, setSmartOrder] = React.useState(true);
+  const showSmart = smartOrder && canUseSmartOrder;
 
   const commentCount = comments?.length ?? 0;
 
@@ -45,21 +57,37 @@ export function DiffTab({ prId, filesCount, files, canComment }: DiffTabProps) {
       <SectionLabel
         icon="Code"
         right={
-          commentCount > 0 ? (
-            <Button
-              kind="ghost"
-              size="sm"
-              icon={showComments ? "EyeOff" : "Eye"}
-              onClick={() => setShowComments((v) => !v)}
-            >
-              {showComments ? "Hide comments" : "Show comments"} ({commentCount})
-            </Button>
-          ) : undefined
+          <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+            {canUseSmartOrder && (
+              <>
+                <Chip active={smartOrder} onClick={() => setSmartOrder(true)}>
+                  Smart order
+                </Chip>
+                <Chip active={!smartOrder} onClick={() => setSmartOrder(false)}>
+                  Original order
+                </Chip>
+              </>
+            )}
+            {commentCount > 0 && (
+              <Button
+                kind="ghost"
+                size="sm"
+                icon={showComments ? "EyeOff" : "Eye"}
+                onClick={() => setShowComments((v) => !v)}
+              >
+                {showComments ? "Hide comments" : "Show comments"} ({commentCount})
+              </Button>
+            )}
+          </div>
         }
       >
         Files changed · {filesCount} files
       </SectionLabel>
-      <DiffViewer files={files} commenting={commenting} />
+      {showSmart ? (
+        <SmartDiffViewer smartDiff={smartDiff!} files={files} commenting={commenting} />
+      ) : (
+        <DiffViewer files={files} commenting={commenting} />
+      )}
     </section>
   );
 }

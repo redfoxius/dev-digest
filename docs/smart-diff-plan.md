@@ -1,6 +1,6 @@
 # Smart Diff — classifier + route + `SmartDiffViewer`
 
-**Status:** in progress — Phases 1-3 implemented and tested. Phase 1
+**Status:** in progress — Phases 1-4 implemented and tested. Phase 1
 (classifier) + Phase 2 (`GET /pulls/:id/smart-diff`):
 `server/src/modules/smart-diff/{constants,classifier,service}.ts`, contract
 change in both `brief.ts` copies, unit + `.it.test.ts` suites green, manually
@@ -8,8 +8,13 @@ verified live against two real PRs. Phase 3 (`SmartDiffViewer`):
 `client/src/components/diff-viewer/SmartDiffViewer/`, additive `CodeLine`/
 `FileCard` props (incl. a `headerRight` slot added during review to fix a
 duplicate-file-path render the first draft shipped), 8/8 component tests,
-full client suite 135/135, no consumer yet (that's Phase 4). Phases 4-6 not
-started.
+full client suite 135/135. Phase 4 (`DiffTab` toggle wiring): `SmartDiffViewer`
+is now reachable in the app; typecheck + full client suite (138/138) green,
+**but the live in-browser click-through (toggle appears, groups render,
+boilerplate collapsed, scroll works) has not actually been done yet** —
+`claude-in-chrome`'s browser extension wasn't connected when this phase
+landed. Do this manual check before considering Phase 4 fully done, not just
+code-reviewed. Phases 5-6 not started.
 
 ## Context
 
