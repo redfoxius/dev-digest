@@ -1,4 +1,4 @@
-import type { ChatMessage, PromptAssembly } from '@devdigest/shared';
+import type { ChatMessage, Intent, PromptAssembly } from '@devdigest/shared';
 
 /**
  * Prompt assembly + prompt-injection hardening.
@@ -35,6 +35,22 @@ export function wrapUntrusted(label: string, content: string): string {
 
 /** Cap the PR description so a huge author body can't blow the token budget. */
 const MAX_PR_DESCRIPTION_CHARS = 4000;
+/** Cap the derived-intent text — smaller than the PR description cap since
+ *  intent+scope is already a compact, LLM-authored summary, not raw prose. */
+const MAX_INTENT_CHARS = 1500;
+
+/**
+ * The TRUSTED scope-tagging instruction appended right after the wrapped
+ * `## Derived intent` block (own paragraph, OUTSIDE `<untrusted>` — this is
+ * server-authored framing, not PR/spec content, same reasoning as why the
+ * `## Derived intent` heading itself is trusted while its contents aren't).
+ * Only rendered when `parts.intent` is present.
+ */
+const SCOPE_TAGGING_INSTRUCTION =
+  "For each finding you report, set `in_scope` to `false` only if it is clearly about code " +
+  "entirely outside the PR's stated scope above; otherwise `true`. When the intent above is " +
+  'low-confidence (see its evidence tier), be conservative — only mark something out of scope ' +
+  "if you're genuinely confident it's unrelated to what this PR is doing.";
 
 export interface PromptParts {
   /** Agent's system prompt (trusted). */
@@ -73,6 +89,17 @@ export interface PromptParts {
    * undefined → section omitted.
    */
   prDescription?: string;
+  /**
+   * Derived PR intent/scope (Intent Layer) — an already-rendered text block
+   * (composed by `renderIntentText`, below). Untrusted — derivation reads
+   * author-controlled PR/spec content — delimiter-wrapped.
+   * Rendered as `## Derived intent`, right after `## PR description` and
+   * before `## Skills / rules`, so the model sees "what the PR claims" then
+   * "what we inferred" before anything else. Empty/undefined → section
+   * omitted (no behavior change — a review run without intent is identical
+   * to the pre-Intent-Layer prompt).
+   */
+  intent?: string;
   /** The unified diff / user task (untrusted content). */
   diff: string;
   /** Optional task framing line, e.g. "Review PR #482 '…'". */
@@ -110,10 +137,18 @@ export function assemblePrompt(parts: PromptParts): AssembledPrompt {
       ? parts.prDescription.slice(0, MAX_PR_DESCRIPTION_CHARS)
       : undefined;
 
+  const intent =
+    parts.intent && parts.intent.trim().length > 0 ? parts.intent.slice(0, MAX_INTENT_CHARS) : undefined;
+
   const userSections: string[] = [];
   if (parts.task) userSections.push(parts.task);
   if (prDescription) {
     userSections.push(`## PR description\n${wrapUntrusted('pr-description', prDescription)}`);
+  }
+  if (intent) {
+    userSections.push(
+      `## Derived intent\n${wrapUntrusted('derived-intent', intent)}\n\n${SCOPE_TAGGING_INSTRUCTION}`,
+    );
   }
   if (skillsBlock) userSections.push(`## Skills / rules\n${skillsBlock}`);
   if (memoryBlock) userSections.push(`## Relevant memory\n${memoryBlock}`);
@@ -143,8 +178,103 @@ export function assemblePrompt(parts: PromptParts): AssembledPrompt {
     callers: parts.callers ?? null,
     repo_map: parts.repoMap ?? null,
     pr_description: prDescription ?? null,
+    intent: intent ?? null,
     user,
   };
 
   return { messages, assembly };
+}
+
+// ---- safe structured logging of prompt composition ------------------------
+//
+// NEVER put section content here — only its name, source, and length. Raw
+// text (diff, PR body, specs, skills, ...) belongs solely in the persisted,
+// access-controlled `PromptAssembly` run trace, never in a log line that may
+// be mirrored to stdout/an aggregator or streamed live over SSE.
+
+export interface PromptSectionSummary {
+  /** Section name, matching the prompt's own `## Heading` naming. */
+  section: string;
+  /** Where this section's content originates from — never the content itself. */
+  source: string;
+  /** Exact character length of the (already truncated/wrapped) section text. */
+  chars: number;
+  /**
+   * Rough chars/4 estimate — NOT a real tokenizer count. Real tokensIn/
+   * tokensOut come from the LLM response after the call and are logged
+   * separately; this exists only for pre-call prompt-composition visibility.
+   */
+  estTokens: number;
+}
+
+/** chars/4 heuristic. Deliberately not a real tokenizer — see `PromptSectionSummary.estTokens`. */
+export function estimateTokens(chars: number): number {
+  return Math.ceil(chars / 4);
+}
+
+function summarizeSection(
+  section: string,
+  source: string,
+  text: string | null | undefined,
+): PromptSectionSummary | undefined {
+  if (!text) return undefined;
+  return { section, source, chars: text.length, estTokens: estimateTokens(text.length) };
+}
+
+/**
+ * Safe, structured metadata about an already-assembled prompt: which
+ * sections are present, where each came from, and how long it is (chars +
+ * a rough token estimate) — nothing more. This is the ONLY form prompt
+ * composition should ever take in a stdout/SSE log line; pass the result
+ * straight into a log call's `data`, never the `assembly` object itself.
+ */
+export function summarizePromptAssembly(
+  assembly: PromptAssembly,
+  extra: { diffChars?: number } = {},
+): PromptSectionSummary[] {
+  const entries = [
+    summarizeSection('system', 'agent-system-prompt', assembly.system),
+    summarizeSection('skills', 'skill-library', assembly.skills),
+    summarizeSection('memory', 'curated-memory', assembly.memory),
+    summarizeSection('specs', 'project-context', assembly.specs),
+    summarizeSection('callers', 'repo-intel-callers', assembly.callers),
+    summarizeSection('repo_map', 'repo-intel-map', assembly.repo_map),
+    summarizeSection('pr_description', 'pr-body', assembly.pr_description),
+    summarizeSection('intent', 'intent-layer', assembly.intent),
+    extra.diffChars != null
+      ? ({
+          section: 'diff',
+          source: 'diff-loader',
+          chars: extra.diffChars,
+          estTokens: estimateTokens(extra.diffChars),
+        } satisfies PromptSectionSummary)
+      : undefined,
+  ];
+  return entries.filter((e): e is PromptSectionSummary => e != null);
+}
+
+/** Qualitative (never numeric) evidence-tier framing shown both in the prompt
+ *  and — via the client's copy of this same wording — the Intent Layer's UI
+ *  badge. Deliberately no confidence percentage: the model/user need "trust
+ *  this less", not a fake-precise number. */
+const EVIDENCE_TIER_LABEL: Record<Intent['evidence_tier'], string> = {
+  direct: 'backed by the PR description and/or a linked spec/ticket',
+  ticket_only: 'inferred from a linked issue/ticket only — no PR description',
+  indirect_only: 'inferred from branch/commits/file names only — low confidence',
+};
+
+/** Render a derived `Intent` into the compact, LLM-authored-summary text
+ *  block that becomes `PromptParts.intent` (above). Pure (no DB/FS/network) —
+ *  reviewer-core owns rendering because it already owns the `## Derived
+ *  intent` prompt section this feeds; the server only supplies the derived
+ *  `Intent` value. No numeric confidence anywhere in this text — qualitative
+ *  framing only. */
+export function renderIntentText(intent: Intent): string {
+  const bullets = (items: string[]) => (items.length > 0 ? items.map((s) => `- ${s}`).join('\n') : '(none stated)');
+  return [
+    `Intent: ${intent.intent}`,
+    `In scope:\n${bullets(intent.in_scope)}`,
+    `Out of scope:\n${bullets(intent.out_of_scope)}`,
+    `Evidence: ${EVIDENCE_TIER_LABEL[intent.evidence_tier]}`,
+  ].join('\n');
 }

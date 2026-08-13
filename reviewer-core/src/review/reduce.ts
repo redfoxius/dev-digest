@@ -29,6 +29,45 @@ export function scoreFromFindings(findings: Finding[]): number {
   return Math.max(0, Math.min(100, 100 - penalty));
 }
 
+/** One severity step down (floors at SUGGESTION) — used to soften, never to
+ *  silently remove, an out-of-scope finding (see `filterByScope`). */
+const DOWNGRADE: Record<Finding['severity'], Finding['severity']> = {
+  CRITICAL: 'WARNING',
+  WARNING: 'SUGGESTION',
+  SUGGESTION: 'SUGGESTION',
+};
+
+/**
+ * Intent Layer — deterministic scope filtering, pure (findings in, findings
+ * out), same "determinism-over-model-self-report" philosophy as
+ * `scoreFromFindings` above. Called from `reviewPullRequest()` after the
+ * citation-grounding gate, and only when intent was actually provided.
+ *
+ * Safety-critical kinds (secret_leak, lethal_trifecta, phantom, hook) always
+ * pass through regardless of declared scope — only ordinary 'finding'-kind
+ * findings are scope-filtered. Every in-scope finding is kept as-is.
+ * Out-of-scope findings are advisory, NOT unconditionally dropped: every one
+ * is kept, one severity rank softer (CRITICAL→WARNING→SUGGESTION, floored at
+ * SUGGESTION). `intent`/`in_scope` are derived from attacker-controlled PR
+ * content (title/body/linked issue/spec) by a cheap LLM classifier — an
+ * unconditional drop would let a crafted PR description make a genuine
+ * CRITICAL vulnerability finding vanish outright (never persisted, only a
+ * trace log line survives). Softening instead of dropping means the worst a
+ * scope misclassification can do is understate severity, never erase the
+ * finding — pr-self-review security-skill finding on PR #15.
+ */
+export function filterByScope(findings: Finding[]): { kept: Finding[]; downgraded: Finding[] } {
+  const scoreable = findings.filter((f) => (f.kind ?? 'finding') === 'finding');
+  const exempt = findings.filter((f) => (f.kind ?? 'finding') !== 'finding');
+  const inScope = scoreable.filter((f) => f.in_scope !== false);
+  const outOfScope = scoreable.filter((f) => f.in_scope === false);
+
+  const downgraded = outOfScope.map((f) => ({ ...f, severity: DOWNGRADE[f.severity] }));
+
+  const kept = [...exempt, ...inScope, ...downgraded];
+  return { kept, downgraded };
+}
+
 /** Verdict severity order for the reduce step (worst verdict wins). */
 const VERDICT_RANK: Record<string, number> = {
   request_changes: 2,

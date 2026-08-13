@@ -148,6 +148,19 @@ workflow and quality bar.
   automatically on skill delete. A plain `window.confirm` is sufficient,
   matching `AgentCard.tsx`'s existing delete-button pattern.
 
+- 2026-08-09 — `OverviewTab.tsx` (PR detail page) has NO `next-intl` usage at
+  all — unlike almost every sibling `_components/` folder on the same page
+  (`FindingCard`, `VerdictBanner`, `RunReviewDropdown`, `RunHistory`,
+  `RunStatus` all call `useTranslations('prReview')`). The new `IntentCard`
+  (`OverviewTab/_components/IntentCard/`) deliberately followed
+  `OverviewTab`'s own local convention (hardcoded English strings) rather
+  than the page-wide i18n convention, for consistency with the file it's
+  colocated under — don't assume every `_components/` folder under the same
+  route is i18n'd just because most are; check the direct parent first.
+  Worth revisiting together if the Overview tab as a whole ever gets i18n'd.
+  (`client/src/app/repos/[repoId]/pulls/[number]/_components/OverviewTab/OverviewTab.tsx`,
+  `.../_components/IntentCard/IntentCard.tsx`)
+
 ## Tool & Library Notes
 
 - 2026-08-06 — `Checkbox` (`src/vendor/ui/kit/Checkbox.tsx`) renders as a real

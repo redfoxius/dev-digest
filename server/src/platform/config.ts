@@ -36,6 +36,13 @@ const EnvSchema = z.object({
     (v) => (v === '' ? undefined : v),
     z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).optional(),
   ),
+  // Verbose prompt-composition logging (per-skill/per-spec length breakdown,
+  // see reviewer-core's `ReviewInput.promptLogVerbose`). Deliberately NOT
+  // exposed via any API/Settings surface — env-var-only, so it can only be
+  // flipped by editing a local .env, never remotely. Never controls WHETHER
+  // section content is logged (that's never allowed, verbose or not) — only
+  // how granular the safe, content-free length breakdown is.
+  PROMPT_ASSEMBLY_DEBUG: z.string().optional(),
 });
 
 export type AppConfig = {
@@ -59,6 +66,12 @@ export type AppConfig = {
    * EXACTLY like the ripgrep-only baseline.
    */
   repoIntelEnabled: boolean;
+  /**
+   * Verbose prompt-composition logging — see `PROMPT_ASSEMBLY_DEBUG` above.
+   * Forced off outside development/test even if the env var is set, so a
+   * stray env var in a deployed instance can't silently turn it on.
+   */
+  promptAssemblyDebug: boolean;
 };
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
@@ -77,5 +90,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     webOrigin: `http://localhost:${parsed.WEB_PORT}`,
     embeddingsEnabled: parsed.EMBEDDINGS_ENABLED === 'true',
     repoIntelEnabled: parsed.REPO_INTEL_ENABLED !== 'false',
+    promptAssemblyDebug: parsed.PROMPT_ASSEMBLY_DEBUG === 'true' && parsed.NODE_ENV !== 'production',
   };
 }

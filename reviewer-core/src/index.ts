@@ -15,8 +15,19 @@
 export {
   assemblePrompt,
   wrapUntrusted,
+  renderIntentText,
   type PromptParts,
   type AssembledPrompt,
+} from './prompt.js';
+
+// Safe, structured prompt-composition metadata for logging (section name +
+// source + length only — NEVER content). Shared by the server's main-review
+// path (consumed via `ReviewEvent`s, see `ReviewInput.promptLogVerbose`) and
+// the Intent Layer classifier's own logging (`modules/intent/service.ts`).
+export {
+  estimateTokens,
+  summarizePromptAssembly,
+  type PromptSectionSummary,
 } from './prompt.js';
 
 // Citation grounding — the mandatory mechanical gate for diff findings.
@@ -32,7 +43,8 @@ export {
 } from './llm/structured.js';
 
 // Map-reduce helpers (reduce partials, slice a file's diff).
-export { reduceReviews, sliceDiff } from './review/reduce.js';
+// Intent Layer — deterministic scope-based finding filtering (pure).
+export { reduceReviews, sliceDiff, filterByScope } from './review/reduce.js';
 
 // The engine entry point: given (diff + resolved agent inputs + LLM) → grounded Review.
 export {

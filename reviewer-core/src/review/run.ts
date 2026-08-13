@@ -7,9 +7,9 @@ import type {
   UnifiedDiff,
 } from '@devdigest/shared';
 import { Review as ReviewSchema } from '@devdigest/shared';
-import { assemblePrompt } from '../prompt.js';
+import { assemblePrompt, estimateTokens, summarizePromptAssembly } from '../prompt.js';
 import { groundFindings, groundingSummary } from '../grounding.js';
-import { reduceReviews, scoreFromFindings, sliceDiff } from './reduce.js';
+import { filterByScope, reduceReviews, scoreFromFindings, sliceDiff } from './reduce.js';
 
 /**
  * reviewPullRequest — the review engine entry point.
@@ -71,6 +71,15 @@ export interface ReviewInput {
   /** PR author's description/body (untrusted; truncated + delimiter-wrapped in
       the prompt). Empty/undefined → section omitted. */
   prDescription?: string;
+  /**
+   * Derived PR intent/scope (Intent Layer) — an already-rendered text block;
+   * caller (server) derives it, this engine only threads it into the prompt
+   * and, when present, deterministically filters findings by the model's own
+   * `in_scope` self-tag after grounding. Empty/undefined → both the prompt
+   * section AND scope filtering are skipped (identical to pre-Intent-Layer
+   * behavior).
+   */
+  intent?: string;
   /** Task framing line, e.g. "Review PR #482 …". */
   task?: string;
   /** Override the structured-output retry budget. */
@@ -79,9 +88,18 @@ export interface ReviewInput {
   mapThresholdLines?: number;
   /**
    * OpenRouter session id — forwarded on every LLM call so all chunks of this
-   * review group into one session in the OpenRouter dashboard.
+   * review group into one session in the OpenRouter dashboard. Also used as
+   * the correlation id on the structured `prompt_assembly` log event below.
    */
   sessionId?: string;
+  /**
+   * Emit the additional, more granular `prompt_assembly_verbose` event (per-
+   * skill/per-spec length breakdown) alongside the always-on compact one.
+   * Still never includes section content — only more entries, each still
+   * just a name + length. The caller (server) decides this from a
+   * LOCAL-ONLY env flag; this engine has no config/env access of its own.
+   */
+  promptLogVerbose?: boolean;
   /** Progress sink. */
   onEvent?: (e: ReviewEvent) => void;
   /**
@@ -135,11 +153,46 @@ export async function reviewPullRequest(input: ReviewInput): Promise<ReviewOutco
     callers: input.callers,
     repoMap: input.repoMap,
     prDescription: input.prDescription,
+    intent: input.intent,
     task: input.task,
   };
 
   // Whole-diff assembly is the trace default; overwritten below for single-pass.
   let assembly: PromptAssembly = assemblePrompt({ ...promptParts, diff: input.diff.raw }).assembly;
+
+  // Safe, structured prompt-composition log — section names/sources/lengths
+  // only, never content. Always on (nothing here is sensitive by
+  // construction); the richer per-item breakdown below is local-debug-only.
+  emit('info', 'Prompt assembled', {
+    event: 'prompt_assembly',
+    correlationId: input.sessionId ?? null,
+    model: input.model,
+    sections: summarizePromptAssembly(assembly, { diffChars: input.diff.raw.length }),
+  });
+  if (input.promptLogVerbose) {
+    emit('tool', 'Prompt assembly (verbose)', {
+      event: 'prompt_assembly_verbose',
+      correlationId: input.sessionId ?? null,
+      model: input.model,
+      skills: (input.skills ?? []).map((s, i) => ({
+        section: `skill-${i}`,
+        chars: s.length,
+        estTokens: estimateTokens(s.length),
+      })),
+      specs: (input.specs ?? []).map((s, i) => ({
+        section: `spec-${i}`,
+        chars: s.length,
+        estTokens: estimateTokens(s.length),
+      })),
+      memory: (input.memory ?? []).map((m, i) => ({
+        section: `memory-${i}`,
+        chars: m.length,
+        estTokens: estimateTokens(m.length),
+      })),
+      totalUserChars: assembly.user.length,
+      totalUserEstTokens: estimateTokens(assembly.user.length),
+    });
+  }
 
   const chunks =
     mode === 'map-reduce'
@@ -201,13 +254,34 @@ export async function reviewPullRequest(input: ReviewInput): Promise<ReviewOutco
   }
   emit('result', `Citation grounding: ${grounding}`);
 
-  // Score is derived from the findings that SURVIVED grounding (not the model's
-  // self-reported number, and not the pre-grounding set) so the score, the
-  // findings list, and the deterministic event always agree.
+  // Intent Layer — deterministic scope filtering, AFTER grounding, BEFORE
+  // scoring, and ONLY when intent was actually provided (no intent → no
+  // declared scope → skip entirely, so a review run without intent behaves
+  // exactly as it did before this feature). Advisory, not a drop: every
+  // out-of-scope finding survives into `finalFindings` one severity rank
+  // softer, so it's still persisted and visible — see filterByScope's
+  // docstring for why an unconditional drop was rejected.
+  let finalFindings = ground.kept;
+  const dropped = ground.dropped;
+  if (input.intent) {
+    const scoped = filterByScope(finalFindings);
+    if (scoped.downgraded.length > 0) {
+      emit('info', `Scope filter: softened ${scoped.downgraded.length} out-of-scope finding(s) by one severity rank`);
+      for (const f of scoped.downgraded) {
+        emit('info', `scope filter downgraded "${f.title}" to ${f.severity}: outside the PR's stated scope`);
+      }
+    }
+    finalFindings = scoped.kept;
+  }
+
+  // Score is derived from the findings that SURVIVED grounding + scope
+  // filtering (not the model's self-reported number, and not the
+  // pre-grounding set) so the score, the findings list, and the
+  // deterministic event always agree.
   return {
-    review: { ...merged, findings: ground.kept, score: scoreFromFindings(ground.kept) },
+    review: { ...merged, findings: finalFindings, score: scoreFromFindings(finalFindings) },
     grounding,
-    dropped: ground.dropped,
+    dropped,
     mode,
     assembly,
     chunks: chunks.map((c) => ({ label: c.label })),

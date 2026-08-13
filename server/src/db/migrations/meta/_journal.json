@@ -120,6 +120,48 @@
       "when": 1786275718956,
       "tag": "0016_add_agent_run_skills",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1786305089252,
+      "tag": "0017_simple_violations",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1786542731090,
+      "tag": "0018_nifty_taskmaster",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1786545004341,
+      "tag": "0019_pale_gamma_corps",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1786565228010,
+      "tag": "0020_eager_rhino",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1786566054934,
+      "tag": "0021_lame_solo",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1786653725737,
+      "tag": "0022_fixed_old_lace",
+      "breakpoints": true
     }
   ]
 }

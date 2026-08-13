@@ -6,10 +6,21 @@ import { z } from 'zod';
  */
 
 // ---- Intent ----
+/** How strongly the derivation is backed by real signal — a closed enum so
+ * the UI can render a fixed qualitative badge (never a numeric %). */
+export const EvidenceTier = z.enum(['direct', 'ticket_only', 'indirect_only']);
+export type EvidenceTier = z.infer<typeof EvidenceTier>;
+
 export const Intent = z.object({
   intent: z.string(),
   in_scope: z.array(z.string()),
   out_of_scope: z.array(z.string()),
+  /** Server-side-clamped confidence (0-1) — audit/log/clamp mechanism only,
+   * never rendered as a percentage in the UI. */
+  confidence: z.number().min(0).max(1),
+  evidence_tier: EvidenceTier,
+  /** Audit trail of resolved (and explicitly-failed) data sources. */
+  sources: z.array(z.string()),
 });
 export type Intent = z.infer<typeof Intent>;
 

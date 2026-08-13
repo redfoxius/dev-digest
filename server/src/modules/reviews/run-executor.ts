@@ -1,6 +1,6 @@
 import type { Container } from '../../platform/container.js';
 import type { Provider, Review, RunTrace, UnifiedDiff } from '@devdigest/shared';
-import { reviewPullRequest, countBlockers } from '@devdigest/reviewer-core';
+import { reviewPullRequest, countBlockers, renderIntentText } from '@devdigest/reviewer-core';
 import { RunLogger } from '../../platform/run-logger.js';
 import * as schema from '../../db/schema.js';
 import type { AgentRow } from '../../db/rows.js';
@@ -105,6 +105,18 @@ export class ReviewRunExecutor {
     }
     runLog.info(`Diff ready — ${diff.files.length} changed file(s); starting ${jobs.length} agent run(s)`);
 
+    // Intent Layer — derived ONCE per batch (not per-agent), before the
+    // per-agent loop. Best-effort at the batch level: `derive()` itself never
+    // throws (returns undefined + logs internally on total failure), so a
+    // failed derivation degrades to "no intent section" rather than failing
+    // every queued run via failAll().
+    const intent = await runLog.step(
+      'Deriving PR intent',
+      () => this.container.intentDeriver.derive({ workspaceId, pull, repo, diff, log: runLog }),
+      { kind: 'tool' },
+    );
+    const intentText = intent ? renderIntentText(intent) : undefined;
+
     // Tracks whether ANY agent in this batch actually completed — gates the
     // single markReviewed() call below.
     let anySucceeded = false;
@@ -116,7 +128,7 @@ export class ReviewRunExecutor {
         `review: agent "${agent.name}" started (${agent.provider}/${agent.model})`,
       );
       try {
-        const outcome = await this.runOneAgent(workspaceId, pull, repo, diff, agent, runId, runLog);
+        const outcome = await this.runOneAgent(workspaceId, pull, repo, diff, agent, runId, runLog, intentText);
         anySucceeded = true;
         logger?.info(
           {
@@ -157,6 +169,7 @@ export class ReviewRunExecutor {
     agent: AgentRow,
     runId: string,
     parentLog: RunLogger,
+    intentText: string | undefined,
   ): Promise<RunOutcome> {
     const start = Date.now();
     // Narrow the fanned-out pre-work logger to THIS run; the shared diff/intent
@@ -255,8 +268,16 @@ export class ReviewRunExecutor {
         // PR author's description/body — untrusted; assemblePrompt wraps +
         // truncates it. Omitted when the PR has no body.
         ...(pull.body ? { prDescription: pull.body } : {}),
+        // Intent Layer — derived once per batch above; omitted when
+        // derivation failed/returned nothing, so behavior is unchanged from
+        // before this feature (acceptance: no intent → identical prompt).
+        ...(intentText ? { intent: intentText } : {}),
         task,
         sessionId: `${repo.owner}/${repo.name}#${pull.number}:${agent.name}`,
+        // Local-only verbose prompt-composition breakdown (PROMPT_ASSEMBLY_DEBUG) —
+        // the compact structured `prompt_assembly` event is always emitted
+        // regardless of this flag; see reviewer-core's ReviewInput doc.
+        promptLogVerbose: this.container.config.promptAssemblyDebug,
         onEvent: (e) => runLog.event(e.kind, e.msg, e.data),
         checkCancelled: () => {
           if (this.container.runBus.isCancelled(runId)) throw new RunCancelledError();
