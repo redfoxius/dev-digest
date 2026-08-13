@@ -93,3 +93,16 @@ export const BOILERPLATE_SUBSTRING_PATTERNS = [
  * are seen.
  */
 export const WIRING_ESCALATION_LINE_THRESHOLD = 50;
+
+// --- [Phase2] Split suggestion ------------------------------------------------
+/**
+ * [Phase2] Total diff size (additions + deletions summed across every changed
+ * file) above which `SmartDiff.split_suggestion.too_big` is true.
+ *
+ * Untested starting guess, not a user-confirmed figure — same framing as
+ * `WIRING_ESCALATION_LINE_THRESHOLD` above; easy to retune once real PRs are
+ * seen. Only decides whether to show the "this PR is large" banner —
+ * proposing HOW to split (`proposed_splits`) is real import-graph clustering,
+ * deferred to Phase 6.
+ */
+export const SPLIT_SUGGESTION_TOO_BIG_LINE_THRESHOLD = 500;

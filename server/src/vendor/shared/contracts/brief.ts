@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { Severity } from './findings.js';
 
 /**
  * PR Brief building blocks: Intent, Blast radius, Risks, PR History,
@@ -97,7 +98,13 @@ export const SmartDiffFile = z.object({
   pseudocode_summary: z.string().nullish(),
   additions: z.number().int(),
   deletions: z.number().int(),
-  finding_lines: z.array(z.number().int()),
+  /** One entry per highlighted line — can outnumber `findings_count` once a
+   * single finding's `start_line..end_line` range is expanded; where two
+   * findings overlap on a line, the WORSE severity wins. */
+  finding_lines: z.array(z.object({ line: z.number().int(), severity: Severity })),
+  /** Count of distinct findings touching the file (unexpanded) — the "N
+   * findings" badge must use this, never `finding_lines.length`. */
+  findings_count: z.number().int(),
 });
 export type SmartDiffFile = z.infer<typeof SmartDiffFile>;
 

@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull } from 'drizzle-orm';
 import type { Db } from '../../../db/client.js';
 import * as t from '../../../db/schema.js';
 import type { Finding } from '@devdigest/shared';
@@ -76,6 +76,45 @@ export async function reviewsForPull(
     review,
     findings: findings.filter((f) => f.reviewId === review.id),
   }));
+}
+
+/**
+ * Findings from the PR's LATEST review batch only — one `POST /pulls/:id/review`
+ * action may fan out to several agents sharing `agent_runs.multi_agent_run_id`
+ * (a batch), not a single review row. Re-derives the same batch-key algorithm
+ * already inlined in `pulls/routes.ts` (`batchKey = review.runId →
+ * agentRuns.multiAgentRunId ?? review.id`; rows ordered newest-first; the
+ * first batch key seen pins "the latest batch"), scoped to one `prId` instead
+ * of the bulk multi-PR list version — used by Smart Diff (Phase 2) to badge
+ * finding lines without duplicating that computation. Excludes dismissed
+ * findings (`dismissed_at IS NULL`); an accepted-but-not-dismissed finding is
+ * still included (accepted ≠ resolved). Empty array before any review has run.
+ */
+export async function getLatestReviewBatchFindings(db: Db, prId: string): Promise<FindingRow[]> {
+  const reviewRows = await db
+    .select({
+      id: t.reviews.id,
+      runId: t.reviews.runId,
+      multiAgentRunId: t.agentRuns.multiAgentRunId,
+    })
+    .from(t.reviews)
+    .leftJoin(t.agentRuns, eq(t.reviews.runId, t.agentRuns.id))
+    .where(and(eq(t.reviews.prId, prId), eq(t.reviews.kind, 'review')))
+    .orderBy(desc(t.reviews.createdAt));
+
+  let latestBatchKey: string | undefined;
+  const latestReviewIds: string[] = [];
+  for (const rv of reviewRows) {
+    const batchKey = rv.runId ? (rv.multiAgentRunId ?? rv.runId) : rv.id;
+    if (latestBatchKey === undefined) latestBatchKey = batchKey;
+    if (batchKey === latestBatchKey) latestReviewIds.push(rv.id);
+  }
+  if (latestReviewIds.length === 0) return [];
+
+  return db
+    .select()
+    .from(t.findings)
+    .where(and(inArray(t.findings.reviewId, latestReviewIds), isNull(t.findings.dismissedAt)));
 }
 
 export async function getReview(db: Db, reviewId: string): Promise<ReviewRow | undefined> {

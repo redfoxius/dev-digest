@@ -1,0 +1,104 @@
+import type { Container } from '../../platform/container.js';
+import type { Severity, SmartDiff, SmartDiffFile, SmartDiffGroup, SmartDiffRole } from '@devdigest/shared';
+import { NotFoundError } from '../../platform/errors.js';
+import type { FindingRow } from '../../db/rows.js';
+import { classifyFile } from './classifier.js';
+import { SPLIT_SUGGESTION_TOO_BIG_LINE_THRESHOLD } from './constants.js';
+
+/** Fixed presentation order (matches the mockup) — any role with zero files
+ *  is omitted from `groups[]` entirely, never emitted empty. */
+const ROLE_ORDER: SmartDiffRole[] = ['core', 'wiring', 'boilerplate'];
+
+/** Worse-wins ranking for two findings overlapping on the same line — no
+ *  existing rank constant to reuse, this list is short enough to own locally. */
+const SEVERITY_RANK: Record<Severity, number> = {
+  CRITICAL: 3,
+  WARNING: 2,
+  SUGGESTION: 1,
+};
+
+/**
+ * Smart Diff (Phase 2 of docs/smart-diff-plan.md) — deterministic, no-LLM
+ * composition of a PR's changed files (classified by `classifyFile`, Phase 1)
+ * with its latest review batch's findings. Never calls `container.llm` —
+ * `pseudocode_summary` stays `null` (LLM-authored, Phase 5) and
+ * `proposed_splits` stays `[]` (import-graph clustering, Phase 6), both by
+ * design this phase, not left half-done.
+ */
+export class SmartDiffService {
+  constructor(private container: Container) {}
+
+  async getSmartDiff(workspaceId: string, prId: string): Promise<SmartDiff> {
+    const pull = await this.container.reviewRepo.getPull(workspaceId, prId);
+    if (!pull) throw new NotFoundError('Pull request not found');
+
+    const [files, findings] = await Promise.all([
+      this.container.reviewRepo.getPrFiles(prId),
+      this.container.reviewRepo.getLatestReviewBatchFindings(prId),
+    ]);
+
+    const findingsByFile = new Map<string, FindingRow[]>();
+    for (const f of findings) {
+      const arr = findingsByFile.get(f.file);
+      if (arr) arr.push(f);
+      else findingsByFile.set(f.file, [f]);
+    }
+
+    const filesByRole = new Map<SmartDiffRole, SmartDiffFile[]>();
+    for (const file of files) {
+      const role = classifyFile(file);
+      const fileFindings = findingsByFile.get(file.path) ?? [];
+      const smartDiffFile: SmartDiffFile = {
+        path: file.path,
+        pseudocode_summary: null,
+        additions: file.additions,
+        deletions: file.deletions,
+        finding_lines: buildFindingLines(fileFindings),
+        // Unexpanded finding count — never `finding_lines.length`, which a
+        // single multi-line finding would inflate.
+        findings_count: fileFindings.length,
+      };
+      const arr = filesByRole.get(role);
+      if (arr) arr.push(smartDiffFile);
+      else filesByRole.set(role, [smartDiffFile]);
+    }
+
+    const groups: SmartDiffGroup[] = ROLE_ORDER.filter(
+      (role) => (filesByRole.get(role)?.length ?? 0) > 0,
+    ).map((role) => ({ role, files: filesByRole.get(role)! }));
+
+    const totalLines = files.reduce((sum, f) => sum + f.additions + f.deletions, 0);
+
+    return {
+      groups,
+      split_suggestion: {
+        too_big: totalLines > SPLIT_SUGGESTION_TOO_BIG_LINE_THRESHOLD,
+        total_lines: totalLines,
+        proposed_splits: [],
+      },
+    };
+  }
+}
+
+/**
+ * Expands every non-dismissed finding's `start_line..end_line` range into
+ * individual lines; where two findings' ranges overlap on the same line, the
+ * WORSE severity wins. Always returned sorted ascending by `line` — Phase 3's
+ * "click the findings badge" step scrolls to `finding_lines[0]`, so an
+ * unsorted array would jump to an arbitrary line instead of the topmost one.
+ */
+function buildFindingLines(findings: FindingRow[]): { line: number; severity: Severity }[] {
+  const severityByLine = new Map<number, Severity>();
+  for (const f of findings) {
+    const severity = f.severity as Severity;
+    for (let line = f.startLine; line <= f.endLine; line++) {
+      const existing = severityByLine.get(line);
+      if (!existing || SEVERITY_RANK[severity] > SEVERITY_RANK[existing]) {
+        severityByLine.set(line, severity);
+      }
+    }
+  }
+  return [...severityByLine.entries()]
+    .map(([line, severity]) => ({ line, severity }))
+    .sort((a, b) => a.line - b.line);
+}

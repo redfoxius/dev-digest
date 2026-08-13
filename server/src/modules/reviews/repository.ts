@@ -76,6 +76,12 @@ export class ReviewRepository {
     return reviewRepo.getReview(this.db, reviewId);
   }
 
+  /** Findings from the PR's latest review batch only (dismissed excluded,
+   *  accepted included) — used by Smart Diff (Phase 2) to badge lines. */
+  getLatestReviewBatchFindings(prId: string): Promise<FindingRow[]> {
+    return reviewRepo.getLatestReviewBatchFindings(this.db, prId);
+  }
+
   /** In-flight runs for a PR (status='running') — the server-side source of
    *  truth for "which agents are running now". Joined with the agent name. */
   activeRunsForPull(

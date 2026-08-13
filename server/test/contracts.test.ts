@@ -116,12 +116,24 @@ describe('AI contracts parse fixtures', () => {
       groups: [
         {
           role: 'core',
-          files: [{ path: 'a.ts', additions: 84, deletions: 0, finding_lines: [28, 52] }],
+          files: [
+            {
+              path: 'a.ts',
+              additions: 84,
+              deletions: 0,
+              finding_lines: [
+                { line: 28, severity: 'WARNING' },
+                { line: 52, severity: 'CRITICAL' },
+              ],
+              findings_count: 2,
+            },
+          ],
         },
       ],
       split_suggestion: { too_big: false, total_lines: 285, proposed_splits: [] },
     });
     expect(d.groups[0]!.role).toBe('core');
+    expect(d.groups[0]!.files[0]!.findings_count).toBe(2);
   });
 
   it('Conformance / Onboarding / EvalRun / MemoryItem', () => {
