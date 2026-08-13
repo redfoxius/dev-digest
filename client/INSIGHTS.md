@@ -15,6 +15,26 @@ workflow and quality bar.
 
 ## What Doesn't Work
 
+- 2026-08-14 — First `SmartDiffViewer` draft rendered a file's "N findings"
+  `Chip` in a separate wrapper `<div>` stacked ABOVE `FileCard`, with its own
+  copy of `file.path` next to it — but `FileCard`'s own header
+  (`FileCard.tsx:95-97`, `s.filePath`) already renders that same path, so the
+  path visibly appeared TWICE per file. Caught during review, not by the test
+  suite — a test had actually been written asserting the duplication as
+  expected (`getAllByText(path).length).toBe(2)`), which normalizes a real
+  bug into "intended behavior" instead of catching it. Fixed by giving
+  `FileCard` a new `headerRight?: React.ReactNode` prop (rendered inside its
+  existing header row, with `stopPropagation` on its own click so it doesn't
+  also toggle the card's open/close) instead of a sibling wrapper — one path,
+  one row, matches "next to a file's path" the way the plan actually meant
+  it. Lesson: when a new composite view re-renders a field a child component
+  already owns (here, the path `FileCard` already shows), extend the child
+  with a slot prop rather than duplicating that field's markup one level up
+  — and don't let a test that merely describes current output substitute for
+  checking whether that output is actually right.
+  (`client/src/components/diff-viewer/FileCard/FileCard.tsx` — `headerRight`,
+  `client/src/components/diff-viewer/SmartDiffViewer/SmartDiffViewer.tsx`)
+
 ## Codebase Patterns
 
 - 2026-08-06 — There is no shared `srOnly`/visually-hidden style utility in
@@ -161,7 +181,59 @@ workflow and quality bar.
   (`client/src/app/repos/[repoId]/pulls/[number]/_components/OverviewTab/OverviewTab.tsx`,
   `.../_components/IntentCard/IntentCard.tsx`)
 
+- 2026-08-14 — `FileCard`'s new `scrollToLine` prop (Smart Diff's "click a
+  finding badge, scroll to it") needs TWO separate `useEffect`s, not one —
+  unlike `ReviewRunAccordion`'s existing `targetRunId`/`targetNonce` precedent
+  (`ReviewRunAccordion.tsx:48-54`), which calls `setOpen(true)` then
+  `rootRef.current?.scrollIntoView(...)` in the SAME effect and works fine,
+  because `rootRef` there points at the header/container that's ALWAYS
+  mounted regardless of `open`. `FileCard`'s target line only exists in the
+  DOM once `open` is already `true` (its lines render behind `{open && (...)}`,
+  `FileCard.tsx:111`), so calling `containerRef.current?.querySelector(...)`
+  in the same tick as `setOpen(true)` queries a DOM that hasn't re-rendered
+  yet and silently finds nothing. Fix: one effect keyed on `scrollToLine.nonce`
+  that only calls `setOpen(true)`, a second effect keyed on
+  `[scrollToLine.nonce, open]` that does the actual querySelector +
+  `scrollIntoView` — the second effect's `open` dependency is what guarantees
+  it re-runs AFTER the DOM commit that made the line visible. Generalizable:
+  before copying a "force open + scroll into view" effect pattern to a new
+  component, check whether the scroll target is inside content that's
+  conditionally rendered on the same open flag being forced — if so, one
+  effect isn't enough.
+  (`client/src/components/diff-viewer/FileCard/FileCard.tsx:59-73`)
+
 ## Tool & Library Notes
+
+- 2026-08-14 — `SeverityBadge`'s `compact` variant renders icon-only, no text
+  and no `aria-label` (`Badge.tsx:80` — `compact ? null : s.label`, nothing
+  else) — RTL has no accessible-name query that can distinguish CRITICAL vs
+  WARNING vs SUGGESTION badges rendered this way. Lucide icons DO carry a
+  stable `class="lucide lucide-<icon-name>"` (e.g. `lucide-triangle-alert`
+  for `AlertTriangle`/WARNING, `lucide-octagon-alert` for
+  `AlertOctagon`/CRITICAL), confirmed by rendering the icons directly via
+  `renderToStaticMarkup` — the only workable way to assert "this specific
+  line shows WARNING vs CRITICAL" in a test is
+  `container.querySelector('[data-line="N"] svg.lucide-<icon-class>')`, a
+  deliberate exception to "avoid `container.querySelector`" for lack of any
+  accessible alternative. Worth reusing this exact query shape for any future
+  per-line/per-cell compact-badge assertion.
+  (`client/src/vendor/ui/primitives/Badge.tsx:52-88`; exercised in
+  `client/src/components/diff-viewer/SmartDiffViewer/SmartDiffViewer.test.tsx`)
+
+- 2026-08-14 — `next-intl`'s `NextIntlClientProvider` throws `MISSING_MESSAGE`
+  for a namespace as soon as ANY descendant calls
+  `useTranslations("thatNamespace")`, even if the component under test never
+  actually renders the specific key that namespace would resolve — `FileCard`
+  unconditionally calls `useTranslations("shell")` (for its `noDiffText`
+  fallback, `FileCard.tsx:52`) even when every rendered file has real diff
+  content, so a test provider that only supplied `{ prReview: ... }` failed
+  before any assertion ran. When a new test wraps a component tree that
+  transitively includes `FileCard` (or anything else with its own
+  `useTranslations` call), pass EVERY namespace those descendants use, not
+  just the one directly under test — check each rendered child file, not
+  just the component being tested.
+  (`client/src/components/diff-viewer/FileCard/FileCard.tsx:52`,
+  `client/src/components/diff-viewer/SmartDiffViewer/SmartDiffViewer.test.tsx`)
 
 - 2026-08-06 — `Checkbox` (`src/vendor/ui/kit/Checkbox.tsx`) renders as a real
   `<button role="checkbox" aria-checked>` , not an `<input type="checkbox">` —

@@ -3,6 +3,8 @@
 "use client";
 
 import React from "react";
+import { SeverityBadge } from "@devdigest/ui";
+import type { Severity } from "@devdigest/shared";
 import { commentTargetFor, type CommentThread, type DiffCommentApi, cs } from "../comments";
 import { type Line } from "../helpers";
 import { s, lineRowFor, lineSignFor } from "../styles";
@@ -14,11 +16,15 @@ export function CodeLine({
   path,
   threads,
   commenting,
+  findingSeverity,
 }: {
   ln: Line;
   path: string;
   threads: CommentThread[];
   commenting?: DiffCommentApi;
+  /** When set, renders a compact severity badge inline at the end of the row —
+   *  Smart Diff's per-line finding highlight (`SmartDiffFile.finding_lines`). */
+  findingSeverity?: Severity;
 }) {
   const [hover, setHover] = React.useState(false);
   const [composing, setComposing] = React.useState(false);
@@ -41,7 +47,7 @@ export function CodeLine({
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
     >
-      <div style={lineRowFor(ln.kind)}>
+      <div style={lineRowFor(ln.kind)} data-line={ln.newNo}>
         <span className="mono tnum" style={{ ...s.lineNo, position: "relative" }}>
           {showAdd && target && (
             <button
@@ -62,6 +68,11 @@ export function CodeLine({
         <span className="mono" style={s.lineText}>
           {ln.text || " "}
         </span>
+        {findingSeverity && (
+          <span style={{ flexShrink: 0, display: "flex", alignItems: "center", paddingRight: 10 }}>
+            <SeverityBadge severity={findingSeverity} compact />
+          </span>
+        )}
       </div>
 
       {commenting &&
