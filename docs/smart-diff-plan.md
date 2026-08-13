@@ -1,9 +1,12 @@
 # Smart Diff — classifier + route + `SmartDiffViewer`
 
-**Status:** in progress — Phase 1 (classifier) implemented and tested
-(`server/src/modules/smart-diff/{constants,classifier}.ts`,
-`server/test/smart-diff-classifier.test.ts`, 14/14 passing). Phases 2-6 not
-started.
+**Status:** in progress — Phase 1 (classifier) and Phase 2
+(`GET /pulls/:id/smart-diff`) implemented and tested
+(`server/src/modules/smart-diff/{constants,classifier,service}.ts`, contract
+change in both `brief.ts` copies, `server/test/smart-diff-classifier.test.ts`
+14/14, `server/test/smart-diff-service.it.test.ts` 3/3 against real Postgres,
+full unit suite 302/302, plus manually verified live against two real PRs
+including the empty-pre-review and 404 cases). Phases 3-6 not started.
 
 ## Context
 

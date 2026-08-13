@@ -32,6 +32,31 @@ workflow and quality bar.
 
 ## Codebase Patterns
 
+- 2026-08-14 — `docs/smart-diff-plan.md` Phase 2 describes `SmartDiffService`
+  as "constructed with `Container` … composes: 1. Files … 2. Latest review's
+  findings … (a query joined to `agent_runs`, ordered by `created_at DESC`)" —
+  phrasing that reads as if the join query itself belongs inside
+  `smart-diff/service.ts`. It doesn't: `onion-architecture`'s CRITICAL rule
+  (service.ts never imports `drizzle-orm`) still applies to a brand-new
+  capability module exactly like it does to `reviews`/`intent`. The single-PR
+  batch-key algorithm (re-derived from `pulls/routes.ts`'s multi-PR version)
+  had to land as a new `ReviewRepository.getLatestReviewBatchFindings(prId)`
+  method (`review.repo.ts`), with the service only calling it — a plan
+  description of "the service composes X and Y" is about the USE CASE, not
+  necessarily where the query text itself is allowed to live. Confirmed by
+  re-reading `intent/service.ts`, which never touches `container.db` directly
+  either, only `container.reviewRepo.*` methods, despite deriving output from
+  several data sources the same way this plan describes Smart Diff doing.
+  Scoping the algorithm to one `prId` also let it become a single `leftJoin`
+  (`reviews` → `agentRuns` on `reviews.runId = agentRuns.id`) instead of the
+  two-`Map` bulk-grouping shape `pulls/routes.ts` needs for its multi-PR list
+  — simpler, and still correct against `reviews.runId`'s missing FK (an
+  orphaned/unmatched `runId` just yields `multiAgentRunId: null` from the
+  join, falling back to the review's own id as its batch key, same as the
+  bulk version's fallback).
+  (`server/src/modules/reviews/repository/review.repo.ts:getLatestReviewBatchFindings`,
+  `server/src/modules/smart-diff/service.ts`)
+
 - 2026-08-14 — Reusing repo-intel's `EXCLUDED_DIRS` shape (each entry wrapped
   `/x/` for path-segment matching) against a `pr_files.path` value needs a
   leading-slash normalization repo-intel's OWN walk code never needed: a
