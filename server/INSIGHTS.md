@@ -32,6 +32,23 @@ workflow and quality bar.
 
 ## Codebase Patterns
 
+- 2026-08-14 — Reusing repo-intel's `EXCLUDED_DIRS` shape (each entry wrapped
+  `/x/` for path-segment matching) against a `pr_files.path` value needs a
+  leading-slash normalization repo-intel's OWN walk code never needed: a
+  repo-relative path like `dist/bundle.js` or `vendor/foo.go` has NO leading
+  slash, so `path.includes('/dist/')` is false even though `dist` is
+  genuinely the path's first segment — repo-intel's walk (`pipeline/walk.ts`)
+  never hits this because it matches directory NAMES directly, not this
+  `/x/`-wrapped substring shape. `smart-diff/classifier.ts`'s
+  `classifyFile()` (Phase 1 of `docs/smart-diff-plan.md`) fixed it by
+  matching against a synthetic `` `/${path}` `` instead of the raw lowercased
+  path. Caught by two failing unit tests (`dist/bundle.js`, a `/vendor/`-path
+  Go file both wrongly landing `core` instead of `boilerplate`) before the
+  fix — any future consumer of an `EXCLUDED_DIRS`-style `/dir/`-wrapped
+  pattern list against a repo-relative path needs the same normalization.
+  (`server/src/modules/smart-diff/classifier.ts`,
+  `server/test/smart-diff-classifier.test.ts`)
+
 - 2026-08-05 — `multi_agent_runs` (`server/src/db/schema/runs.ts`) sat in the
   schema with zero inserts/selects anywhere in the codebase (confirmed by
   repo-wide grep) before this date — its shape (`id, workspaceId, prId,
