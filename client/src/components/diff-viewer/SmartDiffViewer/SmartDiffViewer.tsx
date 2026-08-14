@@ -12,9 +12,14 @@
    Phase 6 — a `split_suggestion` banner (rendered only when `too_big`),
    above the group list: one clickable Chip per `ProposedSplit`. Clicking a
    split's Chip highlights that split's files by dimming every OTHER
-   rendered `FileCard` (via its new `dimmed` prop); clicking the same Chip
-   again clears the highlight. Suggestion/highlight surface only — no PR is
-   actually created or split here. */
+   rendered `FileCard` (via its new `dimmed` prop), opens the `core` section
+   if it was collapsed (every split file is always `core`-role —
+   server/src/modules/smart-diff/service.ts only ever feeds `coreFilePaths`
+   into the clusterer), and scrolls the split's first file into view —
+   otherwise, on a long PR, telling which file just got highlighted means
+   scrolling/hunting for it manually. Clicking the same Chip again clears
+   the highlight (no re-scroll). Suggestion/highlight surface only — no PR
+   is actually created or split here. */
 "use client";
 
 import React from "react";
@@ -60,12 +65,30 @@ export function SmartDiffViewer({
     React.useState<Record<SmartDiffRole, boolean>>(DEFAULT_SECTION_OPEN);
   const [scrollTarget, setScrollTarget] = React.useState<ScrollTarget | null>(null);
   const [highlightedSplit, setHighlightedSplit] = React.useState<HighlightedSplit | null>(null);
+  const [splitScrollNonce, setSplitScrollNonce] = React.useState(0);
+  const listRef = React.useRef<HTMLDivElement | null>(null);
 
   const { too_big: tooBig, total_lines: totalLines, proposed_splits: proposedSplits } =
     smartDiff.split_suggestion;
 
+  // Bringing the highlighted split's first file into view needs the `core`
+  // section open AND the FileCard actually mounted first — both the section
+  // toggle above and this file's own `open` state (driven by `defaultOpen`)
+  // land on the next render, so this can't just scrollIntoView synchronously
+  // inside the click handler.
+  React.useEffect(() => {
+    if (splitScrollNonce === 0 || !highlightedSplit) return;
+    const target = highlightedSplit.files[0];
+    if (!target) return;
+    const el = Array.from(listRef.current?.querySelectorAll<HTMLElement>("[data-file]") ?? []).find(
+      (node) => node.getAttribute("data-file") === target,
+    );
+    el?.scrollIntoView({ behavior: "smooth", block: "center" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [splitScrollNonce]);
+
   return (
-    <div style={s.list}>
+    <div style={s.list} ref={listRef}>
       {tooBig && (
         <div style={s.splitBanner}>
           <div style={s.splitBannerTitle}>{t("smartDiff.largeTitle", { lines: totalLines })}</div>
@@ -75,11 +98,15 @@ export function SmartDiffViewer({
               <Chip
                 key={`${split.name}-${index}`}
                 active={highlightedSplit?.index === index}
-                onClick={() =>
-                  setHighlightedSplit((prev) =>
-                    prev?.index === index ? null : { index, files: split.files },
-                  )
-                }
+                onClick={() => {
+                  if (highlightedSplit?.index === index) {
+                    setHighlightedSplit(null);
+                    return;
+                  }
+                  setOpenSections((prev) => ({ ...prev, core: true }));
+                  setHighlightedSplit({ index, files: split.files });
+                  setSplitScrollNonce((n) => n + 1);
+                }}
               >
                 {split.name} · {t("smartDiff.filesCount", { count: split.files.length })}
               </Chip>

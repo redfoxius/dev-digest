@@ -49,28 +49,29 @@ describe('computeProposedSplits', () => {
     ]);
   });
 
-  it('falls back to "Split N" (1-indexed) when a component has no common directory prefix', () => {
+  it('falls back to a filename-based name when a component has no common directory prefix', () => {
     // Two components, neither with a usable common prefix:
-    //  - a root-level singleton (no directory at all)
-    //  - two connected files in entirely different top-level directories
+    //  - a root-level singleton (no directory at all) → its own basename
+    //  - two connected files in entirely different top-level directories →
+    //    first file's basename + a "+N" count of the rest
     const coreFiles = ['README.md', 'src/a/one.ts', 'lib/b/two.ts'];
     const edges = [{ fromFile: 'src/a/one.ts', toFile: 'lib/b/two.ts' }];
 
     expect(computeProposedSplits(coreFiles, edges)).toEqual([
-      { name: 'Split 1', files: ['README.md'] },
-      { name: 'Split 2', files: ['src/a/one.ts', 'lib/b/two.ts'] },
+      { name: 'README.md', files: ['README.md'] },
+      { name: 'one.ts +1', files: ['src/a/one.ts', 'lib/b/two.ts'] },
     ]);
   });
 
-  it('component order (and therefore fallback numbering) is deterministic by first-file position in coreFilePaths', () => {
+  it('component order is deterministic by first-file position in coreFilePaths', () => {
     const coreFiles = ['z/first.ts', 'a/second.ts', 'root1.ts', 'root2.ts'];
     const edges: { fromFile: string; toFile: string }[] = [];
 
     expect(computeProposedSplits(coreFiles, edges)).toEqual([
       { name: 'z', files: ['z/first.ts'] },
       { name: 'a', files: ['a/second.ts'] },
-      { name: 'Split 1', files: ['root1.ts'] },
-      { name: 'Split 2', files: ['root2.ts'] },
+      { name: 'root1.ts', files: ['root1.ts'] },
+      { name: 'root2.ts', files: ['root2.ts'] },
     ]);
   });
 });
