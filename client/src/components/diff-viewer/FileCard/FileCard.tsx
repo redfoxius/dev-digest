@@ -39,6 +39,7 @@ export function FileCard({
   findingSeverityByLine,
   headerRight,
   pseudocodeSummary,
+  dimmed,
 }: {
   file: PrFile;
   commenting?: DiffCommentApi;
@@ -59,6 +60,10 @@ export function FileCard({
    *  Additive/no-op when omitted, same as this component's other Smart-Diff
    *  props. */
   pseudocodeSummary?: string | null;
+  /** Smart Diff's split-suggestion highlight (Phase 6) — reduced opacity for
+   *  a file NOT in the currently-highlighted proposed split. Additive/no-op
+   *  when omitted, same as this component's other Smart-Diff props. */
+  dimmed?: boolean;
 }) {
   const t = useTranslations("shell");
   const tPrReview = useTranslations("prReview");
@@ -100,7 +105,12 @@ export function FileCard({
     : 0;
 
   return (
-    <div style={s.fileCard} ref={containerRef} data-file={file.path}>
+    <div
+      style={dimmed ? { ...s.fileCard, opacity: 0.4 } : s.fileCard}
+      ref={containerRef}
+      data-file={file.path}
+      data-dimmed={dimmed ? "true" : undefined}
+    >
       <div onClick={() => setOpen((o) => !o)} style={s.fileHeader}>
         <Icon.ChevronRight size={13} style={chevronFor(open)} />
         <Icon.FileText size={14} style={s.fileIcon} />

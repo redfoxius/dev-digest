@@ -320,6 +320,101 @@ workflow and quality bar.
   (`server/src/modules/reviews/repository/review.repo.ts:getLatestReviewBatchFindings`,
   `server/src/modules/smart-diff/service.ts`)
 
+- 2026-08-14 — Adding a new backend module that needs data another module's
+  facade already computes internally (Smart Diff Phase 6 needed
+  `repo-intel`'s import-graph edges) is not automatically a port gap just
+  because the interface lacks the method — check first whether the facade
+  ALREADY exposes an equivalent read (`getCriticalPaths` reads the same
+  `file_edges` table). Here it genuinely was a gap:
+  `RepoIntelRepository.getEdges` (`repo-intel/repository.ts:436`) was only
+  ever called from `RepoIntelService` internals (`getCriticalPaths`), never
+  exposed on the public `RepoIntel` port
+  (`repo-intel/types.ts`) — so `smart-diff/service.ts` had no
+  `onion-architecture`-legal way to reach it (a module must never import
+  another module's own `repository.ts`). Fixed by adding
+  `RepoIntel.getFileEdges(repoId): Promise<FileEdgeRow[]>` to the port
+  (`repo-intel/types.ts:208`) and a THIN passthrough in `RepoIntelService`
+  (`repo-intel/service.ts:778`) to the existing `this.repo.getEdges` —
+  reused verbatim, not reimplemented. Only one other `RepoIntel` implementer
+  exists repo-wide (`conventions.it.test.ts`'s `FakeRepoIntel`, found via
+  `grep -rln "implements RepoIntel"`) and needed the same new method stubbed
+  to `[]`; `src/adapters/mocks.ts` has NO `MockRepoIntel` at all, so no
+  update was needed there. Before assuming a facade method just needs
+  "exposing," `grep` for every `implements <Port>` in the codebase — a new
+  interface method breaks every one of them at compile time, not just the
+  concrete service.
+  (`server/src/modules/repo-intel/types.ts:208`,
+  `server/src/modules/repo-intel/service.ts:778`,
+  `server/test/conventions.it.test.ts` — `FakeRepoIntel.getFileEdges`)
+
+- 2026-08-14 — `docs/smart-diff-plan.md`'s Phase 6 text contains two rules in
+  real tension with each other, and the more explicit/repeated one had to
+  win: point 6 says the split function should degrade to
+  `proposed_splits: []` "if repo-intel is unavailable/unindexed," but point
+  5 (stated twice, with explicit reasoning: "do not special-case or merge
+  singletons... an accurate signal is itself useful") mandates that a
+  changed `core` file with ZERO edges to any other changed `core` file still
+  becomes its own one-file `ProposedSplit`. A pure clustering function
+  cannot distinguish "repo-intel is disabled/unindexed" from "repo-intel is
+  fully indexed but these specific files just have no edges between them" —
+  both arrive as `edges: []`. Implemented per the more explicit rule (5):
+  `computeProposedSplits` (`smart-diff/split.ts:36`) always emits one
+  singleton `ProposedSplit` per otherwise-unconnected `core` file, never
+  `[]`, as long as at least one `core` file changed. This flips the EXPECTED
+  value of two Phase-2-era integration assertions in
+  `smart-diff-service.it.test.ts` that had asserted `proposed_splits: []`
+  back when the field was hardcoded — both updated to expect real
+  directory-named singleton splits (`smart-diff-service.it.test.ts:233,269`)
+  instead of weakening rule 5. Net effect worth flagging to whoever
+  demos/reviews Phase 6: a large PR against an UNINDEXED repo now shows a
+  "Consider splitting" banner with one Chip per `core` file — which may read
+  as noise rather than a real suggestion — this is the plan's own literal
+  rule, not an implementation bug.
+  (`server/src/modules/smart-diff/split.ts:36`,
+  `server/test/smart-diff-service.it.test.ts:233,269`)
+
+- 2026-08-14 — Neither `graphology` nor `graphology-metrics` (both already
+  dependencies) ships a connected-components algorithm — confirmed by
+  reading what `repo-intel/pipeline/rank.ts` actually imports from them
+  (PageRank only, no components API). A hand-rolled BFS over a plain
+  adjacency `Map` (`smart-diff/split.ts:36-` `computeProposedSplits`) was
+  sufficient and simpler than adding a new npm dependency for a graph this
+  small (one PR's changed `core` files, never more than a few dozen nodes).
+  (`server/src/modules/smart-diff/split.ts`,
+  `server/src/modules/repo-intel/pipeline/rank.ts:41`)
+
+- 2026-08-14 — ~~The point-5-vs-point-6 resolution above (rule 5 wins,
+  `computeProposedSplits` always emits singletons)~~ was corrected during
+  review of the same session: a genuinely EMPTY `edges` array is ambiguous
+  between "repo-intel has no data for this repo at all" (point 6 — must
+  degrade to `[]`) and "repo-intel is indexed but this specific PR's `core`
+  files happen to have zero connections among them" (point 5 — legitimate
+  singletons), and the pure clustering function alone cannot tell them
+  apart — but its CALLER can, because `RepoIntel.getFileEdges(repoId)`
+  returns the repo's WHOLE edge set, unfiltered to any one PR. Fixed in
+  `SmartDiffService.getSmartDiff` (`smart-diff/service.ts`, not
+  `split.ts`, which is unchanged and still always singleton-izes a
+  disconnected node when it's actually given one): only call
+  `computeProposedSplits` when `edges.length > 0`; an empty WHOLE-repo edge
+  set short-circuits straight to `proposed_splits: []`. This correctly
+  restores point 6's intent (no repo-intel data ⇒ no noisy per-file banner)
+  while still honoring point 5 once real data exists (a file the graph
+  genuinely shows as isolated still gets its own split). The two
+  Phase-2-era integration assertions the prior entry flipped to expect
+  singletons (`smart-diff-service.it.test.ts`, seeding no `file_edges` at
+  all) were flipped BACK to `proposed_splits: []` — they were testing the
+  "no data" case, not the "genuinely isolated" one; the dedicated Phase 6
+  clustering test (which does seed real `file_edges`) was unaffected and
+  still asserts a real singleton (`src/other/isolated.ts`) alongside a real
+  2-file cluster. Lesson: when two rules in a plan seem to conflict, check
+  whether the ambiguity is resolvable by which LAYER decides, not just by
+  picking the "more explicit" rule as a tiebreaker — a caller often has
+  information (here: the unfiltered edge count) a pure function was never
+  given.
+  (`server/src/modules/smart-diff/service.ts` — the `edges.length > 0`
+  guard, `server/test/smart-diff-service.it.test.ts:233,269` — reverted to
+  `[]`, `:347-350` — the real-data singleton case, unaffected)
+
 ## Tool & Library Notes
 
 - 2026-08-13 — `server/src/adapters/llm/openai.ts:15` and `anthropic.ts:16`'s

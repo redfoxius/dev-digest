@@ -3,6 +3,7 @@ import type { Severity, SmartDiff, SmartDiffFile, SmartDiffGroup, SmartDiffRole 
 import { NotFoundError } from '../../platform/errors.js';
 import type { FindingRow } from '../../db/rows.js';
 import { classifyFile } from './classifier.js';
+import { computeProposedSplits } from './split.js';
 import { SPLIT_SUGGESTION_TOO_BIG_LINE_THRESHOLD } from './constants.js';
 
 /** Fixed presentation order (matches the mockup) — any role with zero files
@@ -23,8 +24,10 @@ const SEVERITY_RANK: Record<Severity, number> = {
  * with its latest review batch's findings and (Phase 5) per-file summaries.
  * Never calls `container.llm` itself — `pseudocode_summary` is read from
  * `review_file_summaries`, a byproduct of the Run Review LLM call persisted
- * elsewhere (`run-executor.ts`), and `proposed_splits` stays `[]`
- * (import-graph clustering, Phase 6, not yet implemented).
+ * elsewhere (`run-executor.ts`), and `proposed_splits` (Phase 6) is
+ * deterministic weakly-connected-components clustering (`split.ts`) over
+ * `container.repoIntel`'s already-persisted import graph — no LLM call
+ * there either.
  */
 export class SmartDiffService {
   constructor(private container: Container) {}
@@ -54,8 +57,12 @@ export class SmartDiffService {
     }
 
     const filesByRole = new Map<SmartDiffRole, SmartDiffFile[]>();
+    // `core`-role file paths, in `pr_files` order — the only role Phase 6's
+    // clustering ever considers; `wiring`/`boilerplate` are excluded entirely.
+    const coreFilePaths: string[] = [];
     for (const file of files) {
       const role = classifyFile(file);
+      if (role === 'core') coreFilePaths.push(file.path);
       const fileFindings = findingsByFile.get(file.path) ?? [];
       const smartDiffFile: SmartDiffFile = {
         path: file.path,
@@ -78,12 +85,28 @@ export class SmartDiffService {
 
     const totalLines = files.reduce((sum, f) => sum + f.additions + f.deletions, 0);
 
+    // Phase 6 — deterministic import-graph clustering, no LLM. `edges` is the
+    // repo's WHOLE (unfiltered) edge set — `edges.length === 0` means
+    // repo-intel has no data for this repo at all (disabled/unindexed), and
+    // that case must degrade to no suggestion, not to "every core file is
+    // its own split": `computeProposedSplits` gives every `core` file its
+    // own adjacency-map entry regardless of edges, so feeding it a genuinely
+    // empty edge list would produce N noisy singleton splits instead of an
+    // honest "nothing to suggest" — the exact case the plan's Phase 6 point 6
+    // asks to degrade to `[]`. Once repo-intel DOES have real data for the
+    // repo, a `core` file with no edges to any other `core` file after
+    // filtering is a legitimate "unrelated to anything else changed" signal
+    // and still gets its own singleton (point 5) — only the "we have zero
+    // information" case short-circuits here.
+    const edges = await this.container.repoIntel.getFileEdges(pull.repoId);
+    const proposedSplits = edges.length > 0 ? computeProposedSplits(coreFilePaths, edges) : [];
+
     return {
       groups,
       split_suggestion: {
         too_big: totalLines > SPLIT_SUGGESTION_TOO_BIG_LINE_THRESHOLD,
         total_lines: totalLines,
-        proposed_splits: [],
+        proposed_splits: proposedSplits,
       },
     };
   }

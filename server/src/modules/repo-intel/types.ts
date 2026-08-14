@@ -123,6 +123,19 @@ export interface FileRankRow {
   percentile: number;
 }
 
+/**
+ * Raw import-graph edge (importer → imported), repo-relative paths — the same
+ * shape/data `getCriticalPaths` already builds its dependency chains from
+ * (`file_edges` table). Exposed as its own facade method (not just an
+ * internal repository read) so `smart-diff`'s Phase 6 clustering can reach it
+ * through `container.repoIntel` per this repo's onion-architecture rule
+ * (a module never reaches into another module's own `repository.ts`).
+ */
+export interface FileEdgeRow {
+  fromFile: string;
+  toFile: string;
+}
+
 export interface RepoMapResult {
   text: string;
   tokens: number;
@@ -184,4 +197,13 @@ export interface RepoIntel {
     opts?: { exclude?: string[] },
   ): Promise<string[]>;
   getCriticalPaths(repoId: string): Promise<string[][]>;
+  /**
+   * Flat import-graph edge list for a repo (Phase 6 of docs/smart-diff-plan.md
+   * — smart-diff's own weakly-connected-components clustering). Unlike
+   * `getCriticalPaths` (ranked, repo-wide chains), this is the raw edge data
+   * a caller filters/clusters itself; degrades to `[]` when repo-intel is
+   * disabled or the repo has no persisted edges, same as every other
+   * array-returning method on this facade.
+   */
+  getFileEdges(repoId: string): Promise<FileEdgeRow[]>;
 }

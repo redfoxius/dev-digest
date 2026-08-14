@@ -108,16 +108,31 @@ const SMART_DIFF: SmartDiff = {
   split_suggestion: { too_big: false, total_lines: 0, proposed_splits: [] },
 };
 
-function renderViewer() {
+function renderViewer(smartDiff: SmartDiff = SMART_DIFF) {
   return render(
     <NextIntlClientProvider
       locale="en"
       messages={{ prReview: prReviewMessages, shell: shellMessages }}
     >
-      <SmartDiffViewer smartDiff={SMART_DIFF} files={FILES} />
+      <SmartDiffViewer smartDiff={smartDiff} files={FILES} />
     </NextIntlClientProvider>,
   );
 }
+
+// A `too_big` variant, reusing the same grouped/files fixtures above, with
+// two proposed splits — one covering `src/api/handler.ts` +
+// `src/api/bigcore.ts`, the other just `src/billing/biglogic.ts`.
+const SMART_DIFF_WITH_SPLITS: SmartDiff = {
+  ...SMART_DIFF,
+  split_suggestion: {
+    too_big: true,
+    total_lines: 404,
+    proposed_splits: [
+      { name: "src/api", files: ["src/api/handler.ts", "src/api/bigcore.ts"] },
+      { name: "Split 2", files: ["src/billing/biglogic.ts"] },
+    ],
+  },
+};
 
 /** Scopes queries to one file's row (`data-file`), so two files sharing the
  *  same "N findings" wording (e.g. both showing "1 findings") can't collide. */
@@ -267,5 +282,42 @@ describe("SmartDiffViewer — pseudocode_summary (Phase 5)", () => {
     expect(within(row).getByText("2 findings")).toBeInTheDocument();
     expect(within(row).getByText("Summary")).toBeInTheDocument();
     expect(within(row).getByText(/Handles incoming API requests/)).toBeInTheDocument();
+  });
+});
+
+describe("SmartDiffViewer — split_suggestion banner (Phase 6)", () => {
+  it("the banner is absent when too_big is false", () => {
+    renderViewer(SMART_DIFF);
+    expect(screen.queryByText(/This PR is large/)).not.toBeInTheDocument();
+  });
+
+  it("the banner appears with one Chip per proposed split when too_big is true", () => {
+    renderViewer(SMART_DIFF_WITH_SPLITS);
+    expect(screen.getByText(/This PR is large/)).toBeInTheDocument();
+    expect(screen.getByText("src/api · 2 files")).toBeInTheDocument();
+    expect(screen.getByText("Split 2 · 1 files")).toBeInTheDocument();
+  });
+
+  it("clicking a split's Chip dims every FileCard not in that split, and leaves the ones in it un-dimmed", () => {
+    const { container } = renderViewer(SMART_DIFF_WITH_SPLITS);
+    fireEvent.click(screen.getByText("src/api · 2 files"));
+
+    // In the split: NOT dimmed.
+    expect(fileRow(container, "src/api/handler.ts")).not.toHaveAttribute("data-dimmed");
+    expect(fileRow(container, "src/api/bigcore.ts")).not.toHaveAttribute("data-dimmed");
+    // NOT in the split (a different core file, plus the whole wiring/boilerplate
+    // groups): dimmed.
+    expect(fileRow(container, "src/billing/biglogic.ts")).toHaveAttribute("data-dimmed", "true");
+  });
+
+  it("clicking the same split's Chip again clears the highlight (no FileCard stays dimmed)", () => {
+    const { container } = renderViewer(SMART_DIFF_WITH_SPLITS);
+    const chip = screen.getByText("src/api · 2 files");
+    fireEvent.click(chip);
+    expect(fileRow(container, "src/billing/biglogic.ts")).toHaveAttribute("data-dimmed", "true");
+
+    fireEvent.click(chip);
+    expect(fileRow(container, "src/billing/biglogic.ts")).not.toHaveAttribute("data-dimmed");
+    expect(fileRow(container, "src/api/handler.ts")).not.toHaveAttribute("data-dimmed");
   });
 });

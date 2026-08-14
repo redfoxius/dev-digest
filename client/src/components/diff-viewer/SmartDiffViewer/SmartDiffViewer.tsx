@@ -9,8 +9,12 @@
    the same `headerRight` slot) and the "What this does: …" text block
    FileCard itself renders below its header once open.
 
-   Not in this phase: `split_suggestion` UI (Phase 6) — the server always
-   returns `[]` for `proposed_splits` until then. */
+   Phase 6 — a `split_suggestion` banner (rendered only when `too_big`),
+   above the group list: one clickable Chip per `ProposedSplit`. Clicking a
+   split's Chip highlights that split's files by dimming every OTHER
+   rendered `FileCard` (via its new `dimmed` prop); clicking the same Chip
+   again clears the highlight. Suggestion/highlight surface only — no PR is
+   actually created or split here. */
 "use client";
 
 import React from "react";
@@ -31,6 +35,14 @@ interface ScrollTarget {
   nonce: number;
 }
 
+/** The currently-highlighted proposed split (Phase 6) — `index` (not just
+ *  `files`) is tracked so clicking the SAME Chip twice can be detected and
+ *  toggled off, even if two splits happened to have identical `files`. */
+interface HighlightedSplit {
+  index: number;
+  files: string[];
+}
+
 export function SmartDiffViewer({
   smartDiff,
   files,
@@ -47,9 +59,34 @@ export function SmartDiffViewer({
   const [openSections, setOpenSections] =
     React.useState<Record<SmartDiffRole, boolean>>(DEFAULT_SECTION_OPEN);
   const [scrollTarget, setScrollTarget] = React.useState<ScrollTarget | null>(null);
+  const [highlightedSplit, setHighlightedSplit] = React.useState<HighlightedSplit | null>(null);
+
+  const { too_big: tooBig, total_lines: totalLines, proposed_splits: proposedSplits } =
+    smartDiff.split_suggestion;
 
   return (
     <div style={s.list}>
+      {tooBig && (
+        <div style={s.splitBanner}>
+          <div style={s.splitBannerTitle}>{t("smartDiff.largeTitle", { lines: totalLines })}</div>
+          <div style={s.splitBannerBody}>{t("smartDiff.largeBody")}</div>
+          <div style={s.splitChips}>
+            {proposedSplits.map((split, index) => (
+              <Chip
+                key={`${split.name}-${index}`}
+                active={highlightedSplit?.index === index}
+                onClick={() =>
+                  setHighlightedSplit((prev) =>
+                    prev?.index === index ? null : { index, files: split.files },
+                  )
+                }
+              >
+                {split.name} · {t("smartDiff.filesCount", { count: split.files.length })}
+              </Chip>
+            ))}
+          </div>
+        </div>
+      )}
       {smartDiff.groups.map((group) => {
         const isOpen = openSections[group.role];
         return (
@@ -111,6 +148,8 @@ export function SmartDiffViewer({
                       {summaryChip}
                     </span>
                   );
+                  const dimmed =
+                    highlightedSplit != null && !highlightedSplit.files.includes(file.path);
                   return (
                     <FileCard
                       key={file.path}
@@ -121,6 +160,7 @@ export function SmartDiffViewer({
                       findingSeverityByLine={findingSeverityByLine}
                       headerRight={headerRight || undefined}
                       pseudocodeSummary={file.pseudocode_summary}
+                      dimmed={dimmed}
                     />
                   );
                 })}
