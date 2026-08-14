@@ -1,4 +1,4 @@
-import type { PrStatus } from '@devdigest/shared';
+import type { PrStatus, Verdict } from '@devdigest/shared';
 
 /**
  * PR-list rollup helpers (pure — no DB / `this`, so they unit-test cleanly).
@@ -52,4 +52,27 @@ export function deriveReviewStatus(args: {
   const staleMs = (args.staleDays ?? STALE_DAYS) * 86_400_000;
   if (updatedAt && now - updatedAt.getTime() > staleMs) return 'stale';
   return 'reviewed';
+}
+
+const VERDICT_PRIORITY: Record<Verdict, number> = {
+  request_changes: 0,
+  comment: 1,
+  approve: 2,
+};
+
+/** Worst verdict across a PR's latest review batch. Non-Verdict garbage
+ * strings (reviews.verdict has no DB CHECK constraint) are silently
+ * ignored, not thrown on. Empty/all-invalid input → null. */
+export function worstVerdict(verdicts: (string | null)[]): Verdict | null {
+  let best: Verdict | null = null;
+  let bestPriority = Infinity;
+  for (const v of verdicts) {
+    if (v !== 'request_changes' && v !== 'comment' && v !== 'approve') continue;
+    const priority = VERDICT_PRIORITY[v];
+    if (priority < bestPriority) {
+      bestPriority = priority;
+      best = v;
+    }
+  }
+  return best;
 }

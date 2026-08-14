@@ -7,7 +7,7 @@ import * as t from '../../db/schema.js';
 import { getContext } from '../_shared/context.js';
 import { IdParams } from '../_shared/schemas.js';
 import { AppError, NotFoundError } from '../../platform/errors.js';
-import { deriveReviewStatus, rollupSeverities } from './status.js';
+import { deriveReviewStatus, rollupSeverities, worstVerdict } from './status.js';
 
 /**
  * F1 — pulls module. PR import via Octokit (list + per-PR detail).
@@ -279,6 +279,22 @@ export default async function pullsRoutes(appBase: FastifyInstance) {
       .where(eq(t.repos.id, pr.repoId));
     if (!repo) throw new NotFoundError('Repo not found');
 
+    // PR Brief aggregate (Phase 2) — computed ONCE here, shared by both the
+    // live-refresh and offline-fallback return branches below (never
+    // hand-duplicated), reusing the SAME latest-batch reviewIds
+    // `getLatestReviewBatchFindings` already resolves elsewhere in this app.
+    const { reviewIds, findings: latestFindings } =
+      await container.reviewRepo.getLatestReviewBatchFindings(pr.id);
+    const batchReviews = await container.reviewRepo.getReviewsByIds(reviewIds);
+    const scores = batchReviews.map((r) => r.score).filter((s): s is number => s != null);
+    const costs = batchReviews.map((r) => r.costUsd).filter((c): c is number => c != null);
+    const prBrief = {
+      score: scores.length > 0 ? Math.min(...scores) : null,
+      latest_run_cost_usd: costs.length > 0 ? costs.reduce((a, b) => a + b, 0) : null,
+      findings: reviewIds.length > 0 ? rollupSeverities(latestFindings) : null,
+      verdict: worstVerdict(batchReviews.map((r) => r.verdict)),
+    };
+
     // Local-first: refresh detail from GitHub when a token is configured;
     // otherwise serve the persisted files/commits/body (seeded or previously
     // imported) so PR detail works offline.
@@ -322,7 +338,7 @@ export default async function pullsRoutes(appBase: FastifyInstance) {
         })
         .where(eq(t.pullRequests.id, pr.id));
 
-      return { ...detail, id: pr.id };
+      return { ...detail, id: pr.id, ...prBrief };
     } catch (err) {
       app.log.warn({ err }, 'GitHub PR detail refresh skipped (no token / offline); serving persisted detail');
       const files = await container.db.select().from(t.prFiles).where(eq(t.prFiles.prId, pr.id));
@@ -354,6 +370,7 @@ export default async function pullsRoutes(appBase: FastifyInstance) {
           author: c.author,
           committed_at: c.committedAt?.toISOString() ?? null,
         })),
+        ...prBrief,
       };
     }
   });
