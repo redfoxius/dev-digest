@@ -13,7 +13,38 @@ workflow and quality bar.
 
 ## What Works
 
+- 2026-08-14 — When a manual/browser verification step needs real data (here:
+  Phase 3 of `docs/intent-smartdiff-improvements.md` needed a PR whose derived
+  intent has populated `risks` to screenshot the redesigned `IntentCard`) but
+  no such row exists yet in the local dev DB and running a real
+  `POST /pulls/:id/intent/derive` would trigger a billed LLM call, a
+  temporary direct `UPDATE pr_intent SET risks = '[...]'::jsonb WHERE pr_id =
+  '<id>'` against the dev Postgres container (then reverted back to `'[]'`
+  right after the screenshot) is a legitimate zero-cost substitute — it
+  exercises the exact same render path (`GET /pulls/:id/intent` → `IntentCard`)
+  without invoking the LLM at all. Confirm the row's pre-edit value first
+  (`select risks from pr_intent where pr_id = ...`) so the revert restores the
+  exact prior state, not just an assumed default.
+  (`client/src/app/repos/[repoId]/pulls/[number]/_components/OverviewTab/_components/IntentCard/IntentCard.tsx`)
+
 ## What Doesn't Work
+
+- 2026-08-14 — Phase 4's `SmartDiffViewer` scroll-target merge
+  (`internalScrollTarget ?? externalScrollTarget`, one per-file `nonce`
+  passed through to `FileCard`) has a narrow, unfixed nonce-collision gap:
+  internal (findings-Chip click) and external ("view in diff" from the
+  Findings tab) each keep their OWN independent nonce counter, both
+  starting at 1. If a file has never had an internal click, and an
+  external target lands on it, the user's FIRST-EVER internal click on
+  that same file can produce a nonce that numerically equals the external
+  target's nonce — `FileCard`'s re-scroll effect is keyed only on
+  `scrollToLine.nonce` (see the 2026-08-14 two-effect entry below), so it
+  won't re-fire even though the winning line changed. Worst case: the user
+  has to click the Chip twice. Documented inline as a code comment at the
+  merge site; not fixed (would need a combined/offset nonce space across
+  both sources). Flag if this area is revisited.
+  (`client/src/components/diff-viewer/SmartDiffViewer/SmartDiffViewer.tsx`
+  — the `scrollToLine = internalTarget ?? externalTarget` merge)
 
 - 2026-08-14 — First `SmartDiffViewer` draft rendered a file's "N findings"
   `Chip` in a separate wrapper `<div>` stacked ABOVE `FileCard`, with its own
@@ -36,6 +67,19 @@ workflow and quality bar.
   `client/src/components/diff-viewer/SmartDiffViewer/SmartDiffViewer.tsx`)
 
 ## Codebase Patterns
+
+- 2026-08-14 — The `<span onClick={(e) => e.stopPropagation()}>` wrapper for
+  a small interactive element nested inside a bigger clickable row (first
+  established for `FileCard`'s `headerRight` slot, see the 2026-08-14
+  entry above) is now used a second time, independently, for
+  `FindingCard`'s new "View in diff" `IconBtn` — `s.metaRow` sits inside
+  `s.header`'s own row-level `onClick` toggle, same shape as `FileCard`.
+  Confirmed as the established idiom for this exact situation across two
+  unrelated component trees — reuse it directly for the next
+  small-interactive-element-inside-a-toggleable-row case rather than
+  re-deriving it.
+  (`client/src/app/repos/[repoId]/pulls/[number]/_components/FindingCard/FindingCard.tsx`
+  — the view-in-diff `IconBtn` wrapper)
 
 - 2026-08-06 — There is no shared `srOnly`/visually-hidden style utility in
   this codebase yet — a repo-wide grep for `sr-only`/`visually-hidden`/
@@ -228,6 +272,37 @@ workflow and quality bar.
   (`client/src/components/diff-viewer/FileCard/FileCard.tsx:66,109,112`)
 
 ## Tool & Library Notes
+
+- 2026-08-14 — Playwright is not a direct dependency of `client/` or the
+  repo root — `npx playwright --version` resolves fine (via a global/npx
+  cache), but `require('playwright')`/`import "playwright"` from a script
+  run inside `client/` fails with `MODULE_NOT_FOUND`, since it isn't on
+  any `node_modules` resolution path from there. For an ad hoc one-off
+  browser check outside `e2e/`'s own `agent-browser` harness (e.g.
+  verifying Phase 4's "view in diff" round trip against real dev data),
+  the working approach was a throwaway scratch project: `npm init -y &&
+  npm install playwright --no-save` in a scratch dir, then run the
+  script from there. `e2e/` itself uses Vercel `agent-browser` (CDP), a
+  different tool — see `e2e/agent-browser.json` — for its real
+  deterministic specs; this is only for a quick manual verification pass.
+
+- 2026-08-14 — `SectionLabel`'s (`src/vendor/ui/primitives/SectionLabel.tsx`)
+  visible text sits in a `<span>` that is a DIRECT CHILD of SectionLabel's
+  own top-level flex-row `<div>` — not of whatever wrapper the caller puts
+  SectionLabel inside. So when a caller wraps a second, nested `SectionLabel`
+  in its own divider wrapper (Phase 3's `<div style={s.subsection}><SectionLabel
+  icon="Shield">...</SectionLabel>...</div>`), an RTL test that needs the
+  actual divider wrapper element (not SectionLabel's own internal row div)
+  must call `.closest("div")` (reaches SectionLabel's own row) THEN
+  `.parentElement` (reaches the caller's wrapper) — a single `closest("div")`
+  stops one level too shallow. Same two-hop pattern would apply to `Badge`'s
+  span if a test ever needs Badge's own parent wrapper rather than the badge
+  itself (`Badge`'s text is a direct child of its own `<span>`, one hop
+  fewer, since Badge has no internal wrapper div).
+  (`client/src/vendor/ui/primitives/SectionLabel.tsx`,
+  `client/src/app/repos/[repoId]/pulls/[number]/_components/OverviewTab/_components/IntentCard/IntentCard.test.tsx`
+  — "wraps the evidence badge and the Risk Areas heading in their own,
+  separate subsection wrappers")
 
 - 2026-08-14 — `SeverityBadge`'s `compact` variant renders icon-only, no text
   and no `aria-label` (`Badge.tsx:80` — `compact ? null : s.label`, nothing
@@ -436,6 +511,25 @@ workflow and quality bar.
   `client/src/app/agents/_components/AgentCard/AgentCard.test.tsx`)
 
 ## Session Notes
+
+- 2026-08-14 — Implemented Phase 4 (final phase) of
+  `docs/intent-smartdiff-improvements.md` — Findings → Code Changes tab
+  navigation. `FileCard` needed zero changes (its `scrollToLine` contract
+  already covered everything); the work was entirely prop-threading a new
+  `ScrollTarget` type down two chains (`DiffTab` → `SmartDiffViewer`/
+  `DiffViewer` → `FileCard`; `page.tsx` → `FindingsTab` → `ReviewRunAccordion`
+  → `FindingsPanel` → `FindingCard`) plus the merge logic in
+  `SmartDiffViewer`. 23 new/changed tests across 5 files, all green;
+  `pnpm typecheck` clean. Verified the real round trip against PR #5 in the
+  local dev DB (6 real findings, already reviewed — no new LLM call) via a
+  scratch Playwright script: click → tab switch → correct FileCard
+  force-opened → correct line scrolled into viewport (confirmed via
+  `getBoundingClientRect`, not just RTL) → existing GitHub deep-link
+  unchanged. This session picked up mid-Phase-4 after a prior implementer
+  subagent hit an account-level API session limit partway through (had
+  already finished the `ScrollTarget` type + `DiffViewer.tsx` — steps 1-2 of
+  6 in the plan); the rest was completed directly rather than via a new
+  subagent, to avoid the same limit.
 
 - 2026-08-05 — Implemented `docs/findings-by-severity-plan.md` end-to-end
   (all 22 steps): server-side live per-severity findings aggregation on the

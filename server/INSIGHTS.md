@@ -15,6 +15,48 @@ workflow and quality bar.
 
 ## What Doesn't Work
 
+- 2026-08-14 — Extends the 2026-08-09 "unwired `FeatureModelId` slot" /
+  "automatic Container-level capability" entries below: writing
+  `reviews.it.test.ts`'s Phase 1 Risk Areas case (the FIRST test anywhere to
+  exercise the real `IntentDeriverService.derive()`, not `MockIntentDeriver`
+  — `reviewRepo` has no `ContainerOverrides` field, so this is the only way
+  to get real Postgres coverage) with `overrides: { llm: { openai: mockLlm } }`
+  made a REAL, billed network call to OpenRouter instead of hitting the mock —
+  confirmed live via a debug `console.log` that printed a genuine
+  LLM-generated intent summary in place of the fixture. Root cause:
+  `review_intent`'s `FeatureModel.defaultProvider` is `'openrouter'`
+  (`contracts/platform.ts:55`), not `'openai'`, and `container.llm('openrouter')`
+  falls through to the real adapter + the dev machine's real
+  `~/.devdigest/secrets.json` `OPENROUTER_API_KEY` whenever the override map
+  doesn't have an `openrouter` key — regardless of what other provider keys
+  ARE overridden. Fixed by keying the override `llm: { openrouter: mockLlm }`
+  instead. Generalizable: before writing any new test that omits a mock for a
+  Container-derived capability (here: `intentDeriver`) to get "real" coverage,
+  check which provider that capability's `FeatureModelId` actually resolves to
+  (`resolveFeatureModel`) — matching the override key to the WRONG provider
+  id doesn't fail loudly, it silently makes a real request.
+  (`server/test/reviews.it.test.ts` — "Risk Areas (Phase 1)" case,
+  `server/src/vendor/shared/contracts/platform.ts:55`)
+
+- 2026-08-14 — `docs/intent-smartdiff-improvements.md`'s Phase 1 Step 4 text
+  claimed `Risk` was "already in module scope (declared just above `Intent`
+  in this file)" for both `brief.ts` vendor copies — false against the actual
+  file: `Risk`/`RiskSeverity` were declared ~40 lines AFTER `Intent`, in a
+  separate `// ---- Risks ----` section below `// ---- Blast radius ----`.
+  Since these are top-level `const` zod schemas evaluated at module-load time
+  in file order, adding `risks: z.array(Risk)` inside `Intent`'s object
+  literal AS WRITTEN would reference `Risk` before its own declaration runs —
+  a `ReferenceError` (TDZ), not merely a lint issue. Fixed by moving the whole
+  Risks section above the Intent section in both
+  `server/src/vendor/shared/contracts/brief.ts` and the client copy, rather
+  than leaving `Intent` in place and hoping declaration order didn't matter.
+  A plan's claim about a file's existing layout (declaration order, "already
+  above/below") should be checked against the actual current file before
+  writing dependent code, not trusted at face value — the plan can be stale
+  even when its output type/shape is entirely correct.
+  (`server/src/vendor/shared/contracts/brief.ts`,
+  `client/src/vendor/shared/contracts/brief.ts`)
+
 - 2026-08-09 — Deriving a config-derived convention candidate's `language`
   via `languageIdForFile(evidence_path)` is wrong: that function resolves by
   SOURCE-file extension (`.ts`, `.go`), but config filenames (`tsconfig.json`,
