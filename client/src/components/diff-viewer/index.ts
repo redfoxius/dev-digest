@@ -4,3 +4,4 @@
 export { DiffViewer } from "./DiffViewer";
 export { SmartDiffViewer } from "./SmartDiffViewer";
 export type { DiffCommentApi } from "./comments";
+export type { ScrollTarget } from "./helpers";

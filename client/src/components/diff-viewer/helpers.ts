@@ -8,6 +8,16 @@ export interface Line {
   newNo?: number;
 }
 
+/** An external request to scroll a specific diff file's line into view.
+ * nonce must be bumped on every new request so a re-click of the same
+ * {path, line} still re-fires the scroll (feeds FileCard's own two-effect
+ * scrollToLine pattern). */
+export interface ScrollTarget {
+  path: string;
+  line: number;
+  nonce: number;
+}
+
 /** Parse unified-diff patch text into renderable lines with old/new line numbers. */
 export function parsePatch(patch: string | null | undefined): Line[] {
   if (!patch) return [];

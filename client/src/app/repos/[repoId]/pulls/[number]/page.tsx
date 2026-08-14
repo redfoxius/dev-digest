@@ -22,6 +22,7 @@ import { useActiveRepo, useRepoNotFound } from "../../../../../lib/repo-context"
 import { ApiError } from "../../../../../lib/api";
 import { githubPrUrl } from "../../../../../lib/github-urls";
 import type { FindingRecord } from "@devdigest/shared";
+import type { ScrollTarget } from "../../../../../components/diff-viewer";
 
 export default function PRDetailPage() {
   const params = useParams<{ repoId: string; number: string }>();
@@ -66,6 +67,15 @@ export default function PRDetailPage() {
     router.replace(`/repos/${repoId}/pulls/${number}${sp.toString() ? `?${sp.toString()}` : ""}`);
   };
   const setTab = (t: string) => setParam("tab", t);
+
+  // "View in diff" (Findings tab → Files-changed tab). nonce is bumped on
+  // every request so a re-click of the same {file, line} still re-fires the
+  // scroll even though DiffTab fully unmounts/remounts between tab switches.
+  const [diffScrollTarget, setDiffScrollTarget] = React.useState<ScrollTarget | null>(null);
+  function handleViewInDiff(file: string, line: number) {
+    setDiffScrollTarget((prev) => ({ path: file, line, nonce: (prev?.nonce ?? 0) + 1 }));
+    setTab("diff");
+  }
 
   // Reviews come newest-first; each is its own run (grouped into accordions).
   const runs = reviews ?? [];
@@ -134,7 +144,16 @@ export default function PRDetailPage() {
       />
 
       <div style={{ padding: "24px 32px 44px", display: "flex", flexDirection: "column", gap: 24, maxWidth: 1080, margin: "0 auto" }}>
-        {tab === "overview" && <OverviewTab prBody={pr.body} prId={prId} />}
+        {tab === "overview" && (
+          <OverviewTab
+            prBody={pr.body}
+            prId={prId}
+            verdict={pr.verdict}
+            score={pr.score}
+            findings={pr.findings}
+            latestRunCostUsd={pr.latest_run_cost_usd}
+          />
+        )}
 
         {tab === "findings" && (
           <FindingsTab
@@ -158,6 +177,7 @@ export default function PRDetailPage() {
               invalidateRunHistory();
               refetchReviews();
             }}
+            onViewInDiff={handleViewInDiff}
           />
         )}
 
@@ -167,6 +187,7 @@ export default function PRDetailPage() {
             filesCount={pr.files_count}
             files={pr.files}
             canComment={pr.status === "open"}
+            scrollTarget={diffScrollTarget}
           />
         )}
       </div>
