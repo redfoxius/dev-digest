@@ -101,6 +101,14 @@ export class ReviewRepository {
     return reviewRepo.getFileSummariesForReviews(this.db, reviewIds);
   }
 
+  /** Whole review rows for a set of review ids — a different read from
+   *  `getLatestReviewBatchFindings` (whole rows by id, no batch-key logic of
+   *  its own); used by the PR Brief banner (Phase 2) to derive score/cost/
+   *  verdict across a PR's latest review batch. */
+  getReviewsByIds(reviewIds: string[]): Promise<ReviewRow[]> {
+    return reviewRepo.getReviewsByIds(this.db, reviewIds);
+  }
+
   /** In-flight runs for a PR (status='running') — the server-side source of
    *  truth for "which agents are running now". Joined with the agent name. */
   activeRunsForPull(

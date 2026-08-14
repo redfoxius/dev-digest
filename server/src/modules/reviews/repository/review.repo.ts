@@ -164,6 +164,18 @@ export async function getFileSummariesForReviews(
     .where(inArray(t.reviewFileSummaries.reviewId, reviewIds));
 }
 
+/**
+ * Whole review rows for a given set of review ids — a genuinely different
+ * read from `getLatestReviewBatchFindings` (whole rows by id, no batch-key
+ * algorithm of its own); the `reviewIds` are already resolved by the caller
+ * (e.g. via `getLatestReviewBatchFindings`). Mirrors
+ * `getFileSummariesForReviews`'s empty-array-guard shape.
+ */
+export async function getReviewsByIds(db: Db, reviewIds: string[]): Promise<ReviewRow[]> {
+  if (reviewIds.length === 0) return [];
+  return db.select().from(t.reviews).where(inArray(t.reviews.id, reviewIds));
+}
+
 export async function getReview(db: Db, reviewId: string): Promise<ReviewRow | undefined> {
   const [row] = await db.select().from(t.reviews).where(eq(t.reviews.id, reviewId));
   return row;

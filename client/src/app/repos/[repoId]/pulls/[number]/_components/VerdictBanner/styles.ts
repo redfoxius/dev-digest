@@ -47,4 +47,8 @@ export const s = {
     color: "var(--text-muted)",
     letterSpacing: "0.04em",
   } satisfies CSSProperties,
+  costText: {
+    fontSize: 12,
+    color: "var(--text-muted)",
+  } satisfies CSSProperties,
 } as const;

@@ -6,7 +6,7 @@
  * + age, so it gets unit coverage independent of the route's queries.
  */
 import { describe, it, expect } from 'vitest';
-import { deriveReviewStatus, rollupSeverities, STALE_DAYS } from '../src/modules/pulls/status.js';
+import { deriveReviewStatus, rollupSeverities, worstVerdict, STALE_DAYS } from '../src/modules/pulls/status.js';
 
 const DAY = 86_400_000;
 const now = Date.UTC(2026, 5, 11);
@@ -64,5 +64,33 @@ describe('rollupSeverities', () => {
 
   it('is all-zero for no findings', () => {
     expect(rollupSeverities([])).toEqual({ critical: 0, warning: 0, suggestion: 0 });
+  });
+});
+
+describe('worstVerdict', () => {
+  it('is null for an empty batch', () => {
+    expect(worstVerdict([])).toBeNull();
+  });
+
+  it('is null when every verdict is null', () => {
+    expect(worstVerdict([null, null])).toBeNull();
+  });
+
+  it('is approve when every agent approved', () => {
+    expect(worstVerdict(['approve', 'approve'])).toBe('approve');
+  });
+
+  it('picks request_changes over any other verdict in the batch, position-independent', () => {
+    expect(worstVerdict(['approve', 'request_changes', 'comment'])).toBe('request_changes');
+    expect(worstVerdict(['request_changes', 'approve', 'comment'])).toBe('request_changes');
+  });
+
+  it('picks comment over approve when no request_changes is present', () => {
+    expect(worstVerdict(['approve', 'comment'])).toBe('comment');
+  });
+
+  it('ignores non-Verdict garbage strings rather than crashing', () => {
+    expect(worstVerdict(['approve', 'not-a-real-verdict', null])).toBe('approve');
+    expect(worstVerdict(['garbage-only'])).toBeNull();
   });
 });
