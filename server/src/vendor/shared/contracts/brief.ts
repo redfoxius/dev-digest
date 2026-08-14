@@ -6,6 +6,26 @@ import { Severity } from './findings.js';
  * Smart Diff. Composed into PrBrief.
  */
 
+// ---- Risks ----
+// Declared before Intent — Intent.risks references Risk, and these are
+// `const` object literals evaluated at module-load time in file order.
+export const RiskSeverity = z.enum(['high', 'medium', 'low']);
+export type RiskSeverity = z.infer<typeof RiskSeverity>;
+
+export const Risk = z.object({
+  kind: z.string(),
+  title: z.string(),
+  explanation: z.string(),
+  severity: RiskSeverity,
+  file_refs: z.array(z.string()),
+});
+export type Risk = z.infer<typeof Risk>;
+
+export const Risks = z.object({
+  risks: z.array(Risk),
+});
+export type Risks = z.infer<typeof Risks>;
+
 // ---- Intent ----
 /** How strongly the derivation is backed by real signal — a closed enum so
  * the UI can render a fixed qualitative badge (never a numeric %). */
@@ -22,6 +42,9 @@ export const Intent = z.object({
   evidence_tier: EvidenceTier,
   /** Audit trail of resolved (and explicitly-failed) data sources. */
   sources: z.array(z.string()),
+  /** Notable risk areas surfaced by the same classifier call — human-facing
+   *  PR-brief concern, never fed back into the reviewer prompt. */
+  risks: z.array(Risk),
 });
 export type Intent = z.infer<typeof Intent>;
 
@@ -54,24 +77,6 @@ export const BlastRadius = z.object({
   summary: z.string(),
 });
 export type BlastRadius = z.infer<typeof BlastRadius>;
-
-// ---- Risks ----
-export const RiskSeverity = z.enum(['high', 'medium', 'low']);
-export type RiskSeverity = z.infer<typeof RiskSeverity>;
-
-export const Risk = z.object({
-  kind: z.string(),
-  title: z.string(),
-  explanation: z.string(),
-  severity: RiskSeverity,
-  file_refs: z.array(z.string()),
-});
-export type Risk = z.infer<typeof Risk>;
-
-export const Risks = z.object({
-  risks: z.array(Risk),
-});
-export type Risks = z.infer<typeof Risks>;
 
 // ---- PR History ----
 export const PrHistoryItem = z.object({

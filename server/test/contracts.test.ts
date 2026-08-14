@@ -92,6 +92,7 @@ describe('AI contracts parse fixtures', () => {
         confidence: 0.8,
         evidence_tier: 'direct',
         sources: ['pr_description'],
+        risks: [],
       }),
     ).not.toThrow();
     expect(() =>
@@ -241,6 +242,25 @@ describe('platform DTOs', () => {
         status: 'open',
         files: [],
         commits: [],
+      }),
+    ).not.toThrow();
+    // PR Brief banner (Phase 2) — verdict is nullish, absent-fixture above
+    // must keep passing; a real value round-trips too.
+    expect(() =>
+      PrDetail.parse({
+        number: 482,
+        title: 't',
+        author: 'a',
+        branch: 'b',
+        base: 'main',
+        head_sha: 'sha',
+        additions: 1,
+        deletions: 0,
+        files_count: 1,
+        status: 'open',
+        files: [],
+        commits: [],
+        verdict: 'request_changes',
       }),
     ).not.toThrow();
   });
