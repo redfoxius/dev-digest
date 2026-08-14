@@ -767,6 +767,50 @@ workflow and quality bar.
   (`server/src/modules/agents/repository.ts:86-172` vs
   `server/src/modules/skills/repository.ts:79-148`)
 
+- 2026-08-14 — `computeProposedSplits()`'s naming for a SINGLETON component
+  (one file, no import edge to any other `core` file) used
+  `commonDirectoryPrefix(files)` — but for a 1-element array that function
+  trivially returns the file's OWN full directory (nothing to compare it
+  against), not `null`. Reported live by the user against a real PR: several
+  unrelated files sharing a folder (`IntentCard.tsx`/`IntentCard.test.tsx`/
+  `constants.ts`/`styles.ts`, none importing each other) each became their
+  own singleton chip in the `split_suggestion` banner, but all four rendered
+  the SAME label (their shared folder path) — indistinguishable duplicates.
+  Fix: singletons are now always named by their own basename; the
+  directory-prefix path is only reached for genuine multi-file (edge-
+  connected) components. Confirmed live: 0 duplicate names in a 55-chip
+  response that previously had many.
+  (`server/src/modules/smart-diff/split.ts:78-91`; regression tests in
+  `server/test/smart-diff-split.test.ts` — "a core file with no edges...
+  named by its OWN filename" and "multiple unconnected singletons sharing a
+  directory get DISTINCT names")
+
+- 2026-08-14 — Same `computeProposedSplits()`, a second naming gap: a REAL
+  multi-file connected component can still get an uninformative name when
+  its `commonDirectoryPrefix` collapses to just ONE segment (e.g. `server`)
+  because its member files are scattered across unrelated subdirectories of
+  the same top-level package — true of nearly every file in that package,
+  not a distinguishing label. Confirmed live: a 10-file connected component
+  spanning several `server/` modules named itself just `"server"`. Fix:
+  require the prefix to have >= 2 segments before trusting it; otherwise
+  fall back to the existing `${basename} +N` naming.
+  (`server/src/modules/smart-diff/split.ts:92-100`; regression test:
+  "falls back to a filename-based name when a REAL multi-file component
+  only shares a one-segment (top-level) directory prefix")
+
+- 2026-08-14 — Even after both fixes above, two UNRELATED singletons can
+  still legitimately share a basename across different folders (confirmed
+  live: 7 of 55 chips collided — `styles.ts` ×2, `service.ts` ×3,
+  `INSIGHTS.md` ×2, `constants.ts` ×2). Added a post-pass,
+  `disambiguateSingletonNames()`, that grows any still-colliding singleton's
+  displayed name by one more trailing path segment per iteration until
+  unique across the whole `proposed_splits` list — bounded by path depth,
+  always terminates (the full path is unique per file by construction).
+  One parent-directory segment resolved all 7 real collisions observed.
+  (`server/src/modules/smart-diff/split.ts:114-133`; regression tests:
+  "disambiguates two unrelated singletons that happen to share a basename"
+  and "a singleton whose basename is unique keeps the plain filename")
+
 ## Open Questions
 
 - 2026-08-06 — `z.coerce.boolean()` on a query param (`?enabled=false` being

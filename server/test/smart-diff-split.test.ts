@@ -39,13 +39,90 @@ describe('computeProposedSplits', () => {
     ]);
   });
 
-  it('a core file with no edges to any other core file becomes its own singleton component', () => {
+  it('a core file with no edges to any other core file becomes its own singleton component, named by its OWN filename (not its directory)', () => {
     const coreFiles = ['src/api/handler.ts', 'src/utils/logger.ts'];
     const edges: { fromFile: string; toFile: string }[] = [];
 
     expect(computeProposedSplits(coreFiles, edges)).toEqual([
-      { name: 'src/api', files: ['src/api/handler.ts'] },
-      { name: 'src/utils', files: ['src/utils/logger.ts'] },
+      { name: 'handler.ts', files: ['src/api/handler.ts'] },
+      { name: 'logger.ts', files: ['src/utils/logger.ts'] },
+    ]);
+  });
+
+  it('multiple unconnected singletons sharing a directory get DISTINCT names, not the same directory label', () => {
+    // Regression for a real bug: a singleton's "common directory prefix" is
+    // trivially its own full directory, so naming singletons that way made
+    // every unconnected file in the same folder (e.g. a component + its
+    // test + its styles/constants, none importing each other) render as
+    // several chips with an IDENTICAL label — indistinguishable duplicates
+    // in the split_suggestion banner.
+    const coreFiles = [
+      'client/src/.../IntentCard/IntentCard.tsx',
+      'client/src/.../IntentCard/IntentCard.test.tsx',
+      'client/src/.../IntentCard/constants.ts',
+      'client/src/.../IntentCard/styles.ts',
+    ];
+    const edges: { fromFile: string; toFile: string }[] = [];
+
+    const names = computeProposedSplits(coreFiles, edges).map((s) => s.name);
+    expect(names).toEqual(['IntentCard.tsx', 'IntentCard.test.tsx', 'constants.ts', 'styles.ts']);
+    expect(new Set(names).size).toBe(names.length);
+  });
+
+  it('disambiguates two unrelated singletons that happen to share a basename, by growing each name with parent-directory context', () => {
+    // Regression for a real bug: two DIFFERENT `styles.ts` files (and two
+    // different `INSIGHTS.md` files) in unrelated folders, with no import
+    // edge between them, both named themselves just "styles.ts"/
+    // "INSIGHTS.md" — indistinguishable chips even though each points at a
+    // different file.
+    const coreFiles = [
+      'client/.../IntentCard/styles.ts',
+      'client/.../PrBriefBanner/styles.ts',
+      'client/INSIGHTS.md',
+      'server/INSIGHTS.md',
+    ];
+    const edges: { fromFile: string; toFile: string }[] = [];
+
+    const names = computeProposedSplits(coreFiles, edges).map((s) => s.name);
+    expect(names).toEqual([
+      'IntentCard/styles.ts',
+      'PrBriefBanner/styles.ts',
+      'client/INSIGHTS.md',
+      'server/INSIGHTS.md',
+    ]);
+    expect(new Set(names).size).toBe(names.length);
+  });
+
+  it('a singleton whose basename is unique keeps the plain filename (no unnecessary parent-directory noise)', () => {
+    const coreFiles = ['client/.../IntentCard/IntentCard.tsx', 'server/src/modules/pulls/routes.ts'];
+    const edges: { fromFile: string; toFile: string }[] = [];
+
+    expect(computeProposedSplits(coreFiles, edges).map((s) => s.name)).toEqual([
+      'IntentCard.tsx',
+      'routes.ts',
+    ]);
+  });
+
+  it('falls back to a filename-based name when a REAL multi-file component only shares a one-segment (top-level) directory prefix', () => {
+    // Regression for a real bug: a connected component spanning several
+    // unrelated modules under the same top-level package (e.g. `server`)
+    // had its common prefix collapse all the way up to just that top-level
+    // segment — a name true of nearly every file in the package, not a
+    // distinguishing label for this specific cluster.
+    const coreFiles = [
+      'server/src/modules/pulls/routes.ts',
+      'server/src/db/schema/reviews.ts',
+      'server/test/pulls.it.test.ts',
+    ];
+    const edges = [
+      { fromFile: 'server/src/modules/pulls/routes.ts', toFile: 'server/src/db/schema/reviews.ts' },
+      { fromFile: 'server/src/db/schema/reviews.ts', toFile: 'server/test/pulls.it.test.ts' },
+    ];
+
+    // Common prefix across all three is just "server" (1 segment) — too
+    // shallow to be trusted, so this falls back to filename-based naming.
+    expect(computeProposedSplits(coreFiles, edges)).toEqual([
+      { name: 'routes.ts +2', files: coreFiles },
     ]);
   });
 
@@ -68,8 +145,8 @@ describe('computeProposedSplits', () => {
     const edges: { fromFile: string; toFile: string }[] = [];
 
     expect(computeProposedSplits(coreFiles, edges)).toEqual([
-      { name: 'z', files: ['z/first.ts'] },
-      { name: 'a', files: ['a/second.ts'] },
+      { name: 'first.ts', files: ['z/first.ts'] },
+      { name: 'second.ts', files: ['a/second.ts'] },
       { name: 'root1.ts', files: ['root1.ts'] },
       { name: 'root2.ts', files: ['root2.ts'] },
     ]);
