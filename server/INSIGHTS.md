@@ -13,7 +13,34 @@ workflow and quality bar.
 
 ## What Works
 
+- 2026-08-14 — `RunBus.subscribe()` (`src/platform/sse.ts:63-68`) already
+  correctly replays the full buffered event history to a brand-new
+  subscriber before continuing live — confirmed live via `curl -N
+  /runs/:id/events` mid-run and again on a completed run. A client that
+  reconnects (e.g. after a component remount) does NOT need its own
+  replay/catch-up logic; the server already guarantees it sees everything
+  from the start. Worth checking this exists before assuming client-side
+  reconnect handling needs to solve replay itself.
+  (`server/src/platform/sse.ts:63-68`)
+
 ## What Doesn't Work
+
+- 2026-08-14 — `RunBus`'s `buffers`/`seq`/`completed` Maps
+  (`src/platform/sse.ts`) were never evicted — one entry accumulated per
+  run for the ENTIRE server process lifetime, despite a comment claiming
+  the buffer was kept only "briefly" for late subscribers. Fixed:
+  `complete()` now schedules a 15-minute eviction timer (with a
+  defensive clear-existing-timer-first guard in case `complete()` ever
+  fires twice for the same `runId`). Accepted, documented-not-fixed edge
+  case: a client reconnecting to `/runs/:id/events` for a run finished
+  >15 min ago gets a fresh empty buffer post-eviction and no `onDone`
+  signal (since `completed` no longer has that `runId`) — the SSE stream
+  hangs open instead of replaying-then-closing. Only reachable by
+  something explicitly re-opening a live-log stream for a long-finished
+  run; not fixed, would need the route to check `agent_runs.status` in
+  the DB before subscribing.
+  (`server/src/platform/sse.ts` — `EVICT_AFTER_MS`, `evictTimers`;
+  regression tests: `server/test/sse.test.ts`)
 
 - 2026-08-14 — Extends the 2026-08-09 "unwired `FeatureModelId` slot" /
   "automatic Container-level capability" entries below: writing
@@ -826,6 +853,13 @@ workflow and quality bar.
   worth adding, or does the course intentionally keep this manual?
 
 ## Session Notes
+
+- 2026-08-14 — Implemented `docs/run-status-plan.md`'s server-side item:
+  `RunBus` eviction (`src/platform/sse.ts`), alongside the client-side
+  run-status tab-switch bug fix (see `client/INSIGHTS.md`). New
+  `server/test/sse.test.ts` (6 cases, `vi.useFakeTimers()` for the
+  15-minute eviction window — no real waiting). Full server suite (330
+  tests) + `pnpm typecheck` green.
 
 - 2026-08-04 — `engineering-insights` did not auto-invoke during the whole
   `feat/review-cost` session (a multi-file feature with real findings — see
