@@ -310,6 +310,27 @@ describe("SmartDiffViewer — split_suggestion banner (Phase 6)", () => {
     expect(fileRow(container, "src/billing/biglogic.ts")).toHaveAttribute("data-dimmed", "true");
   });
 
+  it("clicking a split's Chip scrolls its first file's FileCard into view", () => {
+    const { container } = renderViewer(SMART_DIFF_WITH_SPLITS);
+    const scrollIntoView = window.HTMLElement.prototype.scrollIntoView as ReturnType<typeof vi.fn>;
+
+    fireEvent.click(screen.getByText("src/api · 2 files"));
+
+    expect(scrollIntoView).toHaveBeenCalledTimes(1);
+    expect(scrollIntoView.mock.instances[0]).toBe(fileRow(container, "src/api/handler.ts"));
+  });
+
+  it("clicking a split's Chip opens the core section if it was collapsed", () => {
+    renderViewer(SMART_DIFF_WITH_SPLITS);
+    const coreButton = screen.getByRole("button", { name: /^Core\b/i });
+    fireEvent.click(coreButton); // collapse it
+    expect(coreButton).toHaveAttribute("aria-expanded", "false");
+
+    fireEvent.click(screen.getByText("src/api · 2 files"));
+
+    expect(coreButton).toHaveAttribute("aria-expanded", "true");
+  });
+
   it("clicking the same split's Chip again clears the highlight (no FileCard stays dimmed)", () => {
     const { container } = renderViewer(SMART_DIFF_WITH_SPLITS);
     const chip = screen.getByText("src/api · 2 files");

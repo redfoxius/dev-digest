@@ -28,9 +28,9 @@ export interface SplitEdge {
  *   edges to any other `core` file becomes its own singleton component (no
  *   special-casing/merging into a catch-all bucket; a uniform rule keeps an
  *   accurate "unrelated to anything else changed" signal itself useful).
- * - Component order (and therefore `ProposedSplit[]` order, and fallback
- *   naming's "Split N" numbering) is deterministic: by each component's
- *   earliest file's position in `coreFilePaths` (i.e. `pr_files` order).
+ * - Component order (and therefore `ProposedSplit[]` order) is deterministic:
+ *   by each component's earliest file's position in `coreFilePaths` (i.e.
+ *   `pr_files` order).
  * - `[]` in ⇒ `[]` out: no `core` files means nothing to cluster.
  */
 export function computeProposedSplits(
@@ -75,13 +75,26 @@ export function computeProposedSplits(
     components.push(coreFilePaths.filter((p) => memberSet.has(p)));
   }
 
-  let fallbackCounter = 0;
   return components.map((files) => {
     const prefix = commonDirectoryPrefix(files);
     if (prefix != null) return { name: prefix, files };
-    fallbackCounter += 1;
-    return { name: `Split ${fallbackCounter}`, files };
+    // No shared directory — a generic "Split N" fallback here is
+    // indistinguishable from every other ungrouped singleton/cluster in the
+    // banner (confirmed live: a PR with several disconnected `core` files
+    // renders a wall of "Split 1"/"Split 2"/"Split 3" chips with no hint of
+    // which file each one is). Naming off the first member's own filename
+    // instead means every chip's label is something the user can actually
+    // recognize.
+    const name =
+      files.length === 1 ? basename(files[0]!) : `${basename(files[0]!)} +${files.length - 1}`;
+    return { name, files };
   });
+}
+
+/** Last `/`-separated segment of a path. */
+function basename(path: string): string {
+  const idx = path.lastIndexOf('/');
+  return idx === -1 ? path : path.slice(idx + 1);
 }
 
 /**
