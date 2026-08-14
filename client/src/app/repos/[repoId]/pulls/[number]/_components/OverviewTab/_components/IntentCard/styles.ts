@@ -39,4 +39,19 @@ export const s = {
     color: "var(--text-muted)",
     fontStyle: "italic",
   } satisfies CSSProperties,
+  riskRow: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: 8,
+    marginTop: 4,
+  } satisfies CSSProperties,
+  /** Divider wrapper for a labeled subsection inside the card (Phase 3 —
+   *  "PR BRIEF" redesign). Mirrors this codebase's established divider
+   *  idiom (`FindingCard/styles.ts`'s `body` entry) — a `borderTop` rule
+   *  applied directly to the section's own wrapper, no separate `<hr>`. */
+  subsection: {
+    marginTop: 14,
+    paddingTop: 14,
+    borderTop: "1px solid var(--border)",
+  } satisfies CSSProperties,
 } as const;
