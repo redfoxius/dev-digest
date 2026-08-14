@@ -38,6 +38,9 @@ const FILES: PrFile[] = [
   { path: "vite.config.ts", additions: 5, deletions: 2, patch: PATCH_WIRING },
   { path: "package-lock.json", additions: 1, deletions: 1, patch: PATCH_LOCKFILE },
   { path: "src/billing/biglogic.ts", additions: 150, deletions: 100, patch: PATCH_BIGLOGIC },
+  // Present in `files` but deliberately absent from every SMART_DIFF group
+  // below — used only by the "known asymmetry" external-scrollTarget test.
+  { path: "src/orphan.ts", additions: 1, deletions: 0, patch: "@@ -1,1 +1,1 @@\n+export {}\n" },
 ];
 
 const SMART_DIFF: SmartDiff = {
@@ -108,13 +111,16 @@ const SMART_DIFF: SmartDiff = {
   split_suggestion: { too_big: false, total_lines: 0, proposed_splits: [] },
 };
 
-function renderViewer(smartDiff: SmartDiff = SMART_DIFF) {
+function renderViewer(
+  smartDiff: SmartDiff = SMART_DIFF,
+  scrollTarget?: { path: string; line: number; nonce: number } | null,
+) {
   return render(
     <NextIntlClientProvider
       locale="en"
       messages={{ prReview: prReviewMessages, shell: shellMessages }}
     >
-      <SmartDiffViewer smartDiff={smartDiff} files={FILES} />
+      <SmartDiffViewer smartDiff={smartDiff} files={FILES} scrollTarget={scrollTarget} />
     </NextIntlClientProvider>,
   );
 }
@@ -340,5 +346,50 @@ describe("SmartDiffViewer — split_suggestion banner (Phase 6)", () => {
     fireEvent.click(chip);
     expect(fileRow(container, "src/billing/biglogic.ts")).not.toHaveAttribute("data-dimmed");
     expect(fileRow(container, "src/api/handler.ts")).not.toHaveAttribute("data-dimmed");
+  });
+});
+
+describe("SmartDiffViewer — external scrollTarget (Phase 4)", () => {
+  it("an external scrollTarget force-opens a collapsed section and scrolls the right FileCard", () => {
+    const { container } = renderViewer(SMART_DIFF, { path: "package-lock.json", line: 1, nonce: 1 });
+
+    // Boilerplate is collapsed by default — the external target must open it.
+    expect(screen.getByRole("button", { name: /^Boilerplate\b/i })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+    const row = fileRow(container, "package-lock.json");
+    expect(within(row).getByText("{}")).toBeInTheDocument();
+    expect(row.querySelector('[data-line="1"]')).toBeTruthy();
+    expect(window.HTMLElement.prototype.scrollIntoView).toHaveBeenCalledTimes(1);
+  });
+
+  it("internal click-to-scroll wins over an external target on the same file", () => {
+    // External nonce deliberately far from where the internal counter will
+    // land (1) — keeps this test about the merge's WINNER, not about the
+    // separate nonce-collision edge case noted on the merge in
+    // SmartDiffViewer.tsx (two independent nonce sequences can coincide,
+    // a known, narrow limitation not fixed here).
+    const { container } = renderViewer(SMART_DIFF, { path: "src/api/handler.ts", line: 5, nonce: 99 });
+    const row = fileRow(container, "src/api/handler.ts");
+    const scrollIntoView = window.HTMLElement.prototype.scrollIntoView as ReturnType<typeof vi.fn>;
+
+    // The internal findings-Chip click (line 4, the file's FIRST finding)
+    // must win over the external target's line 5 once both are present.
+    fireEvent.click(within(row).getByText("2 findings"));
+
+    const line4El = row.querySelector('[data-line="4"]');
+    expect(scrollIntoView.mock.instances.at(-1)).toBe(line4El);
+  });
+
+  it("known asymmetry: an external target for a file present in `files` but absent from every group is a no-op, not a crash", () => {
+    renderViewer(SMART_DIFF, { path: "src/orphan.ts", line: 1, nonce: 1 });
+
+    // No section was force-opened (orphan.ts has no role), no crash.
+    expect(screen.getByRole("button", { name: /^Boilerplate\b/i })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    expect(window.HTMLElement.prototype.scrollIntoView).not.toHaveBeenCalled();
   });
 });

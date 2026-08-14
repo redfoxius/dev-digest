@@ -2,7 +2,7 @@
 
 import React from "react";
 import { SectionLabel, Button, Chip } from "@devdigest/ui";
-import { DiffViewer, SmartDiffViewer, type DiffCommentApi } from "@/components/diff-viewer";
+import { DiffViewer, SmartDiffViewer, type DiffCommentApi, type ScrollTarget } from "@/components/diff-viewer";
 import { usePrComments, useCreatePrComment } from "@/lib/hooks/reviews";
 import { usePrSmartDiff } from "@/lib/hooks/smart-diff";
 import { notify } from "@/lib/toast";
@@ -14,9 +14,12 @@ interface DiffTabProps {
   files: PrFile[];
   /** Inline commenting is offered only on open PRs (GitHub rejects otherwise). */
   canComment?: boolean;
+  /** An external "view in diff" request from the Findings tab — forwarded
+   *  to whichever viewer (Smart/Original order) is currently active. */
+  scrollTarget?: ScrollTarget | null;
 }
 
-export function DiffTab({ prId, filesCount, files, canComment }: DiffTabProps) {
+export function DiffTab({ prId, filesCount, files, canComment, scrollTarget }: DiffTabProps) {
   const { data: comments } = usePrComments(prId);
   const create = useCreatePrComment(prId);
   // Comments start hidden so the diff is clean by default — toggle to reveal.
@@ -84,9 +87,9 @@ export function DiffTab({ prId, filesCount, files, canComment }: DiffTabProps) {
         Files changed · {filesCount} files
       </SectionLabel>
       {showSmart ? (
-        <SmartDiffViewer smartDiff={smartDiff!} files={files} commenting={commenting} />
+        <SmartDiffViewer smartDiff={smartDiff!} files={files} commenting={commenting} scrollTarget={scrollTarget} />
       ) : (
-        <DiffViewer files={files} commenting={commenting} />
+        <DiffViewer files={files} commenting={commenting} scrollTarget={scrollTarget} />
       )}
     </section>
   );

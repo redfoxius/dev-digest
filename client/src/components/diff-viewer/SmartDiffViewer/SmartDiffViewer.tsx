@@ -31,14 +31,9 @@ import { type DiffCommentApi } from "../comments";
 import { chevronFor } from "../styles";
 import { AUTO_EXPAND_MAX_LINES } from "../constants";
 import { FileCard } from "../FileCard";
+import type { ScrollTarget } from "../helpers";
 import { ROLE_COLORS, DEFAULT_SECTION_OPEN } from "./constants";
 import { s } from "./styles";
-
-interface ScrollTarget {
-  path: string;
-  line: number;
-  nonce: number;
-}
 
 /** The currently-highlighted proposed split (Phase 6) — `index` (not just
  *  `files`) is tracked so clicking the SAME Chip twice can be detected and
@@ -52,24 +47,47 @@ export function SmartDiffViewer({
   smartDiff,
   files,
   commenting,
+  scrollTarget: externalScrollTarget,
 }: {
   smartDiff: SmartDiff;
   files: PrFile[];
   commenting?: DiffCommentApi;
+  /** An external "view in diff" request (Findings tab) — distinct from this
+   *  component's own internal, findings-Chip-click-driven scroll target. On
+   *  the same file, the internal target wins (see the merge below). */
+  scrollTarget?: ScrollTarget | null;
 }) {
   const t = useTranslations("prReview");
   // `SmartDiffFile` carries no `patch` — build the lookup once so each
   // classified file can hand its full row to `FileCard`.
   const fileMap = React.useMemo(() => new Map(files.map((f) => [f.path, f])), [files]);
+  // Path → role lookup, used to force-open the right section when an
+  // external scroll target lands on a file in a currently-collapsed group.
+  const roleByPath = React.useMemo(() => {
+    const m = new Map<string, SmartDiffRole>();
+    for (const g of smartDiff.groups) for (const f of g.files) m.set(f.path, g.role);
+    return m;
+  }, [smartDiff]);
   const [openSections, setOpenSections] =
     React.useState<Record<SmartDiffRole, boolean>>(DEFAULT_SECTION_OPEN);
-  const [scrollTarget, setScrollTarget] = React.useState<ScrollTarget | null>(null);
+  const [internalScrollTarget, setInternalScrollTarget] = React.useState<ScrollTarget | null>(null);
   const [highlightedSplit, setHighlightedSplit] = React.useState<HighlightedSplit | null>(null);
   const [splitScrollNonce, setSplitScrollNonce] = React.useState(0);
   const listRef = React.useRef<HTMLDivElement | null>(null);
 
   const { too_big: tooBig, total_lines: totalLines, proposed_splits: proposedSplits } =
     smartDiff.split_suggestion;
+
+  // Force-open the containing section when an external scroll target
+  // arrives for a file in a currently-collapsed group — mirrors the
+  // split-highlight Chip's own setOpenSections call above.
+  React.useEffect(() => {
+    if (!externalScrollTarget) return;
+    const role = roleByPath.get(externalScrollTarget.path);
+    if (!role) return; // missing-file degrade: no section to open, no-op
+    setOpenSections((prev) => (prev[role] ? prev : { ...prev, [role]: true }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [externalScrollTarget?.nonce]);
 
   // Bringing the highlighted split's first file into view needs the `core`
   // section open AND the FileCard actually mounted first — both the section
@@ -149,14 +167,32 @@ export function SmartDiffViewer({
                   const findingSeverityByLine = new Map(
                     file.finding_lines.map((f) => [f.line, f.severity]),
                   );
-                  const scrollToLine =
-                    scrollTarget && scrollTarget.path === file.path
-                      ? { line: scrollTarget.line, nonce: scrollTarget.nonce }
+                  const internalTarget =
+                    internalScrollTarget && internalScrollTarget.path === file.path
+                      ? { line: internalScrollTarget.line, nonce: internalScrollTarget.nonce }
                       : undefined;
+                  const externalTarget =
+                    externalScrollTarget && externalScrollTarget.path === file.path
+                      ? { line: externalScrollTarget.line, nonce: externalScrollTarget.nonce }
+                      : undefined;
+                  // Internal (this file's own findings-Chip click) wins over
+                  // an external "view in diff" request landing on the same
+                  // file — don't clobber the user's current in-page target.
+                  // Known, narrow limitation: internal/external each keep
+                  // their own independent nonce counter (both start at 1),
+                  // so a first-ever internal click right after a first-ever
+                  // external arrival on the SAME file can coincidentally
+                  // reuse the same nonce number — FileCard's scroll effect
+                  // (keyed on scrollToLine.nonce) then won't re-fire even
+                  // though the winning line changed. Worst case: click the
+                  // Chip twice, same as the pre-existing "click same Chip
+                  // twice re-fires" pattern already relied on elsewhere in
+                  // this file. Not fixed here — out of Phase 4's scope.
+                  const scrollToLine = internalTarget ?? externalTarget;
                   const findingsChip = file.findings_count > 0 && (
                     <Chip
                       onClick={() =>
-                        setScrollTarget((prev) => ({
+                        setInternalScrollTarget((prev) => ({
                           path: file.path,
                           line: file.finding_lines[0]!.line,
                           nonce: (prev?.nonce ?? 0) + 1,

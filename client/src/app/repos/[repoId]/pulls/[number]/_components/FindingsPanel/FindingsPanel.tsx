@@ -17,11 +17,13 @@ export function FindingsPanel({
   prId,
   repoFullName,
   headSha,
+  onViewInDiff,
 }: {
   findings: FindingRecord[];
   prId: string;
   repoFullName?: string | null;
   headSha?: string | null;
+  onViewInDiff?: (file: string, line: number) => void;
 }) {
   const t = useTranslations("prReview");
   const action = useFindingAction();
@@ -68,6 +70,7 @@ export function FindingsPanel({
               repoFullName={repoFullName}
               headSha={headSha}
               onAction={(act) => action.mutate({ findingId: f.id, action: act, prId })}
+              onViewInDiff={onViewInDiff}
             />
           ))
         )}

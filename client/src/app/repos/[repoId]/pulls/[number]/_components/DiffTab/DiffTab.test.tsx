@@ -23,6 +23,7 @@ vi.mock("@/lib/hooks/reviews", () => ({
 }));
 
 import { DiffTab } from "./DiffTab";
+import type { ScrollTarget } from "@/components/diff-viewer";
 
 afterEach(cleanup);
 
@@ -99,13 +100,13 @@ function comment(o: Partial<PrReviewComment> = {}): PrReviewComment {
   };
 }
 
-function renderTab() {
+function renderTab(scrollTarget?: ScrollTarget | null) {
   return render(
     <NextIntlClientProvider
       locale="en"
       messages={{ prReview: prReviewMessages, shell: shellMessages }}
     >
-      <DiffTab prId="pr-1" filesCount={FILES.length} files={FILES} canComment />
+      <DiffTab prId="pr-1" filesCount={FILES.length} files={FILES} canComment scrollTarget={scrollTarget} />
     </NextIntlClientProvider>,
   );
 }
@@ -175,5 +176,40 @@ describe("DiffTab — smart-order toggle", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /Show comments \(1\)/ }));
     expect(screen.getByRole("button", { name: /Hide comments \(1\)/ })).toBeInTheDocument();
+  });
+});
+
+describe("DiffTab — external scrollTarget (Phase 4)", () => {
+  beforeEach(() => {
+    usePrComments.mockReturnValue({ data: [] });
+    useCreatePrComment.mockReturnValue({ mutateAsync: vi.fn(), isPending: false });
+    usePrSmartDiff.mockReturnValue({ data: NON_EMPTY_SMART_DIFF, isLoading: false, isError: false });
+  });
+
+  it("reaches the right FileCard in Smart order (default)", () => {
+    renderTab({ path: "vite.config.ts", line: 1, nonce: 1 });
+
+    expect(screen.getByText("export default {}")).toBeInTheDocument();
+    expect(window.HTMLElement.prototype.scrollIntoView).toHaveBeenCalledTimes(1);
+  });
+
+  it("reaches the right FileCard in Original order (after toggling)", () => {
+    renderTab({ path: "vite.config.ts", line: 1, nonce: 1 });
+    fireEvent.click(screen.getByRole("button", { name: "Original order" }));
+
+    expect(screen.getByText("export default {}")).toBeInTheDocument();
+    // Fired once for the initial Smart-order mount, once more for the fresh
+    // DiffViewer mount after toggling (a full remount, not a prop update).
+    expect(window.HTMLElement.prototype.scrollIntoView).toHaveBeenCalledTimes(2);
+  });
+
+  it("a non-matching scrollTarget path is a no-op in both modes — no crash, nothing scrolls", () => {
+    renderTab({ path: "src/does-not-exist.ts", line: 1, nonce: 1 });
+    expect(window.HTMLElement.prototype.scrollIntoView).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Original order" }));
+    expect(screen.getByText("src/api/handler.ts")).toBeInTheDocument();
+    expect(screen.getByText("vite.config.ts")).toBeInTheDocument();
+    expect(window.HTMLElement.prototype.scrollIntoView).not.toHaveBeenCalled();
   });
 });
