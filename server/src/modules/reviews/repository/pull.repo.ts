@@ -61,6 +61,7 @@ export async function upsertIntent(db: Db, prId: string, intent: Intent): Promis
     confidence: intent.confidence,
     evidenceTier: intent.evidence_tier,
     sources: intent.sources,
+    risks: intent.risks,
   };
   await db
     .insert(t.prIntent)
@@ -78,5 +79,6 @@ export async function getIntent(db: Db, prId: string): Promise<Intent | undefine
     confidence: row.confidence,
     evidence_tier: row.evidenceTier as Intent['evidence_tier'],
     sources: row.sources,
+    risks: row.risks,
   };
 }
