@@ -27,6 +27,25 @@ workflow and quality bar.
   exact prior state, not just an assumed default.
   (`client/src/app/repos/[repoId]/pulls/[number]/_components/OverviewTab/_components/IntentCard/IntentCard.tsx`)
 
+- 2026-08-14 — Fixed the nonce-collision gap the "What Doesn't Work" entry
+  below originally left unfixed: `SmartDiffViewer`'s internal/external
+  scroll-target merge remaps each source's raw nonce to a disjoint parity
+  (`internalScrollTarget.nonce * 2` — always even; `externalScrollTarget.nonce
+  * 2 + 1` — always odd) at the point the merged `scrollToLine` is built for
+  `FileCard`. Two independent counters that both start at 1 can now never
+  produce the same merged value, by construction — no shared state, no new
+  effects, no mount-timing risk (an earlier design considered a shared
+  `useEffect`-bumped counter, rejected because it could double-fire
+  `FileCard`'s scroll on initial mount). Reusable pattern: when merging two
+  independently-sourced monotonic ids into one value a child keys an effect
+  on, remap each source's id into disjoint numeric partitions (parity, or
+  distinct offset ranges) rather than trying to synchronize/share a single
+  counter across the sources.
+  (`client/src/components/diff-viewer/SmartDiffViewer/SmartDiffViewer.tsx:170-186`;
+  regression test: `SmartDiffViewer.test.tsx` — "regression: internal and
+  external both at raw nonce 1 (the exact collision case) still re-fires
+  the scroll")
+
 ## What Doesn't Work
 
 - 2026-08-14 — Phase 4's `SmartDiffViewer` scroll-target merge
@@ -45,6 +64,8 @@ workflow and quality bar.
   both sources). Flag if this area is revisited.
   (`client/src/components/diff-viewer/SmartDiffViewer/SmartDiffViewer.tsx`
   — the `scrollToLine = internalTarget ?? externalTarget` merge)
+  **FIXED 2026-08-14, same day** — see the "What Works" entry below; this
+  antipattern entry stays as the record of what was wrong, not deleted.
 
 - 2026-08-14 — First `SmartDiffViewer` draft rendered a file's "N findings"
   `Chip` in a separate wrapper `<div>` stacked ABOVE `FileCard`, with its own

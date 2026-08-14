@@ -167,27 +167,28 @@ export function SmartDiffViewer({
                   const findingSeverityByLine = new Map(
                     file.finding_lines.map((f) => [f.line, f.severity]),
                   );
+                  // Internal and external each keep their own independent
+                  // nonce counter (both start at 1) — remapped here to
+                  // disjoint parities (internal always even, external always
+                  // odd) so the merged nonce FileCard actually receives can
+                  // never numerically collide between the two sources,
+                  // regardless of their raw counter values. Without this, a
+                  // first-ever internal click right after a first-ever
+                  // external arrival on the SAME file could reuse the same
+                  // raw nonce number and FileCard's scroll effect (keyed on
+                  // scrollToLine.nonce) wouldn't re-fire even though the
+                  // winning line changed.
                   const internalTarget =
                     internalScrollTarget && internalScrollTarget.path === file.path
-                      ? { line: internalScrollTarget.line, nonce: internalScrollTarget.nonce }
+                      ? { line: internalScrollTarget.line, nonce: internalScrollTarget.nonce * 2 }
                       : undefined;
                   const externalTarget =
                     externalScrollTarget && externalScrollTarget.path === file.path
-                      ? { line: externalScrollTarget.line, nonce: externalScrollTarget.nonce }
+                      ? { line: externalScrollTarget.line, nonce: externalScrollTarget.nonce * 2 + 1 }
                       : undefined;
                   // Internal (this file's own findings-Chip click) wins over
                   // an external "view in diff" request landing on the same
                   // file — don't clobber the user's current in-page target.
-                  // Known, narrow limitation: internal/external each keep
-                  // their own independent nonce counter (both start at 1),
-                  // so a first-ever internal click right after a first-ever
-                  // external arrival on the SAME file can coincidentally
-                  // reuse the same nonce number — FileCard's scroll effect
-                  // (keyed on scrollToLine.nonce) then won't re-fire even
-                  // though the winning line changed. Worst case: click the
-                  // Chip twice, same as the pre-existing "click same Chip
-                  // twice re-fires" pattern already relied on elsewhere in
-                  // this file. Not fixed here — out of Phase 4's scope.
                   const scrollToLine = internalTarget ?? externalTarget;
                   const findingsChip = file.findings_count > 0 && (
                     <Chip

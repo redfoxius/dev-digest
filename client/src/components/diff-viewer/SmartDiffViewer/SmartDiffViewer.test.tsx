@@ -365,12 +365,7 @@ describe("SmartDiffViewer — external scrollTarget (Phase 4)", () => {
   });
 
   it("internal click-to-scroll wins over an external target on the same file", () => {
-    // External nonce deliberately far from where the internal counter will
-    // land (1) — keeps this test about the merge's WINNER, not about the
-    // separate nonce-collision edge case noted on the merge in
-    // SmartDiffViewer.tsx (two independent nonce sequences can coincide,
-    // a known, narrow limitation not fixed here).
-    const { container } = renderViewer(SMART_DIFF, { path: "src/api/handler.ts", line: 5, nonce: 99 });
+    const { container } = renderViewer(SMART_DIFF, { path: "src/api/handler.ts", line: 5, nonce: 1 });
     const row = fileRow(container, "src/api/handler.ts");
     const scrollIntoView = window.HTMLElement.prototype.scrollIntoView as ReturnType<typeof vi.fn>;
 
@@ -380,6 +375,23 @@ describe("SmartDiffViewer — external scrollTarget (Phase 4)", () => {
 
     const line4El = row.querySelector('[data-line="4"]');
     expect(scrollIntoView.mock.instances.at(-1)).toBe(line4El);
+  });
+
+  it("regression: internal and external both at raw nonce 1 (the exact collision case) still re-fires the scroll", () => {
+    // Both sources' raw nonce counters land on 1 here — before the
+    // even/odd-parity fix in SmartDiffViewer.tsx, this exact combination
+    // produced the SAME merged nonce for both sources and FileCard's scroll
+    // effect (keyed on scrollToLine.nonce) silently failed to re-fire.
+    const { container } = renderViewer(SMART_DIFF, { path: "src/api/handler.ts", line: 5, nonce: 1 });
+    const row = fileRow(container, "src/api/handler.ts");
+    const scrollIntoView = window.HTMLElement.prototype.scrollIntoView as ReturnType<typeof vi.fn>;
+    const callsBeforeClick = scrollIntoView.mock.calls.length;
+
+    fireEvent.click(within(row).getByText("2 findings"));
+
+    // A genuinely new scroll fired (not silently swallowed by a nonce collision).
+    expect(scrollIntoView.mock.calls.length).toBeGreaterThan(callsBeforeClick);
+    expect(scrollIntoView.mock.instances.at(-1)).toBe(row.querySelector('[data-line="4"]'));
   });
 
   it("known asymmetry: an external target for a file present in `files` but absent from every group is a no-op, not a crash", () => {
