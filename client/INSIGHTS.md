@@ -48,6 +48,30 @@ workflow and quality bar.
 
 ## What Doesn't Work
 
+- 2026-08-14 — `usePrReviews` (`client/src/lib/hooks/reviews.ts:52-58`) had
+  NO `refetchInterval`, unlike its siblings `usePrActiveRuns`/`usePrRuns`
+  which both self-poll every 4s while anything is active. The only thing
+  that ever refreshed it was `page.tsx`'s `onRunDone` callback, wired
+  through `FindingsTab` → `RunStatus`'s own local SSE `running` transition
+  — observable ONLY while `RunStatus` was mounted, i.e. only while the
+  Findings tab was selected (it fully unmounts on tab switch, per
+  `{tab === "findings" && <FindingsTab/>}`). Real, reported bug: start a
+  review, switch to Overview/Files-changed before it finishes, it
+  completes while unmounted, the reviews list stays stale until a full
+  reload. Fixed by adding a page-level edge-triggered `useEffect` on
+  `reviewRunning` (already tab-independent, since `usePrActiveRuns` lives
+  in `page.tsx` which never unmounts) that calls the same handler the
+  SSE path already did — two convergent paths (SSE: fast, tab-gated; poll:
+  ~4s lag, tab-independent) to one `handleRunSettled`. Generalizable:
+  "only refreshes via a callback wired to a component's own local state
+  transition" is a bug waiting to happen the moment that component can
+  unmount while the underlying condition changes — wire the refresh to
+  page-level, always-mounted, server-polled state instead. Verified live
+  against a real ~110s agent run (see Tool & Library Notes below).
+  (`client/src/app/repos/[repoId]/pulls/[number]/page.tsx` —
+  `handleRunSettled` + the `prevReviewRunningRef` effect;
+  `docs/run-status-plan.md`)
+
 - 2026-08-14 — Phase 4's `SmartDiffViewer` scroll-target merge
   (`internalScrollTarget ?? externalScrollTarget`, one per-file `nonce`
   passed through to `FileCard`) has a narrow, unfixed nonce-collision gap:
@@ -88,6 +112,18 @@ workflow and quality bar.
   `client/src/components/diff-viewer/SmartDiffViewer/SmartDiffViewer.tsx`)
 
 ## Codebase Patterns
+
+- 2026-08-14 — The small-pulsing-status-dot visual (7px circle,
+  `boxShadow: "0 0 0 3px var(--<color>-bg)"`, `animation: ddpulse 2s
+  ease-in-out infinite` — the `ddpulse` keyframe is already global in
+  `client/src/vendor/ui/styles.css:230`) is now established in TWO places:
+  its original use in `AutoTriggerStatus.tsx:29-35` (auto-review on/off),
+  and reused verbatim for the new "review running" pulse on the "Agent
+  runs" tab label (`TabDef.pulse`, `Tabs.tsx`). Reuse this exact
+  spec — don't invent a new pulsing-dot style — for the next
+  "small live-status indicator" need in this codebase.
+  (`client/src/vendor/ui/kit/Tabs.tsx`, `client/src/vendor/ui/kit/types.ts`
+  — `TabDef.pulse`; `client/src/vendor/ui/AutoTriggerStatus.tsx:29-35`)
 
 - 2026-08-14 — The `<span onClick={(e) => e.stopPropagation()}>` wrapper for
   a small interactive element nested inside a bigger clickable row (first
@@ -293,6 +329,18 @@ workflow and quality bar.
   (`client/src/components/diff-viewer/FileCard/FileCard.tsx:66,109,112`)
 
 ## Tool & Library Notes
+
+- 2026-08-14 — A real agent review run (not mocked) on a TINY PR (86
+  changed lines, 3 files, single enabled agent) took ~110-165s end to end
+  across two live runs, dominated by two sequential real LLM calls: PR
+  intent derivation (a free-tier model, ~31s alone in one run) then the
+  actual review call (deepseek-v4-flash via OpenRouter, ~2min). Don't
+  assume a "quick" live-run manual/browser verification will finish in
+  under a minute — budget several minutes of real wall-clock wait (or poll
+  `GET /pulls/:id/runs/active`/`GET /runs/:id/events` directly rather than
+  guessing a fixed `waitForTimeout`) for any check that needs a real run to
+  actually complete.
+  (`docs/run-status-plan.md` — live verification section)
 
 - 2026-08-14 — Playwright is not a direct dependency of `client/` or the
   repo root — `npx playwright --version` resolves fine (via a global/npx
@@ -532,6 +580,16 @@ workflow and quality bar.
   `client/src/app/agents/_components/AgentCard/AgentCard.test.tsx`)
 
 ## Session Notes
+
+- 2026-08-14 — Implemented `docs/run-status-plan.md` end to end: fixed a
+  real reported bug (live run status "disappearing" on tab switch — really
+  `usePrReviews` going stale, see What Doesn't Work above), added a pulse
+  indicator on the "Agent runs" tab, and (server-side) `RunBus` eviction.
+  `pnpm typecheck` + full test suites (330 server, 180 client) green in
+  both packages. Verified live against a real, unmocked ~110s agent review
+  run via Playwright — confirmed the pulse dot's full lifecycle and,
+  critically, that the new review appears on the Findings tab with no page
+  reload after being away during completion (the actual reported bug).
 
 - 2026-08-14 — Implemented Phase 4 (final phase) of
   `docs/intent-smartdiff-improvements.md` — Findings → Code Changes tab

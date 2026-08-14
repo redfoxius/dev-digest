@@ -16,12 +16,22 @@ function clockTime(): string {
   return new Date().toTimeString().slice(0, 8);
 }
 
+/**
+ * How long a completed run's buffer/seq/completed entries stay in memory
+ * for late subscribers before being evicted. Generous for any realistic
+ * "still watching" reconnect, short enough to actually bound memory —
+ * without this, these Maps grew by one entry per run for the lifetime of
+ * the server process (nothing ever deleted them).
+ */
+const EVICT_AFTER_MS = 15 * 60 * 1000;
+
 export class RunBus {
   private emitters = new Map<string, EventEmitter>();
   private buffers = new Map<string, RunEvent[]>();
   private seq = new Map<string, number>();
   private completed = new Set<string>();
   private cancelled = new Set<string>();
+  private evictTimers = new Map<string, NodeJS.Timeout>();
 
   /** Request cancellation of an in-flight run. The runner checks `isCancelled`
    *  at its next checkpoint (between map-reduce files) and stops. */
@@ -80,6 +90,22 @@ export class RunBus {
     e?.emit('done');
     // Keep the buffer briefly available for late subscribers; clear emitter.
     this.emitters.delete(runId);
+
+    // Bound memory: evict this run's buffer/seq/completed entries after a
+    // grace window instead of keeping them forever. Clear any pre-existing
+    // timer first — defensive, in case complete() is ever called twice for
+    // the same runId.
+    const existing = this.evictTimers.get(runId);
+    if (existing) clearTimeout(existing);
+    this.evictTimers.set(
+      runId,
+      setTimeout(() => {
+        this.buffers.delete(runId);
+        this.seq.delete(runId);
+        this.completed.delete(runId);
+        this.evictTimers.delete(runId);
+      }, EVICT_AFTER_MS),
+    );
   }
 
   /** Whether a run has already completed (for replay-then-end late subscribers). */

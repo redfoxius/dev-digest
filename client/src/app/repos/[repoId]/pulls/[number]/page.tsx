@@ -58,6 +58,31 @@ export default function PRDetailPage() {
     if (prId) qc.invalidateQueries({ queryKey: ["pr-runs", prId] });
   };
 
+  // Fires on every run-batch completion, regardless of which run finished it
+  // (SSE, from RunStatus while the Findings tab is mounted) or which tab is
+  // currently active (the poll-driven fallback below). usePrReviews has no
+  // refetchInterval of its own — this is the only thing that keeps its
+  // results fresh, so both paths must converge here.
+  const handleRunSettled = React.useCallback(() => {
+    invalidateActiveRuns();
+    invalidateRunHistory();
+    refetchReviews();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prId]);
+
+  // Poll-driven fallback: usePrActiveRuns (reviewRunning) already polls every
+  // 4s regardless of which tab is mounted, unlike the SSE-driven RunStatus
+  // it's paired with below — so a run that completes while the user is on
+  // Overview/Files-changed (Findings tab, and RunStatus with it, unmounted)
+  // still gets its results refreshed within ~4s instead of staying stale
+  // until a full reload. Harmless overlap with the SSE-driven onRunDone below
+  // when both observe the same completion.
+  const prevReviewRunningRef = React.useRef(false);
+  React.useEffect(() => {
+    if (prevReviewRunningRef.current && !reviewRunning) handleRunSettled();
+    prevReviewRunningRef.current = reviewRunning;
+  }, [reviewRunning, handleRunSettled]);
+
   const tab = search.get("tab") ?? "overview";
   const traceRunId = search.get("trace");
   const setParam = (key: string, val: string | null) => {
@@ -137,6 +162,7 @@ export default function PRDetailPage() {
         prId={prId}
         tab={tab}
         findingsCount={findingsCount}
+        reviewRunning={reviewRunning}
         githubUrl={repoFullName ? githubPrUrl(repoFullName, pr.number) : null}
         onSetTab={setTab}
         onRunStart={() => setTab("findings")}
@@ -172,11 +198,7 @@ export default function PRDetailPage() {
               if (window.confirm("Delete this run from history? (its logs are removed too)"))
                 deleteRun.mutate(id);
             }}
-            onRunDone={() => {
-              invalidateActiveRuns();
-              invalidateRunHistory();
-              refetchReviews();
-            }}
+            onRunDone={handleRunSettled}
             onViewInDiff={handleViewInDiff}
           />
         )}
