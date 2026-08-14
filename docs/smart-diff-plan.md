@@ -1,6 +1,6 @@
 # Smart Diff — classifier + route + `SmartDiffViewer`
 
-**Status:** in progress — Phases 1-5 implemented and tested. Phase 1
+**Status:** done — all 6 phases implemented and tested. Phase 1
 (classifier) + Phase 2 (`GET /pulls/:id/smart-diff`):
 `server/src/modules/smart-diff/{constants,classifier,service}.ts`, contract
 change in both `brief.ts` copies, unit + `.it.test.ts` suites green, manually
@@ -28,7 +28,56 @@ computes, not a second "latest batch" query), wired through
 `FileCard` (a header Chip + an open-state "What this does:" text block).
 Server unit (303) + integration (70, incl. a new Phase 5 case) green,
 migration applied to local dev Postgres; client typecheck + full suite
-(141/141, incl. 3 new Phase 5 cases) green. Phase 6 not started.
+(141/141, incl. 3 new Phase 5 cases) green.
+
+Phase 6 (`split_suggestion` — import-graph clustering): closed an
+architectural gap the plan text didn't account for — `RepoIntel.getEdges`
+was internal to `repo-intel/repository.ts`, not on the public `RepoIntel`
+port, so `smart-diff/service.ts` couldn't reach it per `onion-architecture`.
+Added `RepoIntel.getFileEdges(repoId)` to the port interface
+(`server/src/modules/repo-intel/types.ts`), implemented in
+`RepoIntelService` as a thin passthrough to the existing (unreimplemented)
+`this.repo.getEdges` (`server/src/modules/repo-intel/service.ts`), and added
+the same method (returning `[]`) to `conventions.it.test.ts`'s `FakeRepoIntel`
+— the only other `RepoIntel` implementer in the codebase; no `MockRepoIntel`
+exists in `src/adapters/mocks.ts`. New pure function
+`server/src/modules/smart-diff/split.ts` (`computeProposedSplits`) — a
+hand-rolled BFS over an adjacency map (neither `graphology` nor
+`graphology-metrics` ships a components algorithm; confirmed via
+`repo-intel/pipeline/rank.ts`, PageRank only), weakly-connected components
+over the induced subgraph of changed `core` files, named by common directory
+prefix or `"Split N"` fallback, wired into `SmartDiffService.getSmartDiff`
+(replacing the hardcoded `[]`). **Reviewed and corrected after the first
+implementation pass:** the plan's point 5 ("no special-casing singletons —
+a `core` file with zero edges still becomes its own split") and point 6
+("degrades to `proposed_splits: []` when repo-intel is unavailable/
+unindexed") are only reconcilable at the SERVICE layer, not inside
+`split.ts` itself — a bare empty `edges` array can't tell "no repo-intel
+data at all" apart from "data exists but these files are genuinely
+unconnected." Fixed by gating the call in `SmartDiffService`: `edges.length
+> 0` (the repo's WHOLE, unfiltered edge set) decides whether to run
+`computeProposedSplits` at all; a genuinely-indexed repo where this PR's
+`core` files happen to be disconnected still gets real singleton splits
+(point 5), while an unindexed repo now correctly shows no banner content at
+all instead of one noisy "Split N" Chip per changed file (point 6).
+`split.ts` itself is unchanged — it still always singleton-izes a
+disconnected node when actually given one; the distinction lives entirely
+in whether the caller invokes it. Two pre-existing Phase 2 integration
+assertions (seeding no `file_edges` at all — the "no data" case) were
+corrected back to `proposed_splits: []`; the dedicated Phase 6 test (which
+does seed real `file_edges`) already asserted the correct real-singleton-
+plus-real-cluster output and needed no change. Frontend: `SmartDiffViewer` gained a `too_big` banner with one clickable
+`Chip` per proposed split (click toggles a `highlightedSplit` local state;
+clicking the same Chip again clears it) and `FileCard` gained an additive
+`dimmed?: boolean` prop (opacity reduction, no-op when omitted, same pattern
+as its other Smart-Diff props from Phases 3/5). Server unit (309, +6 new
+`smart-diff-split.test.ts` cases) + integration (71, +1 new Phase 6 wiring
+case in `smart-diff-service.it.test.ts`) green; client typecheck + full
+suite (145/145, +4 new Phase 6 `SmartDiffViewer.test.tsx` cases) green.
+**Not done as part of this pass** (out of implementer scope, deferred to the
+review/demo step): the plan's own manual/browser verification step (open a
+large indexed-repo PR, confirm the banner + click-to-dim in a real browser)
+and the acceptance criteria's demo video.
 
 ## Context
 

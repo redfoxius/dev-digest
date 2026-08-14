@@ -202,6 +202,31 @@ workflow and quality bar.
   effect isn't enough.
   (`client/src/components/diff-viewer/FileCard/FileCard.tsx:59-73`)
 
+- 2026-08-14 — `messages/en/prReview.json`'s `smartDiff.largeTitle`/
+  `smartDiff.largeBody` keys ("This PR is large ({lines} changed lines)" /
+  "Consider splitting it into smaller, focused PRs for easier review:")
+  already existed, unused, before Phase 6 of `docs/smart-diff-plan.md` wrote
+  its `split_suggestion` banner — pre-authored in an earlier phase for
+  exactly this banner and sitting dead until now. Confirms the 2026-08-07
+  entry below ("grep `messages/en/` for a matching namespace before writing
+  new copy") generalizes past whole-namespace files to individual pre-written
+  keys within an already-used namespace too.
+  (`client/messages/en/prReview.json:60-61`,
+  `client/src/components/diff-viewer/SmartDiffViewer/SmartDiffViewer.tsx`)
+
+- 2026-08-14 — `FileCard`'s new `dimmed?: boolean` prop (Phase 6's
+  split-suggestion highlight) followed the same additive/no-op-when-omitted
+  shape as every other Smart-Diff prop added to this component across Phases
+  3/5 (`defaultOpen`, `scrollToLine`, `findingSeverityByLine`, `headerRight`,
+  `pseudocodeSummary`) — reduced opacity via an inline style plus a
+  `data-dimmed="true"` attribute (omitted entirely when `false`) so RTL tests
+  can assert it via `toHaveAttribute` without a real layout engine, the same
+  attribute-for-testability convention already used by `data-line`/`data-file`
+  elsewhere in this component tree. Worth reusing this exact "no-op prop +
+  presence/absence data-attribute" shape for the next additive visual-state
+  prop on a shared diff-viewer component.
+  (`client/src/components/diff-viewer/FileCard/FileCard.tsx:66,109,112`)
+
 ## Tool & Library Notes
 
 - 2026-08-14 — `SeverityBadge`'s `compact` variant renders icon-only, no text

@@ -225,7 +225,13 @@ d('SmartDiffService.getSmartDiff — real DB-backed wiring (Testcontainers pg)',
       expect(utilTs.findings_count).toBe(0);
       expect(utilTs.finding_lines).toEqual([]);
 
-      // ---- split_suggestion (minimal this phase) --------------------------
+      // ---- split_suggestion (Phase 6 — real clustering). No `file_edges`
+      // seeded for this repo at all, so `SmartDiffService` treats it as "no
+      // repo-intel data" and degrades to `[]` — NOT one singleton split per
+      // `core` file. The singleton rule (Phase 6 point 5) only applies once
+      // the repo genuinely has edge data and a specific file happens to have
+      // none *within this PR's core-file set* (covered by the dedicated
+      // Phase 6 clustering test below, which does seed `file_edges`).
       expect(result.split_suggestion.total_lines).toBe(40 + 40 + 2);
       expect(result.split_suggestion.proposed_splits).toEqual([]);
       expect(result.split_suggestion.too_big).toBe(false);
@@ -255,7 +261,13 @@ d('SmartDiffService.getSmartDiff — real DB-backed wiring (Testcontainers pg)',
         ],
       },
     ]);
-    expect(result.split_suggestion).toEqual({ too_big: false, total_lines: 5, proposed_splits: [] });
+    // Phase 6: no `file_edges` seeded for this repo at all — no repo-intel
+    // data, degrades to `[]`, not a singleton split for the one core file.
+    expect(result.split_suggestion).toEqual({
+      too_big: false,
+      total_lines: 5,
+      proposed_splits: [],
+    });
   });
 
   it(
@@ -309,6 +321,33 @@ d('SmartDiffService.getSmartDiff — real DB-backed wiring (Testcontainers pg)',
 
       expect(serviceTs.pseudocode_summary).toBe('Handles the core service logic for this PR.');
       expect(otherTs.pseudocode_summary).toBeNull();
+    },
+  );
+
+  it(
+    'wires real file_edges rows (via the new RepoIntel.getFileEdges port method) through ' +
+      "classifyFile's core files into a non-empty proposed_splits (Phase 6)",
+    async () => {
+      const { repo, pr } = await setupRepoAndPr(pg.handle.db, workspaceId, 904);
+      await pg.handle.db.insert(t.prFiles).values([
+        { prId: pr.id, path: 'src/api/handler.ts', additions: 10, deletions: 0 },
+        { prId: pr.id, path: 'src/api/router.ts', additions: 5, deletions: 0 },
+        { prId: pr.id, path: 'src/other/isolated.ts', additions: 3, deletions: 0 },
+        // wiring-role file — must be excluded from clustering entirely, even
+        // though it has a real edge to a core file below.
+        { prId: pr.id, path: 'src/index.ts', additions: 2, deletions: 0 },
+      ]);
+      await pg.handle.db.insert(t.fileEdges).values([
+        { repoId: repo.id, fromFile: 'src/api/handler.ts', toFile: 'src/api/router.ts' },
+        { repoId: repo.id, fromFile: 'src/index.ts', toFile: 'src/api/handler.ts' },
+      ]);
+
+      const result = await service.getSmartDiff(workspaceId, pr.id);
+
+      expect(result.split_suggestion.proposed_splits).toEqual([
+        { name: 'src/api', files: ['src/api/handler.ts', 'src/api/router.ts'] },
+        { name: 'src/other', files: ['src/other/isolated.ts'] },
+      ]);
     },
   );
 
