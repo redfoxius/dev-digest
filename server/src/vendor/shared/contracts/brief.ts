@@ -1,9 +1,30 @@
 import { z } from 'zod';
+import { Severity } from './findings.js';
 
 /**
  * PR Brief building blocks: Intent, Blast radius, Risks, PR History,
  * Smart Diff. Composed into PrBrief.
  */
+
+// ---- Risks ----
+// Declared before Intent — Intent.risks references Risk, and these are
+// `const` object literals evaluated at module-load time in file order.
+export const RiskSeverity = z.enum(['high', 'medium', 'low']);
+export type RiskSeverity = z.infer<typeof RiskSeverity>;
+
+export const Risk = z.object({
+  kind: z.string(),
+  title: z.string(),
+  explanation: z.string(),
+  severity: RiskSeverity,
+  file_refs: z.array(z.string()),
+});
+export type Risk = z.infer<typeof Risk>;
+
+export const Risks = z.object({
+  risks: z.array(Risk),
+});
+export type Risks = z.infer<typeof Risks>;
 
 // ---- Intent ----
 /** How strongly the derivation is backed by real signal — a closed enum so
@@ -21,6 +42,9 @@ export const Intent = z.object({
   evidence_tier: EvidenceTier,
   /** Audit trail of resolved (and explicitly-failed) data sources. */
   sources: z.array(z.string()),
+  /** Notable risk areas surfaced by the same classifier call — human-facing
+   *  PR-brief concern, never fed back into the reviewer prompt. */
+  risks: z.array(Risk),
 });
 export type Intent = z.infer<typeof Intent>;
 
@@ -54,24 +78,6 @@ export const BlastRadius = z.object({
 });
 export type BlastRadius = z.infer<typeof BlastRadius>;
 
-// ---- Risks ----
-export const RiskSeverity = z.enum(['high', 'medium', 'low']);
-export type RiskSeverity = z.infer<typeof RiskSeverity>;
-
-export const Risk = z.object({
-  kind: z.string(),
-  title: z.string(),
-  explanation: z.string(),
-  severity: RiskSeverity,
-  file_refs: z.array(z.string()),
-});
-export type Risk = z.infer<typeof Risk>;
-
-export const Risks = z.object({
-  risks: z.array(Risk),
-});
-export type Risks = z.infer<typeof Risks>;
-
 // ---- PR History ----
 export const PrHistoryItem = z.object({
   pr_number: z.number().int(),
@@ -97,7 +103,13 @@ export const SmartDiffFile = z.object({
   pseudocode_summary: z.string().nullish(),
   additions: z.number().int(),
   deletions: z.number().int(),
-  finding_lines: z.array(z.number().int()),
+  /** One entry per highlighted line — can outnumber `findings_count` once a
+   * single finding's `start_line..end_line` range is expanded; where two
+   * findings overlap on a line, the WORSE severity wins. */
+  finding_lines: z.array(z.object({ line: z.number().int(), severity: Severity })),
+  /** Count of distinct findings touching the file (unexpanded) — the "N
+   * findings" badge must use this, never `finding_lines.length`. */
+  findings_count: z.number().int(),
 });
 export type SmartDiffFile = z.infer<typeof SmartDiffFile>;
 

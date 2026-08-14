@@ -654,4 +654,90 @@ d('A2 reviews + agents (Testcontainers pg)', () => {
 
     await app.close();
   });
+
+  it('Risk Areas (Phase 1): a real derive() run persists risks, filtered against the diff file list, with exactly one LLM call', async () => {
+    // reviewRepo cannot be overridden via ContainerOverrides — the only way
+    // to exercise the REAL IntentDeriverService.derive() is to omit
+    // `intentDeriver` from overrides and drive it through a real LLM mock
+    // instead of MockIntentDeriver (docs/intent-smartdiff-improvements.md,
+    // Phase 1's "Server test suite — correction to the doc's original sketch").
+    const mockLlm = new MockLLMProvider('openai', {
+      structuredBySchema: {
+        IntentDerivation: {
+          intent: 'Add rate limiting to public API endpoints.',
+          in_scope: ['Rate limiter middleware'],
+          out_of_scope: [],
+          confidence: 0.8,
+          risks: [
+            {
+              kind: 'security',
+              title: 'Auth surface touched',
+              explanation: 'Touches request handling near auth-sensitive config.',
+              severity: 'high',
+              // one real diff file (src/config.ts) + one path NOT in the
+              // diff's file list — filterRiskFileRefs must drop the latter
+              // and keep the risk (partial match kept).
+              file_refs: ['src/config.ts', 'src/not-in-diff.ts'],
+            },
+            {
+              kind: 'test_gap',
+              title: 'No tests added',
+              explanation: 'No matching test file was touched.',
+              severity: 'medium',
+              file_refs: [],
+            },
+            {
+              kind: 'dependency',
+              title: 'Hallucinated file risk',
+              explanation: 'Cites a file that does not exist in this diff at all.',
+              severity: 'low',
+              file_refs: ['src/totally-invented.ts'],
+            },
+          ],
+        },
+      },
+    });
+
+    const app = await buildApp({
+      config: config(),
+      db: pg.handle.db,
+      overrides: {
+        embedder: new MockEmbedder(),
+        // NOT MockIntentDeriver — omitting this lets the real
+        // IntentDeriverService run against real Postgres. Keyed by
+        // 'openrouter', not 'openai' — `review_intent`'s FeatureModel
+        // defaultProvider is 'openrouter' (platform.ts:55); omitting this
+        // override would silently fall through to the REAL OpenRouter
+        // adapter and make a genuine, billed network call (confirmed live
+        // during this session — see server/INSIGHTS.md).
+        git: new MockGitClient({ diff: DIFF }),
+        llm: { openrouter: mockLlm },
+      },
+    });
+    const { pr } = await setupRepoAndPr(pg.handle.db, workspaceId);
+
+    const derived = await app.inject({ method: 'POST', url: `/pulls/${pr.id}/intent/derive` });
+    expect(derived.statusCode).toBe(200);
+
+    const fetched = await app.inject({ method: 'GET', url: `/pulls/${pr.id}/intent` });
+    expect(fetched.statusCode).toBe(200);
+    const intent = fetched.json();
+    expect(intent.pr_id).toBe(pr.id);
+
+    // The diff's only file is src/config.ts (setupRepoAndPr's prFiles seed) —
+    // filterRiskFileRefs keeps: the partial-match risk (only the real path
+    // survives), the no-file_refs risk (always valid), and drops the
+    // all-hallucinated-path risk entirely.
+    expect(intent.risks).toHaveLength(2);
+    const authRisk = intent.risks.find((r: { kind: string }) => r.kind === 'security');
+    expect(authRisk.file_refs).toEqual(['src/config.ts']);
+    const testGapRisk = intent.risks.find((r: { kind: string }) => r.kind === 'test_gap');
+    expect(testGapRisk.file_refs).toEqual([]);
+    expect(intent.risks.some((r: { kind: string }) => r.kind === 'dependency')).toBe(false);
+
+    // Exactly one completeStructured call — no second LLM call introduced.
+    expect(mockLlm.calls.filter((c) => c.method === 'completeStructured')).toHaveLength(1);
+
+    await app.close();
+  });
 });

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { Provider } from './knowledge.js';
+import { Verdict } from './findings.js';
 
 /**
  * Platform / scaffolding DTOs owned by F1:
@@ -196,6 +197,9 @@ export const PrMeta = z.object({
       suggestion: z.number().int(),
     })
     .nullish(),
+  // Worst verdict across the PR's LAST review action's agents (same batch as
+  // latest_run_cost_usd/latest_review_ids); null/absent until reviewed.
+  verdict: Verdict.nullish(),
 });
 export type PrMeta = z.infer<typeof PrMeta>;
 

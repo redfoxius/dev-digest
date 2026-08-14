@@ -22,6 +22,7 @@ import { useActiveRepo, useRepoNotFound } from "../../../../../lib/repo-context"
 import { ApiError } from "../../../../../lib/api";
 import { githubPrUrl } from "../../../../../lib/github-urls";
 import type { FindingRecord } from "@devdigest/shared";
+import type { ScrollTarget } from "../../../../../components/diff-viewer";
 
 export default function PRDetailPage() {
   const params = useParams<{ repoId: string; number: string }>();
@@ -57,6 +58,31 @@ export default function PRDetailPage() {
     if (prId) qc.invalidateQueries({ queryKey: ["pr-runs", prId] });
   };
 
+  // Fires on every run-batch completion, regardless of which run finished it
+  // (SSE, from RunStatus while the Findings tab is mounted) or which tab is
+  // currently active (the poll-driven fallback below). usePrReviews has no
+  // refetchInterval of its own — this is the only thing that keeps its
+  // results fresh, so both paths must converge here.
+  const handleRunSettled = React.useCallback(() => {
+    invalidateActiveRuns();
+    invalidateRunHistory();
+    refetchReviews();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prId]);
+
+  // Poll-driven fallback: usePrActiveRuns (reviewRunning) already polls every
+  // 4s regardless of which tab is mounted, unlike the SSE-driven RunStatus
+  // it's paired with below — so a run that completes while the user is on
+  // Overview/Files-changed (Findings tab, and RunStatus with it, unmounted)
+  // still gets its results refreshed within ~4s instead of staying stale
+  // until a full reload. Harmless overlap with the SSE-driven onRunDone below
+  // when both observe the same completion.
+  const prevReviewRunningRef = React.useRef(false);
+  React.useEffect(() => {
+    if (prevReviewRunningRef.current && !reviewRunning) handleRunSettled();
+    prevReviewRunningRef.current = reviewRunning;
+  }, [reviewRunning, handleRunSettled]);
+
   const tab = search.get("tab") ?? "overview";
   const traceRunId = search.get("trace");
   const setParam = (key: string, val: string | null) => {
@@ -66,6 +92,15 @@ export default function PRDetailPage() {
     router.replace(`/repos/${repoId}/pulls/${number}${sp.toString() ? `?${sp.toString()}` : ""}`);
   };
   const setTab = (t: string) => setParam("tab", t);
+
+  // "View in diff" (Findings tab → Files-changed tab). nonce is bumped on
+  // every request so a re-click of the same {file, line} still re-fires the
+  // scroll even though DiffTab fully unmounts/remounts between tab switches.
+  const [diffScrollTarget, setDiffScrollTarget] = React.useState<ScrollTarget | null>(null);
+  function handleViewInDiff(file: string, line: number) {
+    setDiffScrollTarget((prev) => ({ path: file, line, nonce: (prev?.nonce ?? 0) + 1 }));
+    setTab("diff");
+  }
 
   // Reviews come newest-first; each is its own run (grouped into accordions).
   const runs = reviews ?? [];
@@ -127,6 +162,7 @@ export default function PRDetailPage() {
         prId={prId}
         tab={tab}
         findingsCount={findingsCount}
+        reviewRunning={reviewRunning}
         githubUrl={repoFullName ? githubPrUrl(repoFullName, pr.number) : null}
         onSetTab={setTab}
         onRunStart={() => setTab("findings")}
@@ -134,7 +170,16 @@ export default function PRDetailPage() {
       />
 
       <div style={{ padding: "24px 32px 44px", display: "flex", flexDirection: "column", gap: 24, maxWidth: 1080, margin: "0 auto" }}>
-        {tab === "overview" && <OverviewTab prBody={pr.body} prId={prId} />}
+        {tab === "overview" && (
+          <OverviewTab
+            prBody={pr.body}
+            prId={prId}
+            verdict={pr.verdict}
+            score={pr.score}
+            findings={pr.findings}
+            latestRunCostUsd={pr.latest_run_cost_usd}
+          />
+        )}
 
         {tab === "findings" && (
           <FindingsTab
@@ -153,11 +198,8 @@ export default function PRDetailPage() {
               if (window.confirm("Delete this run from history? (its logs are removed too)"))
                 deleteRun.mutate(id);
             }}
-            onRunDone={() => {
-              invalidateActiveRuns();
-              invalidateRunHistory();
-              refetchReviews();
-            }}
+            onRunDone={handleRunSettled}
+            onViewInDiff={handleViewInDiff}
           />
         )}
 
@@ -167,6 +209,7 @@ export default function PRDetailPage() {
             filesCount={pr.files_count}
             files={pr.files}
             canComment={pr.status === "open"}
+            scrollTarget={diffScrollTarget}
           />
         )}
       </div>

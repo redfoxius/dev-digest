@@ -8,6 +8,7 @@ import React from "react";
 import { useTranslations } from "next-intl";
 import {
   Icon,
+  IconBtn,
   SeverityBadge,
   CategoryTag,
   MonoLink,
@@ -31,6 +32,7 @@ export function FindingCard({
   pending,
   repoFullName,
   headSha,
+  onViewInDiff,
 }: {
   f: FindingRecord;
   focused?: boolean;
@@ -39,6 +41,10 @@ export function FindingCard({
   pending?: boolean;
   repoFullName?: string | null;
   headSha?: string | null;
+  /** "View in diff" affordance, alongside the existing GitHub deep-link —
+   *  switches to Files-changed and scrolls to this finding's file:line.
+   *  Omitted → no icon button rendered (additive/no-op). */
+  onViewInDiff?: (file: string, line: number) => void;
 }) {
   const t = useTranslations("prReview");
   const [expanded, setExpanded] = React.useState(defaultExpanded ?? false);
@@ -68,6 +74,16 @@ export function FindingCard({
             <MonoLink href={fileHref}>
               {f.file}:{lineLabel(f)}
             </MonoLink>
+            {onViewInDiff && (
+              <span onClick={(e) => e.stopPropagation()} style={{ display: "inline-flex" }}>
+                <IconBtn
+                  icon="Code"
+                  label={t("finding.viewInDiff")}
+                  size={20}
+                  onClick={() => onViewInDiff(f.file, f.start_line)}
+                />
+              </span>
+            )}
             <ConfidenceNum value={f.confidence} />
           </div>
         </div>

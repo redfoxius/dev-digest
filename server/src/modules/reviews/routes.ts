@@ -1,11 +1,12 @@
 import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
-import { RunRequest, PrIntentRecord } from '@devdigest/shared';
+import { RunRequest, PrIntentRecord, SmartDiff } from '@devdigest/shared';
 import type { RunEvent } from '@devdigest/shared';
 import { getContext } from '../_shared/context.js';
 import { IdParams } from '../_shared/schemas.js';
 import { NotFoundError } from '../../platform/errors.js';
 import { ReviewService } from './service.js';
+import { SmartDiffService } from '../smart-diff/service.js';
 
 /**
  * reviews module.
@@ -13,6 +14,7 @@ import { ReviewService } from './service.js';
  *   GET    /runs/:id/events                            → SSE stream of RunEvent (replay-first)
  *   GET    /runs/:id/trace                             → the single-document RunTrace
  *   GET    /pulls/:id/reviews                          → persisted reviews + findings for a PR
+ *   GET    /pulls/:id/smart-diff                        → deterministic Smart Diff (Phase 2)
  *   POST   /findings/:id/(accept|dismiss)              → finding actions
  */
 const FINDING_ACTIONS = ['accept', 'dismiss'] as const;
@@ -20,6 +22,7 @@ export default async function reviewsRoutes(appBase: FastifyInstance) {
   const app = appBase.withTypeProvider<ZodTypeProvider>();
   const { container } = app;
   const service = new ReviewService(container);
+  const smartDiffService = new SmartDiffService(container);
 
   // ---- Run a review (manual trigger) -------------------------------
   // Tight per-route limit: each call can fan out to expensive LLM runs.
@@ -130,6 +133,18 @@ export default async function reviewsRoutes(appBase: FastifyInstance) {
     const { workspaceId } = await getContext(container, req);
     return service.reviewsForPull(workspaceId, req.params.id);
   });
+
+  // ---- Smart Diff (Phase 2) ------------------------------------------------
+  // Deterministic, no-LLM: classifies the PR's files (core/wiring/boilerplate)
+  // and badges them with the latest review batch's (non-dismissed) findings.
+  app.get(
+    '/pulls/:id/smart-diff',
+    { schema: { params: IdParams, response: { 200: SmartDiff } } },
+    async (req) => {
+      const { workspaceId } = await getContext(container, req);
+      return smartDiffService.getSmartDiff(workspaceId, req.params.id);
+    },
+  );
 
   // ---- Intent Layer ---------------------------------------------------------
   // GET  /pulls/:id/intent         → persisted PrIntentRecord | null (never derived)

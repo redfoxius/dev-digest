@@ -13,9 +13,130 @@ workflow and quality bar.
 
 ## What Works
 
+- 2026-08-14 — When a manual/browser verification step needs real data (here:
+  Phase 3 of `docs/intent-smartdiff-improvements.md` needed a PR whose derived
+  intent has populated `risks` to screenshot the redesigned `IntentCard`) but
+  no such row exists yet in the local dev DB and running a real
+  `POST /pulls/:id/intent/derive` would trigger a billed LLM call, a
+  temporary direct `UPDATE pr_intent SET risks = '[...]'::jsonb WHERE pr_id =
+  '<id>'` against the dev Postgres container (then reverted back to `'[]'`
+  right after the screenshot) is a legitimate zero-cost substitute — it
+  exercises the exact same render path (`GET /pulls/:id/intent` → `IntentCard`)
+  without invoking the LLM at all. Confirm the row's pre-edit value first
+  (`select risks from pr_intent where pr_id = ...`) so the revert restores the
+  exact prior state, not just an assumed default.
+  (`client/src/app/repos/[repoId]/pulls/[number]/_components/OverviewTab/_components/IntentCard/IntentCard.tsx`)
+
+- 2026-08-14 — Fixed the nonce-collision gap the "What Doesn't Work" entry
+  below originally left unfixed: `SmartDiffViewer`'s internal/external
+  scroll-target merge remaps each source's raw nonce to a disjoint parity
+  (`internalScrollTarget.nonce * 2` — always even; `externalScrollTarget.nonce
+  * 2 + 1` — always odd) at the point the merged `scrollToLine` is built for
+  `FileCard`. Two independent counters that both start at 1 can now never
+  produce the same merged value, by construction — no shared state, no new
+  effects, no mount-timing risk (an earlier design considered a shared
+  `useEffect`-bumped counter, rejected because it could double-fire
+  `FileCard`'s scroll on initial mount). Reusable pattern: when merging two
+  independently-sourced monotonic ids into one value a child keys an effect
+  on, remap each source's id into disjoint numeric partitions (parity, or
+  distinct offset ranges) rather than trying to synchronize/share a single
+  counter across the sources.
+  (`client/src/components/diff-viewer/SmartDiffViewer/SmartDiffViewer.tsx:170-186`;
+  regression test: `SmartDiffViewer.test.tsx` — "regression: internal and
+  external both at raw nonce 1 (the exact collision case) still re-fires
+  the scroll")
+
 ## What Doesn't Work
 
+- 2026-08-14 — `usePrReviews` (`client/src/lib/hooks/reviews.ts:52-58`) had
+  NO `refetchInterval`, unlike its siblings `usePrActiveRuns`/`usePrRuns`
+  which both self-poll every 4s while anything is active. The only thing
+  that ever refreshed it was `page.tsx`'s `onRunDone` callback, wired
+  through `FindingsTab` → `RunStatus`'s own local SSE `running` transition
+  — observable ONLY while `RunStatus` was mounted, i.e. only while the
+  Findings tab was selected (it fully unmounts on tab switch, per
+  `{tab === "findings" && <FindingsTab/>}`). Real, reported bug: start a
+  review, switch to Overview/Files-changed before it finishes, it
+  completes while unmounted, the reviews list stays stale until a full
+  reload. Fixed by adding a page-level edge-triggered `useEffect` on
+  `reviewRunning` (already tab-independent, since `usePrActiveRuns` lives
+  in `page.tsx` which never unmounts) that calls the same handler the
+  SSE path already did — two convergent paths (SSE: fast, tab-gated; poll:
+  ~4s lag, tab-independent) to one `handleRunSettled`. Generalizable:
+  "only refreshes via a callback wired to a component's own local state
+  transition" is a bug waiting to happen the moment that component can
+  unmount while the underlying condition changes — wire the refresh to
+  page-level, always-mounted, server-polled state instead. Verified live
+  against a real ~110s agent run (see Tool & Library Notes below).
+  (`client/src/app/repos/[repoId]/pulls/[number]/page.tsx` —
+  `handleRunSettled` + the `prevReviewRunningRef` effect;
+  `docs/run-status-plan.md`)
+
+- 2026-08-14 — Phase 4's `SmartDiffViewer` scroll-target merge
+  (`internalScrollTarget ?? externalScrollTarget`, one per-file `nonce`
+  passed through to `FileCard`) has a narrow, unfixed nonce-collision gap:
+  internal (findings-Chip click) and external ("view in diff" from the
+  Findings tab) each keep their OWN independent nonce counter, both
+  starting at 1. If a file has never had an internal click, and an
+  external target lands on it, the user's FIRST-EVER internal click on
+  that same file can produce a nonce that numerically equals the external
+  target's nonce — `FileCard`'s re-scroll effect is keyed only on
+  `scrollToLine.nonce` (see the 2026-08-14 two-effect entry below), so it
+  won't re-fire even though the winning line changed. Worst case: the user
+  has to click the Chip twice. Documented inline as a code comment at the
+  merge site; not fixed (would need a combined/offset nonce space across
+  both sources). Flag if this area is revisited.
+  (`client/src/components/diff-viewer/SmartDiffViewer/SmartDiffViewer.tsx`
+  — the `scrollToLine = internalTarget ?? externalTarget` merge)
+  **FIXED 2026-08-14, same day** — see the "What Works" entry below; this
+  antipattern entry stays as the record of what was wrong, not deleted.
+
+- 2026-08-14 — First `SmartDiffViewer` draft rendered a file's "N findings"
+  `Chip` in a separate wrapper `<div>` stacked ABOVE `FileCard`, with its own
+  copy of `file.path` next to it — but `FileCard`'s own header
+  (`FileCard.tsx:95-97`, `s.filePath`) already renders that same path, so the
+  path visibly appeared TWICE per file. Caught during review, not by the test
+  suite — a test had actually been written asserting the duplication as
+  expected (`getAllByText(path).length).toBe(2)`), which normalizes a real
+  bug into "intended behavior" instead of catching it. Fixed by giving
+  `FileCard` a new `headerRight?: React.ReactNode` prop (rendered inside its
+  existing header row, with `stopPropagation` on its own click so it doesn't
+  also toggle the card's open/close) instead of a sibling wrapper — one path,
+  one row, matches "next to a file's path" the way the plan actually meant
+  it. Lesson: when a new composite view re-renders a field a child component
+  already owns (here, the path `FileCard` already shows), extend the child
+  with a slot prop rather than duplicating that field's markup one level up
+  — and don't let a test that merely describes current output substitute for
+  checking whether that output is actually right.
+  (`client/src/components/diff-viewer/FileCard/FileCard.tsx` — `headerRight`,
+  `client/src/components/diff-viewer/SmartDiffViewer/SmartDiffViewer.tsx`)
+
 ## Codebase Patterns
+
+- 2026-08-14 — The small-pulsing-status-dot visual (7px circle,
+  `boxShadow: "0 0 0 3px var(--<color>-bg)"`, `animation: ddpulse 2s
+  ease-in-out infinite` — the `ddpulse` keyframe is already global in
+  `client/src/vendor/ui/styles.css:230`) is now established in TWO places:
+  its original use in `AutoTriggerStatus.tsx:29-35` (auto-review on/off),
+  and reused verbatim for the new "review running" pulse on the "Agent
+  runs" tab label (`TabDef.pulse`, `Tabs.tsx`). Reuse this exact
+  spec — don't invent a new pulsing-dot style — for the next
+  "small live-status indicator" need in this codebase.
+  (`client/src/vendor/ui/kit/Tabs.tsx`, `client/src/vendor/ui/kit/types.ts`
+  — `TabDef.pulse`; `client/src/vendor/ui/AutoTriggerStatus.tsx:29-35`)
+
+- 2026-08-14 — The `<span onClick={(e) => e.stopPropagation()}>` wrapper for
+  a small interactive element nested inside a bigger clickable row (first
+  established for `FileCard`'s `headerRight` slot, see the 2026-08-14
+  entry above) is now used a second time, independently, for
+  `FindingCard`'s new "View in diff" `IconBtn` — `s.metaRow` sits inside
+  `s.header`'s own row-level `onClick` toggle, same shape as `FileCard`.
+  Confirmed as the established idiom for this exact situation across two
+  unrelated component trees — reuse it directly for the next
+  small-interactive-element-inside-a-toggleable-row case rather than
+  re-deriving it.
+  (`client/src/app/repos/[repoId]/pulls/[number]/_components/FindingCard/FindingCard.tsx`
+  — the view-in-diff `IconBtn` wrapper)
 
 - 2026-08-06 — There is no shared `srOnly`/visually-hidden style utility in
   this codebase yet — a repo-wide grep for `sr-only`/`visually-hidden`/
@@ -161,7 +282,161 @@ workflow and quality bar.
   (`client/src/app/repos/[repoId]/pulls/[number]/_components/OverviewTab/OverviewTab.tsx`,
   `.../_components/IntentCard/IntentCard.tsx`)
 
+- 2026-08-14 — `FileCard`'s new `scrollToLine` prop (Smart Diff's "click a
+  finding badge, scroll to it") needs TWO separate `useEffect`s, not one —
+  unlike `ReviewRunAccordion`'s existing `targetRunId`/`targetNonce` precedent
+  (`ReviewRunAccordion.tsx:48-54`), which calls `setOpen(true)` then
+  `rootRef.current?.scrollIntoView(...)` in the SAME effect and works fine,
+  because `rootRef` there points at the header/container that's ALWAYS
+  mounted regardless of `open`. `FileCard`'s target line only exists in the
+  DOM once `open` is already `true` (its lines render behind `{open && (...)}`,
+  `FileCard.tsx:111`), so calling `containerRef.current?.querySelector(...)`
+  in the same tick as `setOpen(true)` queries a DOM that hasn't re-rendered
+  yet and silently finds nothing. Fix: one effect keyed on `scrollToLine.nonce`
+  that only calls `setOpen(true)`, a second effect keyed on
+  `[scrollToLine.nonce, open]` that does the actual querySelector +
+  `scrollIntoView` — the second effect's `open` dependency is what guarantees
+  it re-runs AFTER the DOM commit that made the line visible. Generalizable:
+  before copying a "force open + scroll into view" effect pattern to a new
+  component, check whether the scroll target is inside content that's
+  conditionally rendered on the same open flag being forced — if so, one
+  effect isn't enough.
+  (`client/src/components/diff-viewer/FileCard/FileCard.tsx:59-73`)
+
+- 2026-08-14 — `messages/en/prReview.json`'s `smartDiff.largeTitle`/
+  `smartDiff.largeBody` keys ("This PR is large ({lines} changed lines)" /
+  "Consider splitting it into smaller, focused PRs for easier review:")
+  already existed, unused, before Phase 6 of `docs/smart-diff-plan.md` wrote
+  its `split_suggestion` banner — pre-authored in an earlier phase for
+  exactly this banner and sitting dead until now. Confirms the 2026-08-07
+  entry below ("grep `messages/en/` for a matching namespace before writing
+  new copy") generalizes past whole-namespace files to individual pre-written
+  keys within an already-used namespace too.
+  (`client/messages/en/prReview.json:60-61`,
+  `client/src/components/diff-viewer/SmartDiffViewer/SmartDiffViewer.tsx`)
+
+- 2026-08-14 — `FileCard`'s new `dimmed?: boolean` prop (Phase 6's
+  split-suggestion highlight) followed the same additive/no-op-when-omitted
+  shape as every other Smart-Diff prop added to this component across Phases
+  3/5 (`defaultOpen`, `scrollToLine`, `findingSeverityByLine`, `headerRight`,
+  `pseudocodeSummary`) — reduced opacity via an inline style plus a
+  `data-dimmed="true"` attribute (omitted entirely when `false`) so RTL tests
+  can assert it via `toHaveAttribute` without a real layout engine, the same
+  attribute-for-testability convention already used by `data-line`/`data-file`
+  elsewhere in this component tree. Worth reusing this exact "no-op prop +
+  presence/absence data-attribute" shape for the next additive visual-state
+  prop on a shared diff-viewer component.
+  (`client/src/components/diff-viewer/FileCard/FileCard.tsx:66,109,112`)
+
 ## Tool & Library Notes
+
+- 2026-08-14 — A real agent review run (not mocked) on a TINY PR (86
+  changed lines, 3 files, single enabled agent) took ~110-165s end to end
+  across two live runs, dominated by two sequential real LLM calls: PR
+  intent derivation (a free-tier model, ~31s alone in one run) then the
+  actual review call (deepseek-v4-flash via OpenRouter, ~2min). Don't
+  assume a "quick" live-run manual/browser verification will finish in
+  under a minute — budget several minutes of real wall-clock wait (or poll
+  `GET /pulls/:id/runs/active`/`GET /runs/:id/events` directly rather than
+  guessing a fixed `waitForTimeout`) for any check that needs a real run to
+  actually complete.
+  (`docs/run-status-plan.md` — live verification section)
+
+- 2026-08-14 — Playwright is not a direct dependency of `client/` or the
+  repo root — `npx playwright --version` resolves fine (via a global/npx
+  cache), but `require('playwright')`/`import "playwright"` from a script
+  run inside `client/` fails with `MODULE_NOT_FOUND`, since it isn't on
+  any `node_modules` resolution path from there. For an ad hoc one-off
+  browser check outside `e2e/`'s own `agent-browser` harness (e.g.
+  verifying Phase 4's "view in diff" round trip against real dev data),
+  the working approach was a throwaway scratch project: `npm init -y &&
+  npm install playwright --no-save` in a scratch dir, then run the
+  script from there. `e2e/` itself uses Vercel `agent-browser` (CDP), a
+  different tool — see `e2e/agent-browser.json` — for its real
+  deterministic specs; this is only for a quick manual verification pass.
+
+- 2026-08-14 — `SectionLabel`'s (`src/vendor/ui/primitives/SectionLabel.tsx`)
+  visible text sits in a `<span>` that is a DIRECT CHILD of SectionLabel's
+  own top-level flex-row `<div>` — not of whatever wrapper the caller puts
+  SectionLabel inside. So when a caller wraps a second, nested `SectionLabel`
+  in its own divider wrapper (Phase 3's `<div style={s.subsection}><SectionLabel
+  icon="Shield">...</SectionLabel>...</div>`), an RTL test that needs the
+  actual divider wrapper element (not SectionLabel's own internal row div)
+  must call `.closest("div")` (reaches SectionLabel's own row) THEN
+  `.parentElement` (reaches the caller's wrapper) — a single `closest("div")`
+  stops one level too shallow. Same two-hop pattern would apply to `Badge`'s
+  span if a test ever needs Badge's own parent wrapper rather than the badge
+  itself (`Badge`'s text is a direct child of its own `<span>`, one hop
+  fewer, since Badge has no internal wrapper div).
+  (`client/src/vendor/ui/primitives/SectionLabel.tsx`,
+  `client/src/app/repos/[repoId]/pulls/[number]/_components/OverviewTab/_components/IntentCard/IntentCard.test.tsx`
+  — "wraps the evidence badge and the Risk Areas heading in their own,
+  separate subsection wrappers")
+
+- 2026-08-14 — `SeverityBadge`'s `compact` variant renders icon-only, no text
+  and no `aria-label` (`Badge.tsx:80` — `compact ? null : s.label`, nothing
+  else) — RTL has no accessible-name query that can distinguish CRITICAL vs
+  WARNING vs SUGGESTION badges rendered this way. Lucide icons DO carry a
+  stable `class="lucide lucide-<icon-name>"` (e.g. `lucide-triangle-alert`
+  for `AlertTriangle`/WARNING, `lucide-octagon-alert` for
+  `AlertOctagon`/CRITICAL), confirmed by rendering the icons directly via
+  `renderToStaticMarkup` — the only workable way to assert "this specific
+  line shows WARNING vs CRITICAL" in a test is
+  `container.querySelector('[data-line="N"] svg.lucide-<icon-class>')`, a
+  deliberate exception to "avoid `container.querySelector`" for lack of any
+  accessible alternative. Worth reusing this exact query shape for any future
+  per-line/per-cell compact-badge assertion.
+  (`client/src/vendor/ui/primitives/Badge.tsx:52-88`; exercised in
+  `client/src/components/diff-viewer/SmartDiffViewer/SmartDiffViewer.test.tsx`)
+
+- 2026-08-14 — `next-intl`'s `NextIntlClientProvider` throws `MISSING_MESSAGE`
+  for a namespace as soon as ANY descendant calls
+  `useTranslations("thatNamespace")`, even if the component under test never
+  actually renders the specific key that namespace would resolve — `FileCard`
+  unconditionally calls `useTranslations("shell")` (for its `noDiffText`
+  fallback, `FileCard.tsx:52`) even when every rendered file has real diff
+  content, so a test provider that only supplied `{ prReview: ... }` failed
+  before any assertion ran. When a new test wraps a component tree that
+  transitively includes `FileCard` (or anything else with its own
+  `useTranslations` call), pass EVERY namespace those descendants use, not
+  just the one directly under test — check each rendered child file, not
+  just the component being tested.
+  (`client/src/components/diff-viewer/FileCard/FileCard.tsx:52`,
+  `client/src/components/diff-viewer/SmartDiffViewer/SmartDiffViewer.test.tsx`)
+
+- 2026-08-14 — Smart Diff Phase 5 added a SECOND unconditional
+  `useTranslations` call to `FileCard` (`useTranslations("prReview")`, for the
+  "What this does:" label) alongside its pre-existing `useTranslations("shell")`
+  — confirming the 2026-08-14 entry above generalizes to "every namespace a
+  descendant unconditionally calls," not just one. This one broke a
+  pre-existing test that predates `FileCard` even having a `prReview`
+  dependency: `src/test/smoke.test.tsx`'s `DiffViewer` smoke test only
+  supplied `{ shell: ... }` and had been passing fine for months, but started
+  logging (not throwing — `next-intl`'s dev-mode `IntlError` for a MISSING
+  namespace is a console.error, not a thrown exception, so the test still
+  went green) a `MISSING_MESSAGE: Could not resolve 'prReview'` on every run.
+  A green test suite is not proof a `useTranslations` addition to a shared
+  component is namespace-complete — grep `stderr` in Vitest's own output
+  (not just the pass/fail count) after adding a new `useTranslations` call to
+  a component with existing consumers.
+  (`client/src/components/diff-viewer/FileCard/FileCard.tsx` — `tPrReview`,
+  `client/src/test/smoke.test.tsx`)
+
+- 2026-08-14 — RTL's `getByText` is SAFE to use with a regex against one half
+  of a "Label: value" string split across sibling nodes (e.g. `<div><strong>
+  What this does:</strong> {summary}</div>`), with NO ambiguous double-match,
+  because RTL's default `getNodeText` only concatenates a node's OWN DIRECT
+  text-node children — NOT full `node.textContent` (which would include the
+  `<strong>`'s nested text too). Verified empirically: `getByText(/What this
+  does:/)` matches only the `<strong>`, and `getByText(/Recomputes the
+  invoice/)` matches only the parent `<div>` (its own direct text nodes,
+  excluding the `<strong>` child) — no "multiple elements found" error either
+  way. Reusable pattern for any future "label prefix + dynamic value" render
+  that needs two independently-queryable assertions without a `data-testid`.
+  (`client/src/components/diff-viewer/FileCard/FileCard.tsx` —
+  `pseudocodeSummary` block; exercised in
+  `client/src/components/diff-viewer/SmartDiffViewer/SmartDiffViewer.test.tsx`
+  — "pseudocode_summary (Phase 5)")
 
 - 2026-08-06 — `Checkbox` (`src/vendor/ui/kit/Checkbox.tsx`) renders as a real
   `<button role="checkbox" aria-checked>` , not an `<input type="checkbox">` —
@@ -305,6 +580,35 @@ workflow and quality bar.
   `client/src/app/agents/_components/AgentCard/AgentCard.test.tsx`)
 
 ## Session Notes
+
+- 2026-08-14 — Implemented `docs/run-status-plan.md` end to end: fixed a
+  real reported bug (live run status "disappearing" on tab switch — really
+  `usePrReviews` going stale, see What Doesn't Work above), added a pulse
+  indicator on the "Agent runs" tab, and (server-side) `RunBus` eviction.
+  `pnpm typecheck` + full test suites (330 server, 180 client) green in
+  both packages. Verified live against a real, unmocked ~110s agent review
+  run via Playwright — confirmed the pulse dot's full lifecycle and,
+  critically, that the new review appears on the Findings tab with no page
+  reload after being away during completion (the actual reported bug).
+
+- 2026-08-14 — Implemented Phase 4 (final phase) of
+  `docs/intent-smartdiff-improvements.md` — Findings → Code Changes tab
+  navigation. `FileCard` needed zero changes (its `scrollToLine` contract
+  already covered everything); the work was entirely prop-threading a new
+  `ScrollTarget` type down two chains (`DiffTab` → `SmartDiffViewer`/
+  `DiffViewer` → `FileCard`; `page.tsx` → `FindingsTab` → `ReviewRunAccordion`
+  → `FindingsPanel` → `FindingCard`) plus the merge logic in
+  `SmartDiffViewer`. 23 new/changed tests across 5 files, all green;
+  `pnpm typecheck` clean. Verified the real round trip against PR #5 in the
+  local dev DB (6 real findings, already reviewed — no new LLM call) via a
+  scratch Playwright script: click → tab switch → correct FileCard
+  force-opened → correct line scrolled into viewport (confirmed via
+  `getBoundingClientRect`, not just RTL) → existing GitHub deep-link
+  unchanged. This session picked up mid-Phase-4 after a prior implementer
+  subagent hit an account-level API session limit partway through (had
+  already finished the `ScrollTarget` type + `DiffViewer.tsx` — steps 1-2 of
+  6 in the plan); the rest was completed directly rather than via a new
+  subagent, to avoid the same limit.
 
 - 2026-08-05 — Implemented `docs/findings-by-severity-plan.md` end-to-end
   (all 22 steps): server-side live per-severity findings aggregation on the

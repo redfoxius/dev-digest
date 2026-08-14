@@ -359,4 +359,5 @@ const DEFAULT_MOCK_INTENT: Intent = {
   confidence: 0.8,
   evidence_tier: 'direct',
   sources: ['pr_description', 'changed_paths', 'hunk_headers', 'branch_name'],
+  risks: [],
 };

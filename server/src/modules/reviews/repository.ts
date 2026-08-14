@@ -1,6 +1,6 @@
 import type { Db } from '../../db/client.js';
 import * as t from '../../db/schema.js';
-import type { Finding, Intent, RunSummary, RunTrace } from '@devdigest/shared';
+import type { Finding, FileSummary, Intent, RunSummary, RunTrace } from '@devdigest/shared';
 
 /**
  * A2 — review data-access. The ONLY layer touching the DB for the review
@@ -13,8 +13,8 @@ import type { Finding, Intent, RunSummary, RunTrace } from '@devdigest/shared';
  * composes them so its public API stays identical.
  */
 
-import type { FindingRow, PullRow } from '../../db/rows.js';
-export type { FindingRow, PullRow };
+import type { FindingRow, FileSummaryRow, PullRow } from '../../db/rows.js';
+export type { FindingRow, FileSummaryRow, PullRow };
 
 export type ReviewRow = typeof t.reviews.$inferSelect;
 
@@ -67,6 +67,13 @@ export class ReviewRepository {
     return reviewRepo.insertFindings(this.db, reviewId, findings);
   }
 
+  /** Persist a review's per-file summaries (`Review.file_summaries`) — a
+   *  byproduct of the same LLM call that produces `findings`. No-op on an
+   *  empty/absent list. */
+  insertFileSummaries(reviewId: string, summaries: FileSummary[]): Promise<FileSummaryRow[]> {
+    return reviewRepo.insertFileSummaries(this.db, reviewId, summaries);
+  }
+
   /** Reviews for a PR (newest first), each with its findings. */
   reviewsForPull(prId: string): Promise<{ review: ReviewRow; findings: FindingRow[] }[]> {
     return reviewRepo.reviewsForPull(this.db, prId);
@@ -74,6 +81,32 @@ export class ReviewRepository {
 
   getReview(reviewId: string): Promise<ReviewRow | undefined> {
     return reviewRepo.getReview(this.db, reviewId);
+  }
+
+  /** Findings + review-id set from the PR's latest review batch only
+   *  (dismissed excluded, accepted included) — used by Smart Diff (Phase 2)
+   *  to badge lines; `reviewIds` is reused as-is by Phase 5's
+   *  `getFileSummariesForReviews`, never recomputed. */
+  getLatestReviewBatchFindings(
+    prId: string,
+  ): Promise<{ reviewIds: string[]; findings: FindingRow[] }> {
+    return reviewRepo.getLatestReviewBatchFindings(this.db, prId);
+  }
+
+  /** File summaries for a set of review ids — scoped to the SAME
+   *  `reviewIds` `getLatestReviewBatchFindings` returned (Smart Diff,
+   *  Phase 5); no dismissed/accepted filtering (summaries have no such
+   *  state). */
+  getFileSummariesForReviews(reviewIds: string[]): Promise<FileSummaryRow[]> {
+    return reviewRepo.getFileSummariesForReviews(this.db, reviewIds);
+  }
+
+  /** Whole review rows for a set of review ids — a different read from
+   *  `getLatestReviewBatchFindings` (whole rows by id, no batch-key logic of
+   *  its own); used by the PR Brief banner (Phase 2) to derive score/cost/
+   *  verdict across a PR's latest review batch. */
+  getReviewsByIds(reviewIds: string[]): Promise<ReviewRow[]> {
+    return reviewRepo.getReviewsByIds(this.db, reviewIds);
   }
 
   /** In-flight runs for a PR (status='running') — the server-side source of

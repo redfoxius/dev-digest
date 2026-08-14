@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm';
 import { pgTable, uuid, text, integer, jsonb, timestamp, doublePrecision, boolean, check, index } from 'drizzle-orm/pg-core';
+import type { Risk } from '@devdigest/shared';
 import { now } from './_shared';
 import { workspaces } from './core';
 import { pullRequests } from './pulls';
@@ -68,6 +69,30 @@ export const findings = pgTable(
   }),
 );
 
+/**
+ * One-sentence-per-file "what this does" summary — Phase 5 of
+ * `docs/smart-diff-plan.md`. Same per-file grain as `findings` but simpler
+ * (no severity/line range): produced as a byproduct of the same LLM call
+ * that emits `findings` (`Review.file_summaries`), read by Smart Diff's
+ * `pseudocode_summary` field. Not every changed file necessarily gets a row
+ * — a file the model skipped just has none.
+ */
+export const reviewFileSummaries = pgTable(
+  'review_file_summaries',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    reviewId: uuid('review_id')
+      .notNull()
+      .references(() => reviews.id, { onDelete: 'cascade' }),
+    file: text('file').notNull(),
+    summary: text('summary').notNull(),
+  },
+  (t) => ({
+    // getFileSummariesForReviews (review.repo.ts) does an inArray lookup on review_id per Smart Diff read.
+    reviewIdIdx: index('review_file_summaries_review_id_idx').on(t.reviewId),
+  }),
+);
+
 export const prIntent = pgTable(
   'pr_intent',
   {
@@ -97,6 +122,11 @@ export const prIntent = pgTable(
      *  "spec_link_unreachable:https://...", "branch_name", "commit_messages",
      *  "changed_paths", "hunk_headers"]. */
     sources: jsonb('sources').$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+    /** Notable risk areas surfaced by the same classifier call (Phase 1,
+     *  docs/intent-smartdiff-improvements.md) — piggybacked on the existing
+     *  `review_intent` LLM call, never a second call. Defaults to `[]` for
+     *  the same NOT-NULL-safety reason as `sources` above. */
+    risks: jsonb('risks').$type<Risk[]>().notNull().default(sql`'[]'::jsonb`),
   },
   (t) => ({
     confidenceRange: check('pr_intent_confidence_range', sql`${t.confidence} >= 0 AND ${t.confidence} <= 1`),

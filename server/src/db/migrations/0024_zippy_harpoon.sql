@@ -1,0 +1,1 @@
+ALTER TABLE "pr_intent" ADD COLUMN "risks" jsonb DEFAULT '[]'::jsonb NOT NULL;

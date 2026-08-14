@@ -33,6 +33,7 @@ import type {
   BlastCallerRow,
   BlastChangedSymbol,
   BlastResult,
+  FileEdgeRow,
   FileRankRow,
   IndexResult,
   IndexState,
@@ -766,6 +767,17 @@ export class RepoIntelService implements RepoIntel {
       paths.push(chain);
     }
     return paths;
+  }
+
+  /**
+   * Raw import-graph edges for a repo (Phase 6 of docs/smart-diff-plan.md) —
+   * a thin passthrough to the repository's existing `getEdges` (the SAME
+   * query `getCriticalPaths` above already reads from, reused verbatim, not
+   * reimplemented). Callers cluster/filter the flat list themselves.
+   */
+  async getFileEdges(repoId: string): Promise<FileEdgeRow[]> {
+    if (!this.container.config.repoIntelEnabled) return [];
+    return this.repo.getEdges(repoId);
   }
 }
 

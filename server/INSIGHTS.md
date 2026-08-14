@@ -13,7 +13,76 @@ workflow and quality bar.
 
 ## What Works
 
+- 2026-08-14 — `RunBus.subscribe()` (`src/platform/sse.ts:63-68`) already
+  correctly replays the full buffered event history to a brand-new
+  subscriber before continuing live — confirmed live via `curl -N
+  /runs/:id/events` mid-run and again on a completed run. A client that
+  reconnects (e.g. after a component remount) does NOT need its own
+  replay/catch-up logic; the server already guarantees it sees everything
+  from the start. Worth checking this exists before assuming client-side
+  reconnect handling needs to solve replay itself.
+  (`server/src/platform/sse.ts:63-68`)
+
 ## What Doesn't Work
+
+- 2026-08-14 — `RunBus`'s `buffers`/`seq`/`completed` Maps
+  (`src/platform/sse.ts`) were never evicted — one entry accumulated per
+  run for the ENTIRE server process lifetime, despite a comment claiming
+  the buffer was kept only "briefly" for late subscribers. Fixed:
+  `complete()` now schedules a 15-minute eviction timer (with a
+  defensive clear-existing-timer-first guard in case `complete()` ever
+  fires twice for the same `runId`). Accepted, documented-not-fixed edge
+  case: a client reconnecting to `/runs/:id/events` for a run finished
+  >15 min ago gets a fresh empty buffer post-eviction and no `onDone`
+  signal (since `completed` no longer has that `runId`) — the SSE stream
+  hangs open instead of replaying-then-closing. Only reachable by
+  something explicitly re-opening a live-log stream for a long-finished
+  run; not fixed, would need the route to check `agent_runs.status` in
+  the DB before subscribing.
+  (`server/src/platform/sse.ts` — `EVICT_AFTER_MS`, `evictTimers`;
+  regression tests: `server/test/sse.test.ts`)
+
+- 2026-08-14 — Extends the 2026-08-09 "unwired `FeatureModelId` slot" /
+  "automatic Container-level capability" entries below: writing
+  `reviews.it.test.ts`'s Phase 1 Risk Areas case (the FIRST test anywhere to
+  exercise the real `IntentDeriverService.derive()`, not `MockIntentDeriver`
+  — `reviewRepo` has no `ContainerOverrides` field, so this is the only way
+  to get real Postgres coverage) with `overrides: { llm: { openai: mockLlm } }`
+  made a REAL, billed network call to OpenRouter instead of hitting the mock —
+  confirmed live via a debug `console.log` that printed a genuine
+  LLM-generated intent summary in place of the fixture. Root cause:
+  `review_intent`'s `FeatureModel.defaultProvider` is `'openrouter'`
+  (`contracts/platform.ts:55`), not `'openai'`, and `container.llm('openrouter')`
+  falls through to the real adapter + the dev machine's real
+  `~/.devdigest/secrets.json` `OPENROUTER_API_KEY` whenever the override map
+  doesn't have an `openrouter` key — regardless of what other provider keys
+  ARE overridden. Fixed by keying the override `llm: { openrouter: mockLlm }`
+  instead. Generalizable: before writing any new test that omits a mock for a
+  Container-derived capability (here: `intentDeriver`) to get "real" coverage,
+  check which provider that capability's `FeatureModelId` actually resolves to
+  (`resolveFeatureModel`) — matching the override key to the WRONG provider
+  id doesn't fail loudly, it silently makes a real request.
+  (`server/test/reviews.it.test.ts` — "Risk Areas (Phase 1)" case,
+  `server/src/vendor/shared/contracts/platform.ts:55`)
+
+- 2026-08-14 — `docs/intent-smartdiff-improvements.md`'s Phase 1 Step 4 text
+  claimed `Risk` was "already in module scope (declared just above `Intent`
+  in this file)" for both `brief.ts` vendor copies — false against the actual
+  file: `Risk`/`RiskSeverity` were declared ~40 lines AFTER `Intent`, in a
+  separate `// ---- Risks ----` section below `// ---- Blast radius ----`.
+  Since these are top-level `const` zod schemas evaluated at module-load time
+  in file order, adding `risks: z.array(Risk)` inside `Intent`'s object
+  literal AS WRITTEN would reference `Risk` before its own declaration runs —
+  a `ReferenceError` (TDZ), not merely a lint issue. Fixed by moving the whole
+  Risks section above the Intent section in both
+  `server/src/vendor/shared/contracts/brief.ts` and the client copy, rather
+  than leaving `Intent` in place and hoping declaration order didn't matter.
+  A plan's claim about a file's existing layout (declaration order, "already
+  above/below") should be checked against the actual current file before
+  writing dependent code, not trusted at face value — the plan can be stale
+  even when its output type/shape is entirely correct.
+  (`server/src/vendor/shared/contracts/brief.ts`,
+  `client/src/vendor/shared/contracts/brief.ts`)
 
 - 2026-08-09 — Deriving a config-derived convention candidate's `language`
   via `languageIdForFile(evidence_path)` is wrong: that function resolves by
@@ -31,6 +100,48 @@ workflow and quality bar.
   `server/src/modules/conventions/langs/index.ts:languageForConfigFile`)
 
 ## Codebase Patterns
+
+- 2026-08-14 — `docs/smart-diff-plan.md` Phase 2 describes `SmartDiffService`
+  as "constructed with `Container` … composes: 1. Files … 2. Latest review's
+  findings … (a query joined to `agent_runs`, ordered by `created_at DESC`)" —
+  phrasing that reads as if the join query itself belongs inside
+  `smart-diff/service.ts`. It doesn't: `onion-architecture`'s CRITICAL rule
+  (service.ts never imports `drizzle-orm`) still applies to a brand-new
+  capability module exactly like it does to `reviews`/`intent`. The single-PR
+  batch-key algorithm (re-derived from `pulls/routes.ts`'s multi-PR version)
+  had to land as a new `ReviewRepository.getLatestReviewBatchFindings(prId)`
+  method (`review.repo.ts`), with the service only calling it — a plan
+  description of "the service composes X and Y" is about the USE CASE, not
+  necessarily where the query text itself is allowed to live. Confirmed by
+  re-reading `intent/service.ts`, which never touches `container.db` directly
+  either, only `container.reviewRepo.*` methods, despite deriving output from
+  several data sources the same way this plan describes Smart Diff doing.
+  Scoping the algorithm to one `prId` also let it become a single `leftJoin`
+  (`reviews` → `agentRuns` on `reviews.runId = agentRuns.id`) instead of the
+  two-`Map` bulk-grouping shape `pulls/routes.ts` needs for its multi-PR list
+  — simpler, and still correct against `reviews.runId`'s missing FK (an
+  orphaned/unmatched `runId` just yields `multiAgentRunId: null` from the
+  join, falling back to the review's own id as its batch key, same as the
+  bulk version's fallback).
+  (`server/src/modules/reviews/repository/review.repo.ts:getLatestReviewBatchFindings`,
+  `server/src/modules/smart-diff/service.ts`)
+
+- 2026-08-14 — Reusing repo-intel's `EXCLUDED_DIRS` shape (each entry wrapped
+  `/x/` for path-segment matching) against a `pr_files.path` value needs a
+  leading-slash normalization repo-intel's OWN walk code never needed: a
+  repo-relative path like `dist/bundle.js` or `vendor/foo.go` has NO leading
+  slash, so `path.includes('/dist/')` is false even though `dist` is
+  genuinely the path's first segment — repo-intel's walk (`pipeline/walk.ts`)
+  never hits this because it matches directory NAMES directly, not this
+  `/x/`-wrapped substring shape. `smart-diff/classifier.ts`'s
+  `classifyFile()` (Phase 1 of `docs/smart-diff-plan.md`) fixed it by
+  matching against a synthetic `` `/${path}` `` instead of the raw lowercased
+  path. Caught by two failing unit tests (`dist/bundle.js`, a `/vendor/`-path
+  Go file both wrongly landing `core` instead of `boilerplate`) before the
+  fix — any future consumer of an `EXCLUDED_DIRS`-style `/dir/`-wrapped
+  pattern list against a repo-relative path needs the same normalization.
+  (`server/src/modules/smart-diff/classifier.ts`,
+  `server/test/smart-diff-classifier.test.ts`)
 
 - 2026-08-05 — `multi_agent_runs` (`server/src/db/schema/runs.ts`) sat in the
   schema with zero inserts/selects anywhere in the codebase (confirmed by
@@ -247,6 +358,131 @@ workflow and quality bar.
   CHECK-constraint addition is equally safe, as long as nothing is
   dropped/renamed in the same diff.
   (`server/src/db/migrations/0017_simple_violations.sql`)
+
+- 2026-08-14 — Smart Diff Phase 5's plan text specified `Review.file_summaries`
+  as a bare `z.array(...).optional()`, but running the unit suite surfaced a
+  real (not hypothetical) warning from `toJsonSchema`
+  (`reviewer-core/src/llm/structured.ts`, backed by OpenAI's
+  `zodResponseFormat`): "uses `.optional()` without `.nullable()` which is not
+  supported by the API... will become an error in a future version of the
+  SDK." Every other optional field on `Finding`/`Review` in this same file
+  (`suggestion`, `kind`, `trifecta_components`, `evidence`, `in_scope`) is
+  already `.nullish()` for exactly this reason — a plan-specified `.optional()`
+  on a field destined for LLM structured output should be treated as
+  presumptively wrong until checked against this file's own established
+  convention; running the unit suite (not just `pnpm typecheck`, which stays
+  silent) is what actually surfaces the warning.
+  (`server/src/vendor/shared/contracts/findings.ts` — `Review.file_summaries`,
+  `server/test/prompt-structured.test.ts`)
+
+- 2026-08-14 — Growing `ReviewRepository.getLatestReviewBatchFindings` (the
+  batch-key algorithm documented in the 2026-08-14 entry above) to ALSO serve
+  Smart Diff Phase 5's `getFileSummariesForReviews` required changing its
+  return shape from `FindingRow[]` to `{ reviewIds: string[]; findings:
+  FindingRow[] }`, not adding a second exported function that re-runs the same
+  batch-key query — a file summary can legitimately exist for a review with
+  ZERO findings (an agent that approved with nothing to report), so deriving
+  "the latest batch's review ids" from `findings[].reviewId` would silently
+  drop that review's summaries. Confirmed safe to change the signature
+  because a grep showed exactly one consumer (`smart-diff/service.ts`) existed
+  before this session.
+  (`server/src/modules/reviews/repository/review.repo.ts:getLatestReviewBatchFindings`,
+  `server/src/modules/smart-diff/service.ts`)
+
+- 2026-08-14 — Adding a new backend module that needs data another module's
+  facade already computes internally (Smart Diff Phase 6 needed
+  `repo-intel`'s import-graph edges) is not automatically a port gap just
+  because the interface lacks the method — check first whether the facade
+  ALREADY exposes an equivalent read (`getCriticalPaths` reads the same
+  `file_edges` table). Here it genuinely was a gap:
+  `RepoIntelRepository.getEdges` (`repo-intel/repository.ts:436`) was only
+  ever called from `RepoIntelService` internals (`getCriticalPaths`), never
+  exposed on the public `RepoIntel` port
+  (`repo-intel/types.ts`) — so `smart-diff/service.ts` had no
+  `onion-architecture`-legal way to reach it (a module must never import
+  another module's own `repository.ts`). Fixed by adding
+  `RepoIntel.getFileEdges(repoId): Promise<FileEdgeRow[]>` to the port
+  (`repo-intel/types.ts:208`) and a THIN passthrough in `RepoIntelService`
+  (`repo-intel/service.ts:778`) to the existing `this.repo.getEdges` —
+  reused verbatim, not reimplemented. Only one other `RepoIntel` implementer
+  exists repo-wide (`conventions.it.test.ts`'s `FakeRepoIntel`, found via
+  `grep -rln "implements RepoIntel"`) and needed the same new method stubbed
+  to `[]`; `src/adapters/mocks.ts` has NO `MockRepoIntel` at all, so no
+  update was needed there. Before assuming a facade method just needs
+  "exposing," `grep` for every `implements <Port>` in the codebase — a new
+  interface method breaks every one of them at compile time, not just the
+  concrete service.
+  (`server/src/modules/repo-intel/types.ts:208`,
+  `server/src/modules/repo-intel/service.ts:778`,
+  `server/test/conventions.it.test.ts` — `FakeRepoIntel.getFileEdges`)
+
+- 2026-08-14 — `docs/smart-diff-plan.md`'s Phase 6 text contains two rules in
+  real tension with each other, and the more explicit/repeated one had to
+  win: point 6 says the split function should degrade to
+  `proposed_splits: []` "if repo-intel is unavailable/unindexed," but point
+  5 (stated twice, with explicit reasoning: "do not special-case or merge
+  singletons... an accurate signal is itself useful") mandates that a
+  changed `core` file with ZERO edges to any other changed `core` file still
+  becomes its own one-file `ProposedSplit`. A pure clustering function
+  cannot distinguish "repo-intel is disabled/unindexed" from "repo-intel is
+  fully indexed but these specific files just have no edges between them" —
+  both arrive as `edges: []`. Implemented per the more explicit rule (5):
+  `computeProposedSplits` (`smart-diff/split.ts:36`) always emits one
+  singleton `ProposedSplit` per otherwise-unconnected `core` file, never
+  `[]`, as long as at least one `core` file changed. This flips the EXPECTED
+  value of two Phase-2-era integration assertions in
+  `smart-diff-service.it.test.ts` that had asserted `proposed_splits: []`
+  back when the field was hardcoded — both updated to expect real
+  directory-named singleton splits (`smart-diff-service.it.test.ts:233,269`)
+  instead of weakening rule 5. Net effect worth flagging to whoever
+  demos/reviews Phase 6: a large PR against an UNINDEXED repo now shows a
+  "Consider splitting" banner with one Chip per `core` file — which may read
+  as noise rather than a real suggestion — this is the plan's own literal
+  rule, not an implementation bug.
+  (`server/src/modules/smart-diff/split.ts:36`,
+  `server/test/smart-diff-service.it.test.ts:233,269`)
+
+- 2026-08-14 — Neither `graphology` nor `graphology-metrics` (both already
+  dependencies) ships a connected-components algorithm — confirmed by
+  reading what `repo-intel/pipeline/rank.ts` actually imports from them
+  (PageRank only, no components API). A hand-rolled BFS over a plain
+  adjacency `Map` (`smart-diff/split.ts:36-` `computeProposedSplits`) was
+  sufficient and simpler than adding a new npm dependency for a graph this
+  small (one PR's changed `core` files, never more than a few dozen nodes).
+  (`server/src/modules/smart-diff/split.ts`,
+  `server/src/modules/repo-intel/pipeline/rank.ts:41`)
+
+- 2026-08-14 — ~~The point-5-vs-point-6 resolution above (rule 5 wins,
+  `computeProposedSplits` always emits singletons)~~ was corrected during
+  review of the same session: a genuinely EMPTY `edges` array is ambiguous
+  between "repo-intel has no data for this repo at all" (point 6 — must
+  degrade to `[]`) and "repo-intel is indexed but this specific PR's `core`
+  files happen to have zero connections among them" (point 5 — legitimate
+  singletons), and the pure clustering function alone cannot tell them
+  apart — but its CALLER can, because `RepoIntel.getFileEdges(repoId)`
+  returns the repo's WHOLE edge set, unfiltered to any one PR. Fixed in
+  `SmartDiffService.getSmartDiff` (`smart-diff/service.ts`, not
+  `split.ts`, which is unchanged and still always singleton-izes a
+  disconnected node when it's actually given one): only call
+  `computeProposedSplits` when `edges.length > 0`; an empty WHOLE-repo edge
+  set short-circuits straight to `proposed_splits: []`. This correctly
+  restores point 6's intent (no repo-intel data ⇒ no noisy per-file banner)
+  while still honoring point 5 once real data exists (a file the graph
+  genuinely shows as isolated still gets its own split). The two
+  Phase-2-era integration assertions the prior entry flipped to expect
+  singletons (`smart-diff-service.it.test.ts`, seeding no `file_edges` at
+  all) were flipped BACK to `proposed_splits: []` — they were testing the
+  "no data" case, not the "genuinely isolated" one; the dedicated Phase 6
+  clustering test (which does seed real `file_edges`) was unaffected and
+  still asserts a real singleton (`src/other/isolated.ts`) alongside a real
+  2-file cluster. Lesson: when two rules in a plan seem to conflict, check
+  whether the ambiguity is resolvable by which LAYER decides, not just by
+  picking the "more explicit" rule as a tiebreaker — a caller often has
+  information (here: the unfiltered edge count) a pure function was never
+  given.
+  (`server/src/modules/smart-diff/service.ts` — the `edges.length > 0`
+  guard, `server/test/smart-diff-service.it.test.ts:233,269` — reverted to
+  `[]`, `:347-350` — the real-data singleton case, unaffected)
 
 ## Tool & Library Notes
 
@@ -558,6 +794,50 @@ workflow and quality bar.
   (`server/src/modules/agents/repository.ts:86-172` vs
   `server/src/modules/skills/repository.ts:79-148`)
 
+- 2026-08-14 — `computeProposedSplits()`'s naming for a SINGLETON component
+  (one file, no import edge to any other `core` file) used
+  `commonDirectoryPrefix(files)` — but for a 1-element array that function
+  trivially returns the file's OWN full directory (nothing to compare it
+  against), not `null`. Reported live by the user against a real PR: several
+  unrelated files sharing a folder (`IntentCard.tsx`/`IntentCard.test.tsx`/
+  `constants.ts`/`styles.ts`, none importing each other) each became their
+  own singleton chip in the `split_suggestion` banner, but all four rendered
+  the SAME label (their shared folder path) — indistinguishable duplicates.
+  Fix: singletons are now always named by their own basename; the
+  directory-prefix path is only reached for genuine multi-file (edge-
+  connected) components. Confirmed live: 0 duplicate names in a 55-chip
+  response that previously had many.
+  (`server/src/modules/smart-diff/split.ts:78-91`; regression tests in
+  `server/test/smart-diff-split.test.ts` — "a core file with no edges...
+  named by its OWN filename" and "multiple unconnected singletons sharing a
+  directory get DISTINCT names")
+
+- 2026-08-14 — Same `computeProposedSplits()`, a second naming gap: a REAL
+  multi-file connected component can still get an uninformative name when
+  its `commonDirectoryPrefix` collapses to just ONE segment (e.g. `server`)
+  because its member files are scattered across unrelated subdirectories of
+  the same top-level package — true of nearly every file in that package,
+  not a distinguishing label. Confirmed live: a 10-file connected component
+  spanning several `server/` modules named itself just `"server"`. Fix:
+  require the prefix to have >= 2 segments before trusting it; otherwise
+  fall back to the existing `${basename} +N` naming.
+  (`server/src/modules/smart-diff/split.ts:92-100`; regression test:
+  "falls back to a filename-based name when a REAL multi-file component
+  only shares a one-segment (top-level) directory prefix")
+
+- 2026-08-14 — Even after both fixes above, two UNRELATED singletons can
+  still legitimately share a basename across different folders (confirmed
+  live: 7 of 55 chips collided — `styles.ts` ×2, `service.ts` ×3,
+  `INSIGHTS.md` ×2, `constants.ts` ×2). Added a post-pass,
+  `disambiguateSingletonNames()`, that grows any still-colliding singleton's
+  displayed name by one more trailing path segment per iteration until
+  unique across the whole `proposed_splits` list — bounded by path depth,
+  always terminates (the full path is unique per file by construction).
+  One parent-directory segment resolved all 7 real collisions observed.
+  (`server/src/modules/smart-diff/split.ts:114-133`; regression tests:
+  "disambiguates two unrelated singletons that happen to share a basename"
+  and "a singleton whose basename is unique keeps the plain filename")
+
 ## Open Questions
 
 - 2026-08-06 — `z.coerce.boolean()` on a query param (`?enabled=false` being
@@ -573,6 +853,13 @@ workflow and quality bar.
   worth adding, or does the course intentionally keep this manual?
 
 ## Session Notes
+
+- 2026-08-14 — Implemented `docs/run-status-plan.md`'s server-side item:
+  `RunBus` eviction (`src/platform/sse.ts`), alongside the client-side
+  run-status tab-switch bug fix (see `client/INSIGHTS.md`). New
+  `server/test/sse.test.ts` (6 cases, `vi.useFakeTimers()` for the
+  15-minute eviction window — no real waiting). Full server suite (330
+  tests) + `pnpm typecheck` green.
 
 - 2026-08-04 — `engineering-insights` did not auto-invoke during the whole
   `feat/review-cost` session (a multi-file feature with real findings — see
