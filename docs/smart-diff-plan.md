@@ -9,12 +9,14 @@ verified live against two real PRs. Phase 3 (`SmartDiffViewer`):
 `FileCard` props (incl. a `headerRight` slot added during review to fix a
 duplicate-file-path render the first draft shipped), 8/8 component tests,
 full client suite 135/135. Phase 4 (`DiffTab` toggle wiring): `SmartDiffViewer`
-is now reachable in the app; typecheck + full client suite (138/138) green,
-**but the live in-browser click-through (toggle appears, groups render,
-boilerplate collapsed, scroll works) has not actually been done yet** —
-`claude-in-chrome`'s browser extension wasn't connected when this phase
-landed. Do this manual check before considering Phase 4 fully done, not just
-code-reviewed. Phase 5 (`pseudocode_summary`): `Review.file_summaries` (both
+is now reachable in the app; typecheck + full client suite (138/138) green.
+**Live in-browser click-through done** (once `claude-in-chrome` finally
+connected, several sessions after this phase landed): confirmed against a
+real 60-file PR — the Smart order/Original order toggle renders and defaults
+to Smart order, `Core`/`Boilerplate` sections render with the right color
+dot/description/file count, `Boilerplate` starts collapsed and expands on
+click, and the Phase 6 split-suggestion banner (below) renders real Chips.
+Phase 5 (`pseudocode_summary`): `Review.file_summaries` (both
 `findings.ts` vendor copies, shipped as `.nullish()` not the plan's literal
 `.optional()` — a bare `.optional()` array field triggers a real
 `toJsonSchema`/OpenAI `zodResponseFormat` warning that "will become an error
@@ -74,10 +76,25 @@ as its other Smart-Diff props from Phases 3/5). Server unit (309, +6 new
 `smart-diff-split.test.ts` cases) + integration (71, +1 new Phase 6 wiring
 case in `smart-diff-service.it.test.ts`) green; client typecheck + full
 suite (145/145, +4 new Phase 6 `SmartDiffViewer.test.tsx` cases) green.
-**Not done as part of this pass** (out of implementer scope, deferred to the
-review/demo step): the plan's own manual/browser verification step (open a
-large indexed-repo PR, confirm the banner + click-to-dim in a real browser)
-and the acceptance criteria's demo video.
+**Live in-browser check done** on this repo's own PR #15 (60 files,
+24708 changed lines — genuinely `too_big`): the split banner rendered a real
+`Chip` per proposed cluster.
+
+**Real finding from the live check, not a guess — worth a decision, not
+silently patched:** on that same PR, `client/src/vendor/shared/contracts/brief.ts`
+classified as `boilerplate`, not `core` — a real, hand-maintained Zod
+contract a reviewer should read closely, not skim. Root cause: Phase 1's
+`BOILERPLATE_SUBSTRING_PATTERNS` reuses `repo-intel`'s `EXCLUDED_DIRS`,
+which includes a generic `vendor` entry (correct for Go's real vendored-
+dependency convention) — but THIS repo's own `vendor/shared` is not that;
+it's `@devdigest/shared` hand-copied into `server/src/vendor/shared` AND
+`client/src/vendor/shared` (root `CLAUDE.md`'s own "Non-default
+conventions"), a repo-specific reuse of the word "vendor" the generic
+pattern can't distinguish from the real thing. This will affect any repo
+with the same naming collision, not just this one — worth deciding whether
+to special-case it or accept it as a known trade-off of reusing
+`EXCLUDED_DIRS` rather than hand-rolling a JS/TS-only list. Not fixed
+during this verification pass; flagged for the user to decide.
 
 ## Context
 
