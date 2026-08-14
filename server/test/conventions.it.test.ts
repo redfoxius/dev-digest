@@ -87,6 +87,9 @@ class FakeRepoIntel implements RepoIntel {
   async getCriticalPaths(): Promise<string[][]> {
     return [];
   }
+  async getFileEdges(): Promise<{ fromFile: string; toFile: string }[]> {
+    return [];
+  }
 }
 
 /**

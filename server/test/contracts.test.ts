@@ -45,6 +45,24 @@ describe('AI contracts parse fixtures', () => {
     });
     expect(review.findings).toHaveLength(1);
     expect(review.score).toBe(61);
+    // `file_summaries` (Phase 5 of docs/smart-diff-plan.md) is `.optional()`
+    // — absent here, must not fail parsing.
+    expect(review.file_summaries).toBeUndefined();
+  });
+
+  it('Review with file_summaries (Phase 5 — pseudocode_summary)', () => {
+    const review = Review.parse({
+      verdict: 'approve',
+      summary: 'Looks good.',
+      score: 92,
+      findings: [],
+      file_summaries: [
+        { file: 'src/config.ts', summary: 'Loads and validates environment configuration.' },
+      ],
+    });
+    expect(review.file_summaries).toEqual([
+      { file: 'src/config.ts', summary: 'Loads and validates environment configuration.' },
+    ]);
   });
 
   it('lethal-trifecta Finding variant', () => {
@@ -74,6 +92,7 @@ describe('AI contracts parse fixtures', () => {
         confidence: 0.8,
         evidence_tier: 'direct',
         sources: ['pr_description'],
+        risks: [],
       }),
     ).not.toThrow();
     expect(() =>
@@ -116,12 +135,24 @@ describe('AI contracts parse fixtures', () => {
       groups: [
         {
           role: 'core',
-          files: [{ path: 'a.ts', additions: 84, deletions: 0, finding_lines: [28, 52] }],
+          files: [
+            {
+              path: 'a.ts',
+              additions: 84,
+              deletions: 0,
+              finding_lines: [
+                { line: 28, severity: 'WARNING' },
+                { line: 52, severity: 'CRITICAL' },
+              ],
+              findings_count: 2,
+            },
+          ],
         },
       ],
       split_suggestion: { too_big: false, total_lines: 285, proposed_splits: [] },
     });
     expect(d.groups[0]!.role).toBe('core');
+    expect(d.groups[0]!.files[0]!.findings_count).toBe(2);
   });
 
   it('Conformance / Onboarding / EvalRun / MemoryItem', () => {
@@ -211,6 +242,25 @@ describe('platform DTOs', () => {
         status: 'open',
         files: [],
         commits: [],
+      }),
+    ).not.toThrow();
+    // PR Brief banner (Phase 2) — verdict is nullish, absent-fixture above
+    // must keep passing; a real value round-trips too.
+    expect(() =>
+      PrDetail.parse({
+        number: 482,
+        title: 't',
+        author: 'a',
+        branch: 'b',
+        base: 'main',
+        head_sha: 'sha',
+        additions: 1,
+        deletions: 0,
+        files_count: 1,
+        status: 'open',
+        files: [],
+        commits: [],
+        verdict: 'request_changes',
       }),
     ).not.toThrow();
   });

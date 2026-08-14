@@ -9,7 +9,8 @@
     "replyToAuthor": "Reply to author",
     "replyPlaceholder": "Reply to the author about this finding…",
     "sendReply": "Send reply",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "viewInDiff": "View in diff"
   },
   "trifecta": {
     "lethal": "LETHAL TRIFECTA — ALL 3 PRESENT",
@@ -25,6 +26,9 @@
     "findingsCount": "{count} findings",
     "blockers": " · {count} blockers",
     "prScore": "PR SCORE"
+  },
+  "prBrief": {
+    "empty": "Run a review to see the PR Brief — verdict, score, and findings will appear here."
   },
   "panel": {
     "hideLowConfidence": "Hide low confidence",
@@ -54,11 +58,16 @@
     "coreLabel": "Core",
     "wiringLabel": "Wiring",
     "boilerplateLabel": "Boilerplate",
+    "coreDescription": "Core logic — review closely",
+    "wiringDescription": "Wiring — hooks the core into the app",
+    "boilerplateDescription": "Boilerplate — generated/mechanical, skim",
     "largeTitle": "This PR is large ({lines} changed lines)",
     "largeBody": "Consider splitting it into smaller, focused PRs for easier review:",
     "filesCount": "{count} files",
     "findingLines": "{count} finding-lines",
-    "groupedByRole": "Smart Diff · grouped by role"
+    "groupedByRole": "Smart Diff · grouped by role",
+    "summaryLabel": "Summary",
+    "whatThisDoes": "What this does:"
   },
   "list": {
     "breadcrumb": "Pull Requests",

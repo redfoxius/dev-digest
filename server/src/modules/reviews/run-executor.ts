@@ -303,6 +303,14 @@ export class ReviewRunExecutor {
       const findingRows = await this.repo.insertFindings(review.id, keptFindings);
       runLog.result(`Persisted review ${review.id} with ${findingRows.length} finding(s)`);
 
+      // Smart Diff's `pseudocode_summary` (Phase 5, docs/smart-diff-plan.md) —
+      // a byproduct of this SAME LLM call, no new one. Skip the insert
+      // entirely when absent/empty rather than writing a pointless empty batch.
+      const fileSummaries = outcome.review.file_summaries;
+      if (fileSummaries && fileSummaries.length > 0) {
+        await this.repo.insertFileSummaries(review.id, fileSummaries);
+      }
+
       // markReviewed() (so the PR list can tell reviewed / needs-review /
       // stale apart) is called once by executeRuns() after the WHOLE batch
       // settles, not per-agent here — see executeRuns.

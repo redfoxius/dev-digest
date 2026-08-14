@@ -1,6 +1,100 @@
 # Smart Diff — classifier + route + `SmartDiffViewer`
 
-**Status:** not started
+**Status:** done — all 6 phases implemented and tested. Phase 1
+(classifier) + Phase 2 (`GET /pulls/:id/smart-diff`):
+`server/src/modules/smart-diff/{constants,classifier,service}.ts`, contract
+change in both `brief.ts` copies, unit + `.it.test.ts` suites green, manually
+verified live against two real PRs. Phase 3 (`SmartDiffViewer`):
+`client/src/components/diff-viewer/SmartDiffViewer/`, additive `CodeLine`/
+`FileCard` props (incl. a `headerRight` slot added during review to fix a
+duplicate-file-path render the first draft shipped), 8/8 component tests,
+full client suite 135/135. Phase 4 (`DiffTab` toggle wiring): `SmartDiffViewer`
+is now reachable in the app; typecheck + full client suite (138/138) green.
+**Live in-browser click-through done** (once `claude-in-chrome` finally
+connected, several sessions after this phase landed): confirmed against a
+real 60-file PR — the Smart order/Original order toggle renders and defaults
+to Smart order, `Core`/`Boilerplate` sections render with the right color
+dot/description/file count, `Boilerplate` starts collapsed and expands on
+click, and the Phase 6 split-suggestion banner (below) renders real Chips.
+Phase 5 (`pseudocode_summary`): `Review.file_summaries` (both
+`findings.ts` vendor copies, shipped as `.nullish()` not the plan's literal
+`.optional()` — a bare `.optional()` array field triggers a real
+`toJsonSchema`/OpenAI `zodResponseFormat` warning that "will become an error
+in a future SDK version"), all three seeded reviewer prompts
+(`server/src/db/seed-prompts.ts`) instructed to emit it, new
+`review_file_summaries` table + migration `0023_icy_photon.sql`,
+`ReviewRepository.insertFileSummaries`/`getFileSummariesForReviews` (the
+latter reusing the SAME `reviewIds` `getLatestReviewBatchFindings` already
+computes, not a second "latest batch" query), wired through
+`run-executor.ts` and `SmartDiffService`, and rendered in `SmartDiffViewer`/
+`FileCard` (a header Chip + an open-state "What this does:" text block).
+Server unit (303) + integration (70, incl. a new Phase 5 case) green,
+migration applied to local dev Postgres; client typecheck + full suite
+(141/141, incl. 3 new Phase 5 cases) green.
+
+Phase 6 (`split_suggestion` — import-graph clustering): closed an
+architectural gap the plan text didn't account for — `RepoIntel.getEdges`
+was internal to `repo-intel/repository.ts`, not on the public `RepoIntel`
+port, so `smart-diff/service.ts` couldn't reach it per `onion-architecture`.
+Added `RepoIntel.getFileEdges(repoId)` to the port interface
+(`server/src/modules/repo-intel/types.ts`), implemented in
+`RepoIntelService` as a thin passthrough to the existing (unreimplemented)
+`this.repo.getEdges` (`server/src/modules/repo-intel/service.ts`), and added
+the same method (returning `[]`) to `conventions.it.test.ts`'s `FakeRepoIntel`
+— the only other `RepoIntel` implementer in the codebase; no `MockRepoIntel`
+exists in `src/adapters/mocks.ts`. New pure function
+`server/src/modules/smart-diff/split.ts` (`computeProposedSplits`) — a
+hand-rolled BFS over an adjacency map (neither `graphology` nor
+`graphology-metrics` ships a components algorithm; confirmed via
+`repo-intel/pipeline/rank.ts`, PageRank only), weakly-connected components
+over the induced subgraph of changed `core` files, named by common directory
+prefix or `"Split N"` fallback, wired into `SmartDiffService.getSmartDiff`
+(replacing the hardcoded `[]`). **Reviewed and corrected after the first
+implementation pass:** the plan's point 5 ("no special-casing singletons —
+a `core` file with zero edges still becomes its own split") and point 6
+("degrades to `proposed_splits: []` when repo-intel is unavailable/
+unindexed") are only reconcilable at the SERVICE layer, not inside
+`split.ts` itself — a bare empty `edges` array can't tell "no repo-intel
+data at all" apart from "data exists but these files are genuinely
+unconnected." Fixed by gating the call in `SmartDiffService`: `edges.length
+> 0` (the repo's WHOLE, unfiltered edge set) decides whether to run
+`computeProposedSplits` at all; a genuinely-indexed repo where this PR's
+`core` files happen to be disconnected still gets real singleton splits
+(point 5), while an unindexed repo now correctly shows no banner content at
+all instead of one noisy "Split N" Chip per changed file (point 6).
+`split.ts` itself is unchanged — it still always singleton-izes a
+disconnected node when actually given one; the distinction lives entirely
+in whether the caller invokes it. Two pre-existing Phase 2 integration
+assertions (seeding no `file_edges` at all — the "no data" case) were
+corrected back to `proposed_splits: []`; the dedicated Phase 6 test (which
+does seed real `file_edges`) already asserted the correct real-singleton-
+plus-real-cluster output and needed no change. Frontend: `SmartDiffViewer` gained a `too_big` banner with one clickable
+`Chip` per proposed split (click toggles a `highlightedSplit` local state;
+clicking the same Chip again clears it) and `FileCard` gained an additive
+`dimmed?: boolean` prop (opacity reduction, no-op when omitted, same pattern
+as its other Smart-Diff props from Phases 3/5). Server unit (309, +6 new
+`smart-diff-split.test.ts` cases) + integration (71, +1 new Phase 6 wiring
+case in `smart-diff-service.it.test.ts`) green; client typecheck + full
+suite (145/145, +4 new Phase 6 `SmartDiffViewer.test.tsx` cases) green.
+**Live in-browser check done** on this repo's own PR #15 (60 files,
+24708 changed lines — genuinely `too_big`): the split banner rendered a real
+`Chip` per proposed cluster.
+
+**Real finding from the live check, not a guess — worth a decision, not
+silently patched:** on that same PR, `client/src/vendor/shared/contracts/brief.ts`
+classified as `boilerplate`, not `core` — a real, hand-maintained Zod
+contract a reviewer should read closely, not skim. Root cause: Phase 1's
+`BOILERPLATE_SUBSTRING_PATTERNS` reuses `repo-intel`'s `EXCLUDED_DIRS`,
+which includes a generic `vendor` entry (correct for Go's real vendored-
+dependency convention) — but THIS repo's own `vendor/shared` is not that;
+it's `@devdigest/shared` hand-copied into `server/src/vendor/shared` AND
+`client/src/vendor/shared` (root `CLAUDE.md`'s own "Non-default
+conventions"), a repo-specific reuse of the word "vendor" the generic
+pattern can't distinguish from the real thing. This will affect any repo
+with the same naming collision, not just this one — worth deciding whether
+to special-case it or accept it as a known trade-off of reusing
+`EXCLUDED_DIRS` rather than hand-rolling a JS/TS-only list. Not fixed
+during this verification pass; flagged for the user to decide.
 
 ## Context
 

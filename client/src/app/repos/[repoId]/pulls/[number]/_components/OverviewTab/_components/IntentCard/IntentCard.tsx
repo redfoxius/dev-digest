@@ -2,10 +2,11 @@
 
 import React from "react";
 import { useTranslations } from "next-intl";
+import type { Risk } from "@devdigest/shared";
 import { Badge, Button, Card, ErrorState, SectionLabel, Skeleton } from "@devdigest/ui";
 import { usePrIntent, useDeriveIntent } from "@/lib/hooks/reviews";
 import { ApiError } from "@/lib/api";
-import { EVIDENCE_TIER_COLOR } from "./constants";
+import { EVIDENCE_TIER_COLOR, RISK_SEVERITY_COLOR } from "./constants";
 import { s } from "./styles";
 
 interface IntentCardProps {
@@ -80,13 +81,40 @@ export function IntentCard({ prId }: IntentCardProps) {
                 <ScopeList items={intent.out_of_scope} emptyLabel={t("intentCard.noneStated")} />
               </div>
             </div>
-            <Badge {...EVIDENCE_TIER_COLOR[intent.evidence_tier]}>
-              {t(`intentCard.evidence.${intent.evidence_tier}`)}
-            </Badge>
+            <div style={s.subsection}>
+              <Badge {...EVIDENCE_TIER_COLOR[intent.evidence_tier]}>
+                {t(`intentCard.evidence.${intent.evidence_tier}`)}
+              </Badge>
+            </div>
+            <div style={s.subsection}>
+              <SectionLabel icon="Shield">{t("block.risks")}</SectionLabel>
+              {intent.risks.length > 0 ? (
+                <RiskChips risks={intent.risks} />
+              ) : (
+                <p style={s.emptyBullet}>{t("noRisks")}</p>
+              )}
+            </div>
           </>
         )}
       </Card>
     </section>
+  );
+}
+
+/** Compact severity-colored chip row (Phase 1 — Risk Areas). Each risk
+ *  renders as a small icon + title only — `explanation`/`file_refs` are
+ *  derived/persisted but not shown inline in this first pass (per the
+ *  confirmed mockup, docs/intent-smartdiff-improvements.md). Local,
+ *  non-exported — one caller only, mirrors this file's `ScopeList`. */
+function RiskChips({ risks }: { risks: Risk[] }) {
+  return (
+    <div style={s.riskRow}>
+      {risks.map((risk, i) => (
+        <Badge key={`${risk.kind}-${i}`} {...RISK_SEVERITY_COLOR[risk.severity]}>
+          {risk.title}
+        </Badge>
+      ))}
+    </div>
   );
 }
 

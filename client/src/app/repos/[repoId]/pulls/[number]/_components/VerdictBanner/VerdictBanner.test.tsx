@@ -30,4 +30,25 @@ describe("VerdictBanner (smoke)", () => {
     expect(screen.getByText("42")).toBeInTheDocument();
     expect(screen.getByText(/1 findings · 1 blockers/)).toBeInTheDocument();
   });
+
+  it("renders cost when costUsd is provided", () => {
+    renderWithIntl(
+      <VerdictBanner
+        verdict="approve"
+        summary={null}
+        score={100}
+        findingsCount={0}
+        blockers={0}
+        costUsd={0.041}
+      />,
+    );
+    expect(screen.getByText("$0.041")).toBeInTheDocument();
+  });
+
+  it("renders no cost text when costUsd is omitted", () => {
+    renderWithIntl(
+      <VerdictBanner verdict="approve" summary={null} score={100} findingsCount={0} blockers={0} />,
+    );
+    expect(screen.queryByText(/^\$/)).not.toBeInTheDocument();
+  });
 });

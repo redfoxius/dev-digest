@@ -58,3 +58,23 @@ describe("FindingCard (smoke, both themes)", () => {
     expect(onAction).toHaveBeenCalledWith("dismiss");
   });
 });
+
+describe("FindingCard — view-in-diff affordance (Phase 4)", () => {
+  it("is absent when onViewInDiff is omitted", () => {
+    renderWithIntl(<FindingCard f={FINDING} onAction={() => {}} />);
+    expect(screen.queryByLabelText("View in diff")).not.toBeInTheDocument();
+  });
+
+  it("calls onViewInDiff(file, start_line) when clicked, without toggling the expanded state", () => {
+    const onViewInDiff = vi.fn();
+    renderWithIntl(<FindingCard f={FINDING} onAction={() => {}} onViewInDiff={onViewInDiff} />);
+
+    fireEvent.click(screen.getByLabelText("View in diff"));
+
+    expect(onViewInDiff).toHaveBeenCalledWith("src/config.ts", 11);
+    // Card started collapsed (no defaultExpanded) — clicking the icon must
+    // not have also toggled the header's own expand/collapse handler (the
+    // body, e.g. its Accept/Dismiss buttons, only renders once expanded).
+    expect(screen.queryByText("Accept")).not.toBeInTheDocument();
+  });
+});

@@ -24,6 +24,9 @@ interface FindingsTabProps {
   onOpenTrace: (id: string) => void;
   onDelete: (id: string) => void;
   onRunDone: () => void;
+  /** "View in diff" affordance on a finding — switches to Files-changed and
+   *  scrolls to the exact file:line. Omitted → no affordance rendered. */
+  onViewInDiff?: (file: string, line: number) => void;
 }
 
 export function FindingsTab({
@@ -40,6 +43,7 @@ export function FindingsTab({
   onOpenTrace,
   onDelete,
   onRunDone,
+  onViewInDiff,
 }: FindingsTabProps) {
   const handleCancelAll = useCallback(() => {
     liveRunIds.forEach((id) => cancelMutation.mutate(id));
@@ -165,6 +169,7 @@ export function FindingsTab({
             headSha={headSha}
             targetRunId={target?.runId ?? null}
             targetNonce={target?.n ?? 0}
+            onViewInDiff={onViewInDiff}
           />
         ))
       )}

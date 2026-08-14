@@ -11,6 +11,9 @@ interface PrDetailHeaderProps {
   prId: string | null;
   tab: string;
   findingsCount: number;
+  /** A review is currently in flight — shown as a pulse on the "Agent runs"
+   *  tab label, the only cue visible while on a different tab. */
+  reviewRunning?: boolean;
   /** github.com PR URL; null when the repo's full_name isn't known yet. */
   githubUrl?: string | null;
   onSetTab: (tab: string) => void;
@@ -23,6 +26,7 @@ export function PrDetailHeader({
   prId,
   tab,
   findingsCount,
+  reviewRunning,
   githubUrl,
   onSetTab,
   onRunStart,
@@ -114,7 +118,13 @@ export function PrDetailHeader({
         pad="0"
         tabs={[
           { key: "overview", label: "Overview", icon: "FileText" },
-          { key: "findings", label: "Agent runs", icon: "AlertOctagon", count: findingsCount || undefined },
+          {
+            key: "findings",
+            label: "Agent runs",
+            icon: "AlertOctagon",
+            count: findingsCount || undefined,
+            pulse: reviewRunning,
+          },
           { key: "diff", label: "Files changed", icon: "Code", count: pr.files_count },
         ]}
       />

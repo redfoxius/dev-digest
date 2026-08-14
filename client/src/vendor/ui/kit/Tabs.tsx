@@ -19,6 +19,7 @@ export function Tabs({
         const k = typeof t === "string" ? t : t.key;
         const label = typeof t === "string" ? t : t.label;
         const icon = typeof t === "object" ? t.icon : undefined;
+        const pulse = typeof t === "object" ? t.pulse : undefined;
         const on = value === k;
         const I = icon ? Icon[icon] : null;
         return (
@@ -42,6 +43,19 @@ export function Tabs({
           >
             {I && <I size={14} style={{ color: on ? "var(--accent)" : "var(--text-muted)" }} />}
             {label}
+            {pulse && (
+              <span
+                title="A review is currently running"
+                style={{
+                  width: 7,
+                  height: 7,
+                  borderRadius: 99,
+                  background: "var(--warn)",
+                  boxShadow: "0 0 0 3px var(--warn-bg)",
+                  animation: "ddpulse 2s ease-in-out infinite",
+                }}
+              />
+            )}
             {typeof t === "object" && t.count != null && (
               <span className="tnum" style={{ fontSize: 12, color: "var(--text-muted)" }}>
                 {t.count}
