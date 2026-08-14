@@ -75,20 +75,73 @@ export function computeProposedSplits(
     components.push(coreFilePaths.filter((p) => memberSet.has(p)));
   }
 
-  return components.map((files) => {
+  const named = components.map((files) => {
+    // A singleton's "common directory prefix" is trivially its OWN full
+    // directory (nothing to compare it against) — using that as the name
+    // means every unconnected file sharing a folder with another
+    // unconnected file (e.g. Component.tsx / Component.test.tsx / styles.ts
+    // / constants.ts with no import edges between them) renders as several
+    // DIFFERENT chips with the SAME label, reading as duplicates in the
+    // banner even though each is a distinct 1-file split. Always name a
+    // singleton by its own filename instead — only a REAL multi-file
+    // component (genuinely edge-connected) benefits from a shared-directory
+    // name, since there the prefix actually distinguishes it from other
+    // components. (Two singletons whose basenames themselves collide, e.g.
+    // two unrelated `styles.ts` files, are disambiguated in a second pass
+    // below — see `disambiguateSingletonNames`.)
+    if (files.length === 1) return { name: basename(files[0]!), files };
+
+    // A prefix of just one segment (e.g. `server`, `client`) is barely more
+    // informative than no prefix at all — in a repo laid out as top-level
+    // packages, it's often just "the package name," true of nearly every
+    // file in that package, not a distinguishing label for THIS cluster
+    // (confirmed live: a 10-file connected component spanning several
+    // unrelated server/ modules named itself "server" — no signal). Require
+    // at least two segments (e.g. `src/api`) before trusting the prefix.
     const prefix = commonDirectoryPrefix(files);
-    if (prefix != null) return { name: prefix, files };
-    // No shared directory — a generic "Split N" fallback here is
-    // indistinguishable from every other ungrouped singleton/cluster in the
-    // banner (confirmed live: a PR with several disconnected `core` files
-    // renders a wall of "Split 1"/"Split 2"/"Split 3" chips with no hint of
-    // which file each one is). Naming off the first member's own filename
-    // instead means every chip's label is something the user can actually
-    // recognize.
-    const name =
-      files.length === 1 ? basename(files[0]!) : `${basename(files[0]!)} +${files.length - 1}`;
+    if (prefix != null && prefix.split('/').length >= 2) return { name: prefix, files };
+    // No shared directory (or one too shallow to be meaningful) — a generic
+    // "Split N" fallback here is indistinguishable from every other
+    // ungrouped singleton/cluster in the banner (confirmed live: a PR with
+    // several disconnected `core` files renders a wall of "Split 1"/
+    // "Split 2"/"Split 3" chips with no hint of which file each one is).
+    // Naming off the first member's own filename instead means every chip's
+    // label is something the user can actually recognize.
+    const name = `${basename(files[0]!)} +${files.length - 1}`;
     return { name, files };
   });
+
+  return disambiguateSingletonNames(named);
+}
+
+/**
+ * Two unrelated singletons can legitimately share a basename (e.g. two
+ * different `styles.ts`/`service.ts`/`INSIGHTS.md` files in different
+ * folders) — confirmed live on a real PR: 7 of 55 chips collided this way.
+ * For any singleton whose name collides with another chip's name, grow its
+ * label by one more trailing path segment at a time until it's unique —
+ * repeated in passes so a still-colliding pair keeps growing together.
+ * Always terminates: the full path is unique per file by construction, and
+ * `depth` is capped by the longest path's segment count.
+ */
+function disambiguateSingletonNames(
+  entries: { name: string; files: string[] }[],
+): { name: string; files: string[] }[] {
+  let current = entries;
+  const maxDepth = Math.max(1, ...entries.map((e) => e.files[0]!.split('/').length));
+  for (let depth = 1; depth <= maxDepth; depth++) {
+    const counts = new Map<string, number>();
+    for (const e of current) counts.set(e.name, (counts.get(e.name) ?? 0) + 1);
+    const anyColliding = current.some((e) => e.files.length === 1 && (counts.get(e.name) ?? 0) > 1);
+    if (!anyColliding) break;
+    current = current.map((e) => {
+      if (e.files.length !== 1 || (counts.get(e.name) ?? 0) <= 1) return e;
+      const segments = e.files[0]!.split('/');
+      const take = Math.min(depth + 1, segments.length);
+      return { name: segments.slice(-take).join('/'), files: e.files };
+    });
+  }
+  return current;
 }
 
 /** Last `/`-separated segment of a path. */
