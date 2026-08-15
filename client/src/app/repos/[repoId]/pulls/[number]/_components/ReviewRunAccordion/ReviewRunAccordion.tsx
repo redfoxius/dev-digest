@@ -32,6 +32,7 @@ export function ReviewRunAccordion({
   headSha,
   targetRunId = null,
   targetNonce = 0,
+  targetFindingId = null,
   onViewInDiff,
 }: {
   review: ReviewRecord;
@@ -40,9 +41,14 @@ export function ReviewRunAccordion({
   repoFullName?: string | null;
   headSha?: string | null;
   /** When this matches review.run_id, the accordion opens and scrolls into view
-   *  (driven from the Timeline: clicking an agent name navigates here). */
+   *  (driven from the Timeline: clicking an agent name navigates here, or from
+   *  the Diff tab's severity-badge click, which also sets targetFindingId). */
   targetRunId?: string | null;
   targetNonce?: number;
+  /** When set (alongside a matching targetRunId), the specific finding within
+   *  this run's FindingsPanel to scroll to/highlight. Additive/no-op when
+   *  omitted or when this run doesn't have that finding. */
+  targetFindingId?: string | null;
   onViewInDiff?: (file: string, line: number) => void;
 }) {
   const [open, setOpen] = React.useState(defaultOpen);
@@ -159,6 +165,8 @@ export function ReviewRunAccordion({
             repoFullName={repoFullName}
             headSha={headSha}
             onViewInDiff={onViewInDiff}
+            scrollToFindingId={targetFindingId}
+            scrollNonce={targetNonce}
           />
         </div>
       )}

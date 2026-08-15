@@ -102,6 +102,37 @@ export default function PRDetailPage() {
     setTab("diff");
   }
 
+  // Reverse direction: clicking a severity badge in the Diff tab (Smart
+  // order) navigates to that specific finding on the Findings tab. Matched
+  // client-side against `allFindings` (already loaded) rather than needing
+  // the finding's id threaded all the way into the diff-viewer tree.
+  const [findingScrollTarget, setFindingScrollTarget] = React.useState<{
+    runId: string;
+    findingId: string;
+    nonce: number;
+  } | null>(null);
+  function handleFindingBadgeClick(file: string, line: number) {
+    // Worst-severity-wins when multiple findings overlap this line, mirroring
+    // the server's own finding_lines computation (smart-diff/service.ts).
+    const rank: Record<string, number> = { CRITICAL: 3, WARNING: 2, SUGGESTION: 1 };
+    const candidates = allFindings.filter(
+      (f) => f.file === file && line >= f.start_line && line <= f.end_line,
+    );
+    const finding = candidates.reduce<FindingRecord | null>((best, f) => {
+      if (!best) return f;
+      return (rank[f.severity] ?? 0) > (rank[best.severity] ?? 0) ? f : best;
+    }, null);
+    if (!finding) return; // no finding at this line — no-op, no crash
+    const runId = runs.find((r) => r.id === finding.review_id)?.run_id;
+    if (!runId) return; // review has no run_id (legacy/manual) — can't scroll to an accordion
+    setFindingScrollTarget((prev) => ({
+      runId,
+      findingId: finding.id,
+      nonce: (prev?.nonce ?? 0) + 1,
+    }));
+    setTab("findings");
+  }
+
   // Reviews come newest-first; each is its own run (grouped into accordions).
   const runs = reviews ?? [];
   const allFindings: FindingRecord[] = React.useMemo(
@@ -200,6 +231,7 @@ export default function PRDetailPage() {
             }}
             onRunDone={handleRunSettled}
             onViewInDiff={handleViewInDiff}
+            scrollTarget={findingScrollTarget}
           />
         )}
 
@@ -210,6 +242,7 @@ export default function PRDetailPage() {
             files={pr.files}
             canComment={pr.status === "open"}
             scrollTarget={diffScrollTarget}
+            onFindingClick={handleFindingBadgeClick}
           />
         )}
       </div>

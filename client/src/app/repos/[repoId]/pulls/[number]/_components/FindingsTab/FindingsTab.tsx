@@ -27,6 +27,10 @@ interface FindingsTabProps {
   /** "View in diff" affordance on a finding — switches to Files-changed and
    *  scrolls to the exact file:line. Omitted → no affordance rendered. */
   onViewInDiff?: (file: string, line: number) => void;
+  /** An external "go to this finding" request from the Diff tab's severity
+   *  badge click — opens+scrolls to the owning run's accordion AND the
+   *  specific finding within it. Additive/no-op when omitted. */
+  scrollTarget?: { runId: string; findingId: string; nonce: number } | null;
 }
 
 export function FindingsTab({
@@ -44,6 +48,7 @@ export function FindingsTab({
   onDelete,
   onRunDone,
   onViewInDiff,
+  scrollTarget,
 }: FindingsTabProps) {
   const handleCancelAll = useCallback(() => {
     liveRunIds.forEach((id) => cancelMutation.mutate(id));
@@ -69,11 +74,22 @@ export function FindingsTab({
 
   // Timeline → Review-runs navigation: clicking an agent name in the timeline
   // opens + scrolls to that run's accordion below. The nonce re-triggers the
-  // scroll even when the same run is clicked twice.
-  const [target, setTarget] = React.useState<{ runId: string; n: number } | null>(null);
+  // scroll even when the same run is clicked twice. The same target state
+  // also carries an optional findingId — set either by this internal
+  // Timeline click (undefined) or by the external scrollTarget effect below
+  // (from the Diff tab's severity-badge click).
+  const [target, setTarget] = React.useState<{ runId: string; n: number; findingId?: string } | null>(null);
   const handleGoToReview = useCallback((runId: string) => {
     setTarget((p) => ({ runId, n: (p?.n ?? 0) + 1 }));
   }, []);
+
+  // External navigation from the Diff tab — reuses the exact same target
+  // mechanism as the internal Timeline click above, just also carrying a
+  // specific findingId to scroll to within the opened accordion.
+  React.useEffect(() => {
+    if (!scrollTarget) return;
+    setTarget({ runId: scrollTarget.runId, n: scrollTarget.nonce, findingId: scrollTarget.findingId });
+  }, [scrollTarget?.nonce]);
 
   return (
     <section>
@@ -169,6 +185,7 @@ export function FindingsTab({
             headSha={headSha}
             targetRunId={target?.runId ?? null}
             targetNonce={target?.n ?? 0}
+            targetFindingId={target?.findingId ?? null}
             onViewInDiff={onViewInDiff}
           />
         ))

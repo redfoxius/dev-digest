@@ -17,9 +17,12 @@ interface DiffTabProps {
   /** An external "view in diff" request from the Findings tab — forwarded
    *  to whichever viewer (Smart/Original order) is currently active. */
   scrollTarget?: ScrollTarget | null;
+  /** Clicking a per-line severity badge (Smart order only) navigates to that
+   *  specific finding on the Findings tab. Additive/no-op when omitted. */
+  onFindingClick?: (path: string, line: number) => void;
 }
 
-export function DiffTab({ prId, filesCount, files, canComment, scrollTarget }: DiffTabProps) {
+export function DiffTab({ prId, filesCount, files, canComment, scrollTarget, onFindingClick }: DiffTabProps) {
   const { data: comments } = usePrComments(prId);
   const create = useCreatePrComment(prId);
   // Comments start hidden so the diff is clean by default — toggle to reveal.
@@ -87,7 +90,13 @@ export function DiffTab({ prId, filesCount, files, canComment, scrollTarget }: D
         Files changed · {filesCount} files
       </SectionLabel>
       {showSmart ? (
-        <SmartDiffViewer smartDiff={smartDiff!} files={files} commenting={commenting} scrollTarget={scrollTarget} />
+        <SmartDiffViewer
+          smartDiff={smartDiff!}
+          files={files}
+          commenting={commenting}
+          scrollTarget={scrollTarget}
+          onFindingClick={onFindingClick}
+        />
       ) : (
         <DiffViewer files={files} commenting={commenting} scrollTarget={scrollTarget} />
       )}
