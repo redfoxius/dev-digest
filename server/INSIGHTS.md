@@ -101,6 +101,21 @@ workflow and quality bar.
 
 ## Codebase Patterns
 
+- 2026-08-15 — No LLM prompt in this codebase (`intent/service.ts`'s
+  classifier, nor any of `reviewer-core/src/prompt.ts`'s review prompts)
+  had an explicit "respond in English" instruction anywhere — a PR whose
+  title/description/commits are in a non-English language could produce
+  non-English model output. Added to `intent/service.ts`'s system prompt
+  (a new bullet requiring `intent`/`in_scope`/`out_of_scope`/
+  `risks[].title`/`risks[].explanation` to always be English, translating
+  rather than summarizing in the source language) — found via a
+  course-assignment gap-check, not a regression from an established
+  pattern. `reviewer-core/src/prompt.ts`'s review prompts still lack this;
+  worth auditing there too if English-only output becomes a broader
+  requirement, not just for Intent.
+  (`server/src/modules/intent/service.ts` — the `buildMessages()` system
+  array's new bullet, right after the `Return:` bullet)
+
 - 2026-08-14 — `docs/smart-diff-plan.md` Phase 2 describes `SmartDiffService`
   as "constructed with `Container` … composes: 1. Files … 2. Latest review's
   findings … (a query joined to `agent_runs`, ordered by `created_at DESC`)" —
