@@ -40,6 +40,7 @@ export function FileCard({
   headerRight,
   pseudocodeSummary,
   dimmed,
+  onFindingClick,
 }: {
   file: PrFile;
   commenting?: DiffCommentApi;
@@ -64,6 +65,10 @@ export function FileCard({
    *  a file NOT in the currently-highlighted proposed split. Additive/no-op
    *  when omitted, same as this component's other Smart-Diff props. */
   dimmed?: boolean;
+  /** Clicking a per-line severity badge navigates to that specific finding on
+   *  the Findings tab. Only has a visible effect where `findingSeverityByLine`
+   *  is also passed (currently Smart order only) — additive/no-op otherwise. */
+  onFindingClick?: (path: string, line: number) => void;
 }) {
   const t = useTranslations("shell");
   const tPrReview = useTranslations("prReview");
@@ -153,6 +158,7 @@ export function FileCard({
                 threads={threadsForLine(ln, matched)}
                 commenting={commenting}
                 findingSeverity={ln.newNo != null ? findingSeverityByLine?.get(ln.newNo) : undefined}
+                onFindingClick={onFindingClick}
               />
             ))
           )}

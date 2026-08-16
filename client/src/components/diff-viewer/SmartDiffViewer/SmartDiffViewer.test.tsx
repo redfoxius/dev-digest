@@ -114,13 +114,19 @@ const SMART_DIFF: SmartDiff = {
 function renderViewer(
   smartDiff: SmartDiff = SMART_DIFF,
   scrollTarget?: { path: string; line: number; nonce: number } | null,
+  onFindingClick?: (path: string, line: number) => void,
 ) {
   return render(
     <NextIntlClientProvider
       locale="en"
       messages={{ prReview: prReviewMessages, shell: shellMessages }}
     >
-      <SmartDiffViewer smartDiff={smartDiff} files={FILES} scrollTarget={scrollTarget} />
+      <SmartDiffViewer
+        smartDiff={smartDiff}
+        files={FILES}
+        scrollTarget={scrollTarget}
+        onFindingClick={onFindingClick}
+      />
     </NextIntlClientProvider>,
   );
 }
@@ -403,5 +409,36 @@ describe("SmartDiffViewer — external scrollTarget (Phase 4)", () => {
       "false",
     );
     expect(window.HTMLElement.prototype.scrollIntoView).not.toHaveBeenCalled();
+  });
+});
+
+describe("SmartDiffViewer — per-line severity badge click (Diff → Findings navigation)", () => {
+  it("clicking a per-line severity badge calls onFindingClick with the file path and that exact line", () => {
+    const onFindingClick = vi.fn();
+    const { container } = renderViewer(SMART_DIFF, undefined, onFindingClick);
+    const line5 = container.querySelector<HTMLElement>('[data-line="5"]')!;
+
+    fireEvent.click(within(line5).getByRole("button", { name: /Go to this finding/i }));
+
+    expect(onFindingClick).toHaveBeenCalledWith("src/api/handler.ts", 5);
+  });
+
+  it("different lines report their own line number, not a shared/stale one", () => {
+    const onFindingClick = vi.fn();
+    const { container } = renderViewer(SMART_DIFF, undefined, onFindingClick);
+    const line4 = container.querySelector<HTMLElement>('[data-line="4"]')!;
+
+    fireEvent.click(within(line4).getByRole("button", { name: /Go to this finding/i }));
+
+    expect(onFindingClick).toHaveBeenCalledWith("src/api/handler.ts", 4);
+  });
+
+  it("the severity badge renders as a plain (non-interactive) badge, not a button, when onFindingClick is omitted", () => {
+    const { container } = renderViewer(SMART_DIFF); // no onFindingClick
+    const line5 = container.querySelector<HTMLElement>('[data-line="5"]')!;
+
+    expect(within(line5).queryByRole("button", { name: /Go to this finding/i })).not.toBeInTheDocument();
+    // The badge itself still renders — just not clickable.
+    expect(line5.querySelector("svg.lucide-octagon-alert")).toBeTruthy();
   });
 });

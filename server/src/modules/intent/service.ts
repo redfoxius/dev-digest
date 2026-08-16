@@ -301,6 +301,10 @@ function buildMessages(args: {
       '(short bullet phrases describing what this PR is meant to change/fix), `out_of_scope` ' +
       '(short bullet phrases describing what is explicitly NOT part of this PR\'s intent), ' +
       'and your own `confidence` (0-1) in this summary.',
+    'Always write `intent`, `in_scope`, `out_of_scope`, `risks[].title`, and ' +
+      '`risks[].explanation` in English, regardless of what language the PR title, ' +
+      'description, linked issue/spec, or commit messages are written in — translate, ' +
+      'don\'t just summarize in the source language.',
     'If the PR description is empty or unhelpful, infer intent primarily from the title, ' +
       'changed file paths, hunk headers, branch name, and commit messages — and report a ' +
       'LOWER confidence accordingly.',

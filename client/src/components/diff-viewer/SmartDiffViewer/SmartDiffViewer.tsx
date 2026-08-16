@@ -48,6 +48,7 @@ export function SmartDiffViewer({
   files,
   commenting,
   scrollTarget: externalScrollTarget,
+  onFindingClick,
 }: {
   smartDiff: SmartDiff;
   files: PrFile[];
@@ -56,6 +57,9 @@ export function SmartDiffViewer({
    *  component's own internal, findings-Chip-click-driven scroll target. On
    *  the same file, the internal target wins (see the merge below). */
   scrollTarget?: ScrollTarget | null;
+  /** Clicking a per-line severity badge navigates to that specific finding on
+   *  the Findings tab. Additive/no-op when omitted. */
+  onFindingClick?: (path: string, line: number) => void;
 }) {
   const t = useTranslations("prReview");
   // `SmartDiffFile` carries no `patch` — build the lookup once so each
@@ -225,6 +229,7 @@ export function SmartDiffViewer({
                       headerRight={headerRight || undefined}
                       pseudocodeSummary={file.pseudocode_summary}
                       dimmed={dimmed}
+                      onFindingClick={onFindingClick}
                     />
                   );
                 })}

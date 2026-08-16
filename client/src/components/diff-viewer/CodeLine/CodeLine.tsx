@@ -17,6 +17,7 @@ export function CodeLine({
   threads,
   commenting,
   findingSeverity,
+  onFindingClick,
 }: {
   ln: Line;
   path: string;
@@ -25,6 +26,10 @@ export function CodeLine({
   /** When set, renders a compact severity badge inline at the end of the row —
    *  Smart Diff's per-line finding highlight (`SmartDiffFile.finding_lines`). */
   findingSeverity?: Severity;
+  /** Clicking the severity badge navigates to the specific finding on the
+   *  Findings tab — omitted → badge renders but isn't clickable (additive/
+   *  no-op, matches this diff-viewer tree's other optional-callback props). */
+  onFindingClick?: (path: string, line: number) => void;
 }) {
   const [hover, setHover] = React.useState(false);
   const [composing, setComposing] = React.useState(false);
@@ -70,7 +75,19 @@ export function CodeLine({
         </span>
         {findingSeverity && (
           <span style={{ flexShrink: 0, display: "flex", alignItems: "center", paddingRight: 10 }}>
-            <SeverityBadge severity={findingSeverity} compact />
+            {onFindingClick ? (
+              <button
+                type="button"
+                title="Go to this finding"
+                aria-label="Go to this finding"
+                onClick={() => onFindingClick(path, ln.newNo ?? ln.oldNo ?? 0)}
+                style={{ background: "none", border: "none", padding: 0, cursor: "pointer", display: "inline-flex" }}
+              >
+                <SeverityBadge severity={findingSeverity} compact />
+              </button>
+            ) : (
+              <SeverityBadge severity={findingSeverity} compact />
+            )}
           </span>
         )}
       </div>

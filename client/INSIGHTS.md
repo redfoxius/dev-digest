@@ -125,6 +125,34 @@ workflow and quality bar.
   (`client/src/vendor/ui/kit/Tabs.tsx`, `client/src/vendor/ui/kit/types.ts`
   — `TabDef.pulse`; `client/src/vendor/ui/AutoTriggerStatus.tsx:29-35`)
 
+- 2026-08-15 — Built the REVERSE of Phase 4's "view in diff" (a severity
+  badge click in `SmartDiffViewer` → navigate to the specific `FindingCard`
+  on the Findings tab) entirely by reusing three patterns already
+  established for the forward direction, rather than inventing new ones:
+  (1) bubble a raw `(path, line)` primitive up through the component tree
+  (`CodeLine` → `FileCard` → `SmartDiffViewer` → `DiffTab` → `page.tsx`)
+  and resolve it against already-loaded data centrally in `page.tsx`,
+  instead of threading full `FindingRecord`s down into the diff-viewer
+  tree — mirrors `onViewInDiff`'s own shape exactly. (2) Reused
+  `FindingsTab`'s existing Timeline-navigation `target` state
+  (`{runId, n}`) rather than building a parallel mechanism — just extended
+  it with an optional `findingId`, fed via a new effect watching an
+  external `scrollTarget` prop (the same "internal state + external prop,
+  merged via effect" shape `SmartDiffViewer` already uses for its own
+  internal/external scroll target). (3) `FindingsPanel`'s new
+  `scrollToFindingId` two-effect pattern (un-hide "hide low confidence"
+  first if that's what's filtering the target out, THEN scroll once
+  `shown` actually contains it) mirrors `FileCard`'s established
+  two-effect `scrollToLine` reasoning — a state change needs its own
+  render before the target exists in a filtered list. Lesson: before
+  designing a new cross-tab navigation feature, check whether the
+  opposite-direction feature already solved the same "which pattern"
+  question — usually yes.
+  (`client/src/components/diff-viewer/CodeLine/CodeLine.tsx` —
+  `onFindingClick`; `client/src/app/repos/[repoId]/pulls/[number]/page.tsx`
+  — `handleFindingBadgeClick`;
+  `.../_components/FindingsPanel/FindingsPanel.tsx` — `scrollToFindingId`)
+
 - 2026-08-14 — The `<span onClick={(e) => e.stopPropagation()}>` wrapper for
   a small interactive element nested inside a bigger clickable row (first
   established for `FileCard`'s `headerRight` slot, see the 2026-08-14
@@ -579,7 +607,32 @@ workflow and quality bar.
   (`client/src/app/agents/_components/AgentCard/AgentCard.tsx:41-59`,
   `client/src/app/agents/_components/AgentCard/AgentCard.test.tsx`)
 
+- 2026-08-15 — The severity-badge-to-`FindingCard` navigation uses `setTab()`
+  (this app's existing `router.replace`-based tab-switch primitive), not a
+  literal `router.push()`, for consistency with every other tab switch in
+  this codebase (mixing replace/push in the same navigation family would
+  give confusing back-button behavior). If a course-assignment rubric
+  specifically checks for a literal `router.push()` call rather than just
+  "programmatic navigation to the right place," this choice would need
+  revisiting — flagging since the request's own wording used "router.push."
+  (`client/src/app/repos/[repoId]/pulls/[number]/page.tsx` —
+  `handleFindingBadgeClick`'s `setTab("findings")` call)
+
 ## Session Notes
+
+- 2026-08-15 — Implemented two fixes surfaced by comparing the codebase
+  against a course-assignment checklist (branch `feat/diff-findings-nav`,
+  stacked on the still-unmerged `feat/smart-diff`/PR #16 since this work
+  depends on its Phase 4 code): an English-output instruction for the
+  Intent classifier prompt (server, see `server/INSIGHTS.md`), and
+  severity-badge → `FindingCard` navigation in the Diff tab (see Codebase
+  Patterns above). `pnpm typecheck` + full suites (330 server, 188 client)
+  green. Verified live against a real PR (#5): clicking a WARNING badge on
+  `routes.ts:111` correctly opens the Findings tab and scrolls to the
+  matching card, 0 console errors. Two other items from the same
+  checklist comparison (a `verify:l03` script, differently-named client
+  hooks) were left unresolved pending the actual assignment text — see the
+  conversation, not captured here since they weren't implemented.
 
 - 2026-08-14 — Implemented `docs/run-status-plan.md` end to end: fixed a
   real reported bug (live run status "disappearing" on tab switch — really
