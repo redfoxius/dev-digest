@@ -11,7 +11,10 @@ import { z } from 'zod';
  * `secretsPath`, read the way `LocalSecretsProvider` does,
  * `server/src/adapters/secrets/local.ts`) — never a second secrets file.
  */
-const LOOPBACK_HOSTNAMES = new Set(['localhost', '127.0.0.1', '::1']);
+// `new URL(url).hostname` always returns IPv6 literals in bracketed form
+// (`[::1]`, never bare `::1`) — pr-self-review caught a dead allowlist entry
+// here that used the unbracketed form and could never match.
+const LOOPBACK_HOSTNAMES = new Set(['localhost', '127.0.0.1', '[::1]']);
 
 const EnvSchema = z.object({
   // Matches server/src/platform/config.ts's API_PORT default (3001).
@@ -25,7 +28,7 @@ const EnvSchema = z.object({
     .url()
     .default('http://localhost:3001')
     .refine((url) => LOOPBACK_HOSTNAMES.has(new URL(url).hostname), {
-      message: 'DEVDIGEST_API_BASE must point at localhost/127.0.0.1/::1 — this server only talks to a local DevDigest API.',
+      message: 'DEVDIGEST_API_BASE must point at localhost/127.0.0.1/[::1] — this server only talks to a local DevDigest API.',
     }),
   // 45s default: must sit under the MCP SDK Client's own default per-call
   // request timeout (DEFAULT_REQUEST_TIMEOUT_MSEC = 60000ms,

@@ -1,10 +1,7 @@
 import type { PrDetail } from '@devdigest/shared';
 import type { Container } from '../../platform/container.js';
-import type * as schema from '../../db/schema.js';
-import type { PullRow } from '../../db/rows.js';
+import type { PullRow, RepoRow } from '../../db/rows.js';
 import * as pullsRepo from './repository.js';
-
-type RepoRow = typeof schema.repos.$inferSelect;
 
 /**
  * Layer 2 (docs/pr-diff-reindex-plan.md) — live GitHub refresh of a PR's

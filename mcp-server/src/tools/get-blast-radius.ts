@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { PrField, RepoField } from '../schemas.js';
 import type { ToolCallResult, ToolDefinition, ToolDeps } from '../tool-contract.js';
 import type { ToolErrorResult } from '../errors.js';
 
@@ -17,8 +18,8 @@ import type { ToolErrorResult } from '../errors.js';
 
 const GetBlastRadiusInputSchema = z
   .object({
-    repo: z.string(),
-    pr: z.number().int().positive(),
+    repo: RepoField,
+    pr: PrField,
   })
   .strict();
 type GetBlastRadiusInput = z.infer<typeof GetBlastRadiusInputSchema>;

@@ -1,7 +1,8 @@
 import { z } from 'zod';
-import { DomainError, toToolError } from '../errors.js';
+import { DomainError, describeRunFailure, toToolError } from '../errors.js';
 import { mapReviewToConciseResult } from '../mappers.js';
 import { parseRepo, resolvePull, resolveRepo } from '../resolve.js';
+import { PrField, RepoField } from '../schemas.js';
 import type { ToolCallResult, ToolDefinition, ToolDeps } from '../tool-contract.js';
 import type { AgentSummary, RunRow } from '../types.js';
 
@@ -22,8 +23,8 @@ const TERMINAL_STATUSES = new Set(['done', 'failed', 'cancelled']);
 
 const RunAgentOnPrInputSchema = z
   .object({
-    repo: z.string().describe("GitHub repo in 'owner/name' form, e.g. 'acme/payments-api'."),
-    pr: z.number().int().positive().describe('Pull request number.'),
+    repo: RepoField,
+    pr: PrField,
     agent: z.string().describe('Agent id or name — see list_agents for valid values.'),
   })
   .strict();
@@ -109,10 +110,9 @@ export function createRunAgentOnPrTool(): ToolDefinition<RunAgentOnPrInput> {
         }
 
         if (row.status === 'failed' || row.status === 'cancelled') {
-          const errorText = row.error ?? `Run ${row.status} with no error detail provided.`;
           return {
             isError: true,
-            content: [{ type: 'text', text: `Review run ${runId} ${row.status}: ${errorText}` }],
+            content: [{ type: 'text', text: describeRunFailure(runId, row.status, row.error) }],
           };
         }
 

@@ -44,3 +44,22 @@ export function toToolError(err: unknown): ToolErrorResult {
   console.error('[mcp-server] unexpected error:', err);
   return { isError: true, content: [{ type: 'text', text: 'An unexpected error occurred.' }] };
 }
+
+/**
+ * `agent_runs.error` (surfaced to this package via `RunRow.error`) is NOT a
+ * `DomainError` message — it's whatever `server/src/modules/reviews/run-executor.ts`
+ * persisted as `(err as Error).message` for any exception that failed a
+ * review run (LLM/provider errors, network errors, etc.), unsanitized. This
+ * package's own `DomainError` messages are hand-written to be client-safe;
+ * that invariant does NOT extend to text that merely got wrapped in a
+ * `DomainError` after the fact (pr-self-review's CRITICAL finding on PR #18:
+ * `get_findings`/`run_agent_on_pr` were both doing exactly that, letting raw
+ * upstream error text reach the MCP client on every failed run). Give the
+ * raw detail the same stderr-only treatment `toToolError` already gives
+ * non-`DomainError` exceptions, and return a generic-but-actionable message
+ * instead.
+ */
+export function describeRunFailure(runId: string, status: string, rawError: string | null | undefined): string {
+  if (rawError) console.error(`[mcp-server] run ${runId} ${status}:`, rawError);
+  return `Run ${runId} ${status}. Check the DevDigest server logs (or the run's trace in the studio UI) for the underlying cause.`;
+}
