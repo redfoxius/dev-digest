@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { toToolError } from '../errors.js';
-import { resolveRepo } from '../resolve.js';
+import { parseRepo, resolveRepo } from '../resolve.js';
 import { ConventionCategory, ConventionStatus } from '../types.js';
 import type { ToolCallResult, ToolDefinition, ToolDeps } from '../tool-contract.js';
 
@@ -41,8 +41,8 @@ export function createGetConventionsTool(): ToolDefinition<GetConventionsInput> 
     },
     async handler(input: GetConventionsInput, { client }: ToolDeps): Promise<ToolCallResult> {
       try {
-        const [owner, name] = input.repo.split('/');
-        const { repoId } = await resolveRepo(client, owner ?? '', name ?? '');
+        const { owner, name } = parseRepo(input.repo);
+        const { repoId } = await resolveRepo(client, owner, name);
         const conventions = await client.getRepoConventions(repoId, {
           status: input.status,
           category: input.category,

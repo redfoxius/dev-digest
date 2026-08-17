@@ -9,6 +9,18 @@ import type { DevDigestApiClient } from './ports.js';
  * Root" section.
  */
 
+/** Parses `owner/name` into its parts — the one shared repo-format check
+ *  every tool taking a `repo` input uses, so they can't independently drift
+ *  on what counts as a valid repo string (findings-driven consolidation:
+ *  `get_conventions` used to skip this check entirely). */
+export function parseRepo(repo: string): { owner: string; name: string } {
+  const parts = repo.split('/');
+  if (parts.length !== 2 || !parts[0] || !parts[1]) {
+    throw new DomainError(`Repo '${repo}' must be in 'owner/name' format, e.g. 'acme/payments-api'.`);
+  }
+  return { owner: parts[0], name: parts[1] };
+}
+
 export async function resolveRepo(
   client: DevDigestApiClient,
   owner: string,

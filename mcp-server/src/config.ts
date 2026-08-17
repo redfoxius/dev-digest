@@ -11,9 +11,22 @@ import { z } from 'zod';
  * `secretsPath`, read the way `LocalSecretsProvider` does,
  * `server/src/adapters/secrets/local.ts`) — never a second secrets file.
  */
+const LOOPBACK_HOSTNAMES = new Set(['localhost', '127.0.0.1', '::1']);
+
 const EnvSchema = z.object({
   // Matches server/src/platform/config.ts's API_PORT default (3001).
-  DEVDIGEST_API_BASE: z.string().url().default('http://localhost:3001'),
+  // Restricted to loopback: this package's whole trust model is "talks to
+  // server/'s Fastify API over localhost only" (mcp-server/CLAUDE.md's Stack
+  // section) — allowing an arbitrary host here would let a malicious MCP
+  // client config point this process's HTTP requests at an external target
+  // (SSRF), since there's no bearer-token auth in v1 to limit the blast radius.
+  DEVDIGEST_API_BASE: z
+    .string()
+    .url()
+    .default('http://localhost:3001')
+    .refine((url) => LOOPBACK_HOSTNAMES.has(new URL(url).hostname), {
+      message: 'DEVDIGEST_API_BASE must point at localhost/127.0.0.1/::1 — this server only talks to a local DevDigest API.',
+    }),
   // 45s default: must sit under the MCP SDK Client's own default per-call
   // request timeout (DEFAULT_REQUEST_TIMEOUT_MSEC = 60000ms,
   // node_modules/@modelcontextprotocol/sdk/dist/esm/shared/protocol.js:8),

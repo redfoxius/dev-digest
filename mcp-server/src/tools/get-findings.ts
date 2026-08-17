@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { DomainError, toToolError } from '../errors.js';
 import { mapReviewToConciseResult } from '../mappers.js';
-import { resolvePull, resolveRepo } from '../resolve.js';
+import { parseRepo, resolvePull, resolveRepo } from '../resolve.js';
 import type { ToolCallResult, ToolDefinition, ToolDeps } from '../tool-contract.js';
 
 /**
@@ -47,10 +47,7 @@ export function createGetFindingsTool(): ToolDefinition<GetFindingsInput> {
     },
     async handler(input: GetFindingsInput, { client }: ToolDeps): Promise<ToolCallResult> {
       try {
-        const [owner, name] = input.repo.split('/');
-        if (!owner || !name) {
-          throw new DomainError(`Repo '${input.repo}' must be in 'owner/name' format, e.g. 'acme/payments-api'.`);
-        }
+        const { owner, name } = parseRepo(input.repo);
         const { repoId } = await resolveRepo(client, owner, name);
         const { pullId } = await resolvePull(client, repoId, input.pr);
 
