@@ -170,19 +170,25 @@ function handleTopLevel(node: SgNode, out: ParsedSymbol[]): void {
     }
     case 'const_declaration':
     case 'var_declaration': {
-      // Only symbol-worthy when the value is a func literal (mirrors TS/JS's
-      // "only a symbol when the value is fn-like" rule). Multi-name specs
-      // (`var a, b = f, g`) — field('name') returns the first name only;
-      // documented v1 simplification.
+      // Func-literal values are 'function' symbols (mirrors TS/JS). Any other
+      // top-level const/var value (a literal, a composite literal, a call
+      // result, etc.) is now still indexed as a 'const' symbol rather than
+      // silently dropped — TS/JS had the identical gap (`export const
+      // COLLIDERS = {...}` was invisible to reference resolution,
+      // undercounting cross-file callers for const-heavy exports; see
+      // docs/blast-radius-plan.md's live verification) and both extractors
+      // are kept consistent by design (see this function's module comment).
+      // Multi-name specs (`var a, b = f, g`) — field('name') returns the
+      // first name only; documented v1 simplification.
       const specKind = node.kind() === 'const_declaration' ? 'const_spec' : 'var_spec';
       for (const spec of childrenOfKind(node, specKind)) {
         const name = getField(spec, 'name')?.text();
         if (!name) continue;
         const value = getField(spec, 'value');
-        if (value?.kind() !== 'func_literal') continue;
+        const symKind = value?.kind() === 'func_literal' ? 'function' : 'const';
         out.push({
           name,
-          kind: 'function',
+          kind: symKind,
           line: lineOf(spec),
           endLine: endLineOf(spec),
           exported: isExported(name),

@@ -236,17 +236,29 @@ function handleDecl(
     }
     case 'lexical_declaration':
     case 'variable_declaration': {
-      // `const foo = ...` / `let foo = ...` / `var foo = ...` — only treat as
-      // a function-style symbol when the value is a fn-like (arrow, function
-      // expression, async arrow, etc.). Plain values aren't symbols here.
+      // `const foo = ...` / `let foo = ...` / `var foo = ...` at module scope
+      // (this loop only ever sees top-level declarations — see parseSymbols'
+      // "recurse only one level" comment — so this can't flood the table with
+      // function-local variables). Function-like values (arrow/function
+      // expression/generator) are 'function' symbols, same as before; any
+      // other value (object/array literals, primitives, `as const` maps,
+      // etc.) is now still indexed as a 'const' symbol rather than silently
+      // dropped — a bare `continue` here previously meant e.g.
+      // `export const COLLIDERS = {...}` was invisible to reference
+      // resolution, undercounting cross-file callers for const-heavy
+      // exports (found via docs/blast-radius-plan.md's live verification).
       for (const decl of childrenOfKind(node, 'variable_declarator')) {
-        const name = getField(decl, 'name')?.text();
-        if (!name || KEYWORDS.has(name)) continue;
+        const nameNode = getField(decl, 'name');
+        // Skip destructuring patterns (`const { a, b } = ...`) — `.text()`
+        // on an object/array pattern isn't a usable single symbol name.
+        if (!nameNode || nameNode.kind() !== 'identifier') continue;
+        const name = nameNode.text();
+        if (KEYWORDS.has(name)) continue;
         const value = getField(decl, 'value');
-        if (!isFunctionLike(value)) continue;
+        const symKind = isFunctionLike(value) ? 'function' : 'const';
         out.push({
           name,
-          kind: 'function',
+          kind: symKind,
           line: lineOf(decl),
           endLine: endLineOf(decl),
           exported,

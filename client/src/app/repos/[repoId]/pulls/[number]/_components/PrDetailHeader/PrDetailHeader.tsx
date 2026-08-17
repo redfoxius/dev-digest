@@ -126,6 +126,7 @@ export function PrDetailHeader({
             pulse: reviewRunning,
           },
           { key: "diff", label: "Files changed", icon: "Code", count: pr.files_count },
+          { key: "blast", label: "Blast radius", icon: "Target" },
         ]}
       />
     </div>

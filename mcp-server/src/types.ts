@@ -156,3 +156,41 @@ export const ConciseReviewResultSchema = z.object({
   findings: z.array(ConciseFindingSchema),
 });
 export type ConciseReviewResult = z.infer<typeof ConciseReviewResultSchema>;
+
+// ---- Blast radius (GET /pulls/:id/blast) -----------------------------------
+// Hand-copied from server/src/vendor/shared/contracts/review-api.ts's
+// BlastRadiusResponse (itself extending contracts/brief.ts's BlastRadius) —
+// same DRIFT RISK treatment as ConventionCategory/FindingSeverity above: if
+// the server ever renames/adds a field here, this copy goes stale silently.
+
+export const BlastChangedSymbolSchema = z.object({
+  name: z.string(),
+  file: z.string(),
+  kind: z.string(),
+});
+export type BlastChangedSymbol = z.infer<typeof BlastChangedSymbolSchema>;
+
+export const BlastCallerSchema = z.object({
+  name: z.string(),
+  file: z.string(),
+  line: z.number().int(),
+});
+export type BlastCaller = z.infer<typeof BlastCallerSchema>;
+
+export const DownstreamImpactSchema = z.object({
+  symbol: z.string(),
+  callers: z.array(BlastCallerSchema),
+  endpoints_affected: z.array(z.string()),
+  crons_affected: z.array(z.string()),
+});
+export type DownstreamImpact = z.infer<typeof DownstreamImpactSchema>;
+
+export const BlastRadiusResultSchema = z.object({
+  changed_symbols: z.array(BlastChangedSymbolSchema),
+  downstream: z.array(DownstreamImpactSchema),
+  summary: z.string(),
+  degraded: z.boolean().nullish(),
+  reason: z.string().nullish(),
+  indexed_sha: z.string().nullish(),
+});
+export type BlastRadiusResult = z.infer<typeof BlastRadiusResultSchema>;
