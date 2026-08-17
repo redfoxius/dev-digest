@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { DomainError, toToolError } from '../errors.js';
 import { mapReviewToConciseResult } from '../mappers.js';
-import { resolvePull, resolveRepo } from '../resolve.js';
+import { parseRepo, resolvePull, resolveRepo } from '../resolve.js';
 import type { ToolCallResult, ToolDefinition, ToolDeps } from '../tool-contract.js';
 import type { AgentSummary, RunRow } from '../types.js';
 
@@ -29,19 +29,9 @@ const RunAgentOnPrInputSchema = z
   .strict();
 type RunAgentOnPrInput = z.infer<typeof RunAgentOnPrInputSchema>;
 
-function parseRepo(repo: string): { owner: string; name: string } {
-  const parts = repo.split('/');
-  if (parts.length !== 2 || !parts[0] || !parts[1]) {
-    throw new DomainError(
-      `Invalid repo '${repo}' — expected 'owner/name' form, e.g. 'acme/payments-api'.`,
-    );
-  }
-  return { owner: parts[0], name: parts[1] };
-}
-
 function resolveAgentId(agents: AgentSummary[], agent: string): string {
   const byId = agents.find((a) => a.id === agent);
-  if (byId) return byId.id;
+  if (byId) return assertEnabled(byId);
 
   const nameMatches = agents.filter((a) => a.name.toLowerCase() === agent.toLowerCase());
   if (nameMatches.length === 0) {
@@ -54,7 +44,16 @@ function resolveAgentId(agents: AgentSummary[], agent: string): string {
         `again with one of these ids: [${ids}]`,
     );
   }
-  return nameMatches[0]!.id;
+  return assertEnabled(nameMatches[0]!);
+}
+
+function assertEnabled(agent: AgentSummary): string {
+  if (!agent.enabled) {
+    throw new DomainError(
+      `agent '${agent.name}' (${agent.id}) is disabled — call list_agents to see enabled agents.`,
+    );
+  }
+  return agent.id;
 }
 
 function sleep(ms: number): Promise<void> {

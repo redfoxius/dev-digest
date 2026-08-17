@@ -29,13 +29,18 @@ export interface ToolErrorResult {
 /** Maps any thrown error to an MCP tool-result error payload. Every
  *  `DomainError` message is already written to name a concrete next step
  *  (call `list_agents`, retry with a specific id, wait N seconds, start the
- *  server) — this function does no further rewriting for that case. */
+ *  server) — this function does no further rewriting for that case.
+ *
+ *  Anything else (a programming error — TypeError, ReferenceError, etc.) is
+ *  NOT a `DomainError`, so its message wasn't written for an MCP client to
+ *  see and may carry stack-trace-adjacent internal detail. That full error
+ *  is logged to stderr for local debugging, but the client only gets a
+ *  generic message — same least-information-disclosure treatment DomainError
+ *  callers already get by construction. */
 export function toToolError(err: unknown): ToolErrorResult {
-  const text =
-    err instanceof DomainError
-      ? err.message
-      : err instanceof Error
-        ? err.message
-        : String(err);
-  return { isError: true, content: [{ type: 'text', text }] };
+  if (err instanceof DomainError) {
+    return { isError: true, content: [{ type: 'text', text: err.message }] };
+  }
+  console.error('[mcp-server] unexpected error:', err);
+  return { isError: true, content: [{ type: 'text', text: 'An unexpected error occurred.' }] };
 }
