@@ -21,34 +21,43 @@ import type { PrFile, PrCommit } from '@devdigest/shared';
  */
 
 /** Replace a PR's persisted files wholesale (delete + insert) — a live
- *  GitHub fetch has no concept of an incremental file diff to merge against. */
+ *  GitHub fetch has no concept of an incremental file diff to merge against.
+ *  Wrapped in a transaction: an unwrapped delete+insert left the PR with
+ *  zero persisted files if the insert failed after the delete committed
+ *  (pr-self-review finding on PR #18 — a real data-loss bug, not a style
+ *  preference; see the drizzle-orm-patterns skill's transaction guidance). */
 export async function replacePrFiles(db: Db, prId: string, files: PrFile[]): Promise<void> {
-  await db.delete(t.prFiles).where(eq(t.prFiles.prId, prId));
-  if (files.length === 0) return;
-  await db.insert(t.prFiles).values(
-    files.map((f) => ({
-      prId,
-      path: f.path,
-      additions: f.additions,
-      deletions: f.deletions,
-      patch: f.patch ?? null,
-    })),
-  );
+  await db.transaction(async (tx) => {
+    await tx.delete(t.prFiles).where(eq(t.prFiles.prId, prId));
+    if (files.length === 0) return;
+    await tx.insert(t.prFiles).values(
+      files.map((f) => ({
+        prId,
+        path: f.path,
+        additions: f.additions,
+        deletions: f.deletions,
+        patch: f.patch ?? null,
+      })),
+    );
+  });
 }
 
-/** Replace a PR's persisted commits wholesale (delete + insert). */
+/** Replace a PR's persisted commits wholesale (delete + insert). Same
+ *  transaction fix as `replacePrFiles` above. */
 export async function replacePrCommits(db: Db, prId: string, commits: PrCommit[]): Promise<void> {
-  await db.delete(t.prCommits).where(eq(t.prCommits.prId, prId));
-  if (commits.length === 0) return;
-  await db.insert(t.prCommits).values(
-    commits.map((c) => ({
-      prId,
-      sha: c.sha,
-      message: c.message,
-      author: c.author,
-      committedAt: c.committed_at ? new Date(c.committed_at) : null,
-    })),
-  );
+  await db.transaction(async (tx) => {
+    await tx.delete(t.prCommits).where(eq(t.prCommits.prId, prId));
+    if (commits.length === 0) return;
+    await tx.insert(t.prCommits).values(
+      commits.map((c) => ({
+        prId,
+        sha: c.sha,
+        message: c.message,
+        author: c.author,
+        committedAt: c.committed_at ? new Date(c.committed_at) : null,
+      })),
+    );
+  });
 }
 
 /**

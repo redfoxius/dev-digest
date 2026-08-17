@@ -1,7 +1,8 @@
 import { z } from 'zod';
-import { DomainError, toToolError } from '../errors.js';
+import { DomainError, describeRunFailure, toToolError } from '../errors.js';
 import { mapReviewToConciseResult } from '../mappers.js';
 import { parseRepo, resolvePull, resolveRepo } from '../resolve.js';
+import { PrField, RepoField } from '../schemas.js';
 import type { ToolCallResult, ToolDefinition, ToolDeps } from '../tool-contract.js';
 
 /**
@@ -19,10 +20,8 @@ import type { ToolCallResult, ToolDefinition, ToolDeps } from '../tool-contract.
 
 const GetFindingsInputSchema = z
   .object({
-    repo: z
-      .string()
-      .describe("GitHub repo in 'owner/name' format, e.g. 'acme/payments-api'. Must already be imported into DevDigest."),
-    pr: z.number().int().positive().describe('Pull request number within that repo.'),
+    repo: RepoField,
+    pr: PrField,
     run_id: z
       .string()
       .uuid()
@@ -78,7 +77,7 @@ export function createGetFindingsTool(): ToolDefinition<GetFindingsInput> {
           };
         }
         // 'failed' or 'cancelled'
-        throw new DomainError(run.error ?? `Run ${input.run_id} ${run.status} with no error detail recorded.`);
+        throw new DomainError(describeRunFailure(input.run_id, run.status, run.error));
       } catch (err) {
         return toToolError(err);
       }

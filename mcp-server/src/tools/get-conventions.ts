@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { toToolError } from '../errors.js';
 import { parseRepo, resolveRepo } from '../resolve.js';
+import { RepoField } from '../schemas.js';
 import { ConventionCategory, ConventionStatus } from '../types.js';
 import type { ToolCallResult, ToolDefinition, ToolDeps } from '../tool-contract.js';
 
@@ -19,7 +20,7 @@ import type { ToolCallResult, ToolDefinition, ToolDeps } from '../tool-contract.
 
 const GetConventionsInputSchema = z
   .object({
-    repo: z.string(),
+    repo: RepoField,
     status: ConventionStatus.optional(),
     category: ConventionCategory.optional(),
     language: z.string().optional(),
