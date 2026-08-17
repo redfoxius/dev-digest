@@ -15,6 +15,7 @@ aliases, not published modules):
 | `client/`        | `@devdigest/web`            | Next.js 15 web app (the studio)                       | 3000 |
 | `reviewer-core/` | `@devdigest/reviewer-core`  | Pure review engine: diff → prompt → LLM → findings    | —    |
 | `e2e/`           | `@devdigest/e2e`            | Deterministic browser e2e (agent-browser)             | —    |
+| `mcp-server/`    | `@devdigest/mcp-server`     | Local stdio MCP server: PR review as 5 tools for an MCP client | —    |
 | `server/src/vendor/shared` | `@devdigest/shared` | Zod contracts shared across every package             | —    |
 
 `repo-intel` (the codebase indexer that powers the **Indexed** badge and feeds
@@ -62,6 +63,14 @@ Each package has its own README with deeper diagrams:
 [`server`](server/README.md) (API map) ·
 [`reviewer-core`](reviewer-core/README.md) (review pipeline) ·
 [`e2e`](e2e/README.md).
+
+**Optional: drive review from an MCP client.** [`mcp-server/`](mcp-server/README.md)
+runs a local stdio MCP server exposing the same review workflow as 5 tools
+(`list_agents`, `run_agent_on_pr`, `get_findings`, `get_conventions`,
+`get_blast_radius`) so an MCP client like Claude Desktop or Claude Code can
+drive PR review without opening the studio. It talks to `server/`'s existing
+REST API over `localhost` — no separate setup beyond the local stack already
+running.
 
 ## What works on day 1
 

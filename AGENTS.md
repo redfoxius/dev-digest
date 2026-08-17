@@ -1,13 +1,13 @@
 # DevDigest
 
-Local-first AI PR review. Course starter — 4 standalone packages, no workspace
+Local-first AI PR review. Course starter — 5 standalone packages, no workspace
 tool (no pnpm workspaces/turborepo). Cross-package types via tsconfig path
 aliases, not published modules.
 
 ## Stack
 
-Node ≥22 · pnpm ≥10 (server/client) · npm (reviewer-core/e2e — see their own
-AGENTS.md) · Docker (Postgres+pgvector only; API/web run on host).
+Node ≥22 · pnpm ≥10 (server/client) · npm (reviewer-core/e2e/mcp-server — see
+their own AGENTS.md) · Docker (Postgres+pgvector only; API/web run on host).
 
 ## Where things live
 
@@ -15,12 +15,15 @@ AGENTS.md) · Docker (Postgres+pgvector only; API/web run on host).
 - `client/`         Next.js 15 studio (App Router) — see [client/AGENTS.md](client/AGENTS.md)
 - `reviewer-core/`  Pure review engine (diff→LLM→findings), no DB/FS — see [reviewer-core/AGENTS.md](reviewer-core/AGENTS.md)
 - `e2e/`            Deterministic browser e2e — see [e2e/AGENTS.md](e2e/AGENTS.md)
+- `mcp-server/`     Local stdio MCP server exposing PR review as 5 tools, talks to `server/` over HTTP — see [mcp-server/AGENTS.md](mcp-server/AGENTS.md)
 - `docs/`           Cross-cutting reference docs (agent prompts, model choice)
 
 ## Commands
 
-`./scripts/dev.sh` boots Postgres+API+web from zero. Per-package
-`pnpm|npm dev|test|typecheck` — see that package's own AGENTS.md for which.
+`./scripts/dev.sh` boots Postgres+API+web from zero — `mcp-server/` is not
+part of it (it's a stdio process an MCP client launches on demand, not a
+long-running service). Per-package `pnpm|npm dev|test|typecheck` — see that
+package's own AGENTS.md for which.
 
 ## Non-default conventions
 
