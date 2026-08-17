@@ -4,6 +4,7 @@ import { DomainError } from './errors.js';
 import type { ConventionFilters, DevDigestApiClient } from './ports.js';
 import {
   AgentSummarySchema,
+  BlastRadiusResultSchema,
   ConventionSummarySchema,
   PullSummarySchema,
   RepoSummarySchema,
@@ -75,6 +76,10 @@ export class FetchDevDigestApiClient implements DevDigestApiClient {
 
   getReviews(pullId: string): Promise<z.infer<typeof ReviewRecordSchema>[]> {
     return this.requestJson(`/pulls/${encodeURIComponent(pullId)}/reviews`, z.array(ReviewRecordSchema));
+  }
+
+  getBlastRadius(pullId: string): Promise<z.infer<typeof BlastRadiusResultSchema>> {
+    return this.requestJson(`/pulls/${encodeURIComponent(pullId)}/blast`, BlastRadiusResultSchema);
   }
 
   private async requestJson<T>(

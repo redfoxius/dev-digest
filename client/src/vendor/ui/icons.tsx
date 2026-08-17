@@ -2,6 +2,7 @@
    The prototype used window.Icon[name]; here we map those names to
    lucide-react components so all ported components keep the same API. */
 import {
+  Github,
   GitPullRequest,
   Layers,
   Sparkles,
@@ -84,6 +85,7 @@ import {
 
 /** Names used throughout the ported prototype, mapped to lucide-react. */
 export const Icon = {
+  Github,
   GitPullRequest,
   Layers,
   Sparkles,

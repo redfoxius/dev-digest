@@ -85,10 +85,11 @@ via `npx @modelcontextprotocol/inspector node dist/index.js` (after
   `server/tsconfig.json`, which legitimately aliases `@devdigest/reviewer-core`
   as an in-process consumer. This package is not one; it only talks to
   `server/` over HTTP.
-- `get_blast_radius` is a **permanent stub** by explicit product scope — it
-  makes zero HTTP calls and always returns `isError:true`. DevDigest's real
-  blast-radius engine (`server/src/modules/repo-intel/service.ts`'s
-  `getBlastRadius`) has no HTTP route yet; adding one is out of scope here.
+- **2026-08-17 correction:** `get_blast_radius` is no longer a stub — it was
+  called "permanent" by explicit product scope, but `GET /pulls/:id/blast`
+  shipped (`server/src/modules/blast/`, docs/blast-radius-plan.md) and this
+  tool now proxies it via `client.getBlastRadius(pullId)`
+  (`tools/get-blast-radius.ts`), same resolve+call shape as every other tool.
 - The 10/min rate limit on `POST /pulls/:id/review`
   (`server/src/modules/reviews/routes.ts`) is keyed by IP and shared with
   any browser-triggered run from the same host — `run_agent_on_pr` surfaces

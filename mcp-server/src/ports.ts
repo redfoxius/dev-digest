@@ -1,5 +1,6 @@
 import type {
   AgentSummary,
+  BlastRadiusResult,
   ConventionCategory,
   ConventionStatus,
   ConventionSummary,
@@ -34,4 +35,5 @@ export interface DevDigestApiClient {
   triggerReview(pullId: string, agentId: string): Promise<RunRef>;
   getRuns(pullId: string): Promise<RunRow[]>;
   getReviews(pullId: string): Promise<ReviewRecord[]>;
+  getBlastRadius(pullId: string): Promise<BlastRadiusResult>;
 }
