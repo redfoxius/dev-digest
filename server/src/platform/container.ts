@@ -33,6 +33,8 @@ import type { RepoIntel } from '../modules/repo-intel/types.js';
 import { RepoIntelService } from '../modules/repo-intel/service.js';
 import type { IntentDeriver } from '../modules/intent/types.js';
 import { IntentDeriverService } from '../modules/intent/service.js';
+import type { PullsSync } from '../modules/pulls/service.js';
+import { PullsSyncService } from '../modules/pulls/service.js';
 import type { DepGraph } from '../adapters/depgraph/index.js';
 import { UnionDepGraph } from '../adapters/depgraph/union.js';
 import { type Tokenizer, TiktokenTokenizer } from '../adapters/tokenizer/index.js';
@@ -57,6 +59,8 @@ export interface ContainerOverrides {
   repoIntel?: RepoIntel;
   /** Intent Layer — tests inject mock IntentDeriver implementations. */
   intentDeriver?: IntentDeriver;
+  /** Layer 2 PR diff self-heal — tests inject mock PullsSync implementations. */
+  pullsSync?: PullsSync;
   /** repo-intel T3 adapters — only the indexer pipeline reads these. */
   depgraph?: DepGraph;
   tokenizer?: Tokenizer;
@@ -87,6 +91,7 @@ export class Container {
   private _reposRepo?: RepoRepository;
   private _repoIntel?: RepoIntel;
   private _intentDeriver?: IntentDeriver;
+  private _pullsSync?: PullsSync;
   private _depgraph?: DepGraph;
   private _tokenizer?: Tokenizer;
   private _priceBook?: PriceBook;
@@ -151,6 +156,22 @@ export class Container {
     if (this.overrides.intentDeriver) return this.overrides.intentDeriver;
     this._intentDeriver ??= new IntentDeriverService(this);
     return this._intentDeriver;
+  }
+
+  /**
+   * Layer 2 (PR diff self-heal, docs/pr-diff-reindex-plan.md) — live GitHub
+   * refresh of a PR's persisted files/commits/body/diff-stats. Modeled on
+   * `repoIntel`/`intentDeriver` above: a cross-module orchestration
+   * capability (a port + a private repository) wired here so
+   * `diff-loader.ts` and `pulls/routes.ts` both call
+   * `container.pullsSync.refreshFromGitHub(...)` instead of one importing
+   * the other's `service.ts` directly, and so it stays swappable via
+   * `ContainerOverrides` in unit tests.
+   */
+  get pullsSync(): PullsSync {
+    if (this.overrides.pullsSync) return this.overrides.pullsSync;
+    this._pullsSync ??= new PullsSyncService(this);
+    return this._pullsSync;
   }
 
   /** Import-graph builder (dependency-cruiser). T3 indexer pipeline only. */
