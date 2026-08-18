@@ -101,7 +101,7 @@ export function createRunAgentOnPrTool(): ToolDefinition<RunAgentOnPrInput> {
             run_id: runId,
             message:
               `Review still in progress after ${Math.round(config.pollTimeoutMs / 1000)}s — call ` +
-              `get_findings(repo, pr, run_id) once it completes`,
+              `get_findings(repo, pr) once it completes`,
           };
           return {
             content: [{ type: 'text', text: JSON.stringify(result) }],
@@ -126,7 +126,7 @@ export function createRunAgentOnPrTool(): ToolDefinition<RunAgentOnPrInput> {
                 type: 'text',
                 text:
                   `Review run ${runId} reported status 'done' but no matching review was found — ` +
-                  `retry get_findings(repo, pr, run_id="${runId}") shortly.`,
+                  `retry get_findings(repo, pr) shortly.`,
               },
             ],
           };

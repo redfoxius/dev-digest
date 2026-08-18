@@ -1,43 +1,66 @@
 import { z } from 'zod';
-import { DomainError, describeRunFailure, toToolError } from '../errors.js';
-import { mapReviewToConciseResult } from '../mappers.js';
+import { toToolError } from '../errors.js';
+import { mapReviewToFindingsItem } from '../mappers.js';
 import { parseRepo, resolvePull, resolveRepo } from '../resolve.js';
 import { PrField, RepoField } from '../schemas.js';
 import type { ToolCallResult, ToolDefinition, ToolDeps } from '../tool-contract.js';
+import type { ReviewRecord } from '../types.js';
 
 /**
- * `get_findings` — fetch the findings/verdict of an already-completed review
- * run by its `run_id` (docs/mcp-server-plan.md's Work Item 7). Resolves
- * `repo`+`pr` to `pullId` (same `resolve.ts` helpers as `run_agent_on_pr`),
- * then looks the run up by `run_id` — strictly the caller-supplied id, never
- * "the latest review for this PR" (see plan's "Relevant INSIGHTS.md
- * Gotchas": picking the latest row naively drops sibling agents' data).
+ * `get_findings` — fetch the findings/verdicts for a whole PR, across every
+ * agent that has reviewed it. Resolves `repo`+`pr` to `pullId` (same
+ * `resolve.ts` helpers as `run_agent_on_pr`), then reads `GET
+ * /pulls/:id/reviews` (via `client.getReviews`) and, by default, keeps only
+ * the most recent review per agent — an agent re-run on the same PR
+ * shouldn't make its stale findings resurface alongside its current ones.
+ * `all_runs:true` returns the full, undeduped run history instead.
  *
- * Output shape on success is identical to `run_agent_on_pr`'s success case —
- * both go through `mappers.ts`'s `mapReviewToConciseResult` so the two never
- * independently drift.
+ * Dedup relies on the server returning reviews newest-first
+ * (`desc(createdAt)`, `server/src/modules/reviews/repository/review.repo.ts:93`)
+ * so the first occurrence of each `agent_id` is its latest run. A review
+ * with no `agent_id` (no agent attribution) is always kept as-is — there's
+ * no identity to dedup it against.
  */
 
 const GetFindingsInputSchema = z
   .object({
     repo: RepoField,
     pr: PrField,
-    run_id: z
-      .string()
-      .uuid()
+    all_runs: z
+      .boolean()
+      .optional()
       .describe(
-        'The run_id of an already-completed (or in-progress) review run, e.g. as returned by run_agent_on_pr.',
+        'If true, return every review run for this PR, including superseded re-runs of the same ' +
+          'agent. Default (false/omitted): one entry per agent — its most recent run only.',
       ),
   })
   .strict();
 type GetFindingsInput = z.infer<typeof GetFindingsInputSchema>;
 
+/** Newest-first `reviews` in, one entry per `agent_id` out (first = latest).
+ *  Reviews with no `agent_id` pass through unchanged. */
+function dedupeByAgent(reviews: ReviewRecord[]): ReviewRecord[] {
+  const seenAgents = new Set<string>();
+  const result: ReviewRecord[] = [];
+  for (const review of reviews) {
+    if (review.agent_id == null) {
+      result.push(review);
+      continue;
+    }
+    if (seenAgents.has(review.agent_id)) continue;
+    seenAgents.add(review.agent_id);
+    result.push(review);
+  }
+  return result;
+}
+
 export function createGetFindingsTool(): ToolDefinition<GetFindingsInput> {
   return {
     name: 'get_findings',
     description:
-      'Fetch the findings and verdict of an already-completed review run by its `run_id`. Use this to check ' +
-      'results without re-running the agent — e.g. after `run_agent_on_pr` reports the run is still in progress.',
+      'Fetch the findings and verdicts for a pull request, across every agent that has reviewed it. ' +
+      'Returns one entry per agent (its most recent run) by default — pass `all_runs:true` to see the ' +
+      'full run history instead, including superseded re-runs.',
     inputSchema: GetFindingsInputSchema,
     annotations: {
       readOnlyHint: true,
@@ -50,34 +73,18 @@ export function createGetFindingsTool(): ToolDefinition<GetFindingsInput> {
         const { repoId } = await resolveRepo(client, owner, name);
         const { pullId } = await resolvePull(client, repoId, input.pr);
 
-        const reviews = await client.getReviews(pullId);
-        const review = reviews.find((r) => r.run_id === input.run_id);
-        if (review) {
-          const result = mapReviewToConciseResult(review, input.run_id);
-          return {
-            content: [{ type: 'text', text: JSON.stringify(result) }],
-            structuredContent: result,
-          };
-        }
+        const allReviews = await client.getReviews(pullId);
+        const reviews = input.all_runs ? allReviews : dedupeByAgent(allReviews);
+        const mappedReviews = reviews.map(mapReviewToFindingsItem);
 
-        // Not found among completed reviews — cross-check the run rows to
-        // give an accurate reason (still running / failed / never existed).
-        const runs = await client.getRuns(pullId);
-        const run = runs.find((r) => r.run_id === input.run_id);
-        if (!run) {
-          throw new DomainError(
-            `No run found with id=${input.run_id} for this PR — check the id or call run_agent_on_pr again.`,
-          );
-        }
-        if (run.status === 'running') {
-          const result = { status: 'running' as const, message: 'still running, poll again' };
-          return {
-            content: [{ type: 'text', text: JSON.stringify(result) }],
-            structuredContent: result,
-          };
-        }
-        // 'failed' or 'cancelled'
-        throw new DomainError(describeRunFailure(input.run_id, run.status, run.error));
+        const result = {
+          reviews: mappedReviews,
+          total_findings: mappedReviews.reduce((sum, r) => sum + r.findings.length, 0),
+        };
+        return {
+          content: [{ type: 'text', text: JSON.stringify(result) }],
+          structuredContent: result,
+        };
       } catch (err) {
         return toToolError(err);
       }
