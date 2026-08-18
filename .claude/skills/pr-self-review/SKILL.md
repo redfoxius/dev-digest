@@ -1,7 +1,7 @@
 ---
 name: pr-self-review
 description: "Post-PR gate for this repo's own development: right after `gh pr create` succeeds (and again after any later `git push` to that PR's branch), matches the PR's changed files against every other skill in the catalog, runs each matched skill as an independent parallel reviewer, and posts the result as a real GitHub PR review (always `COMMENT` — GitHub blocks self-REQUEST_CHANGES too) plus a `blocked-critical` label on any CRITICAL finding or incomplete run. Two modes: light (default — critical-tier skills only: security, onion-architecture, golang-architecture, drizzle-orm-patterns, postgresql-table-design, fastify-best-practices, zod) and full (every matched skill), full runs only on request ('/pr-self-review full', 'full review', 'повний огляд') or when Claude proactively proposes it for a security-sensitive or large diff. Use automatically after opening or updating a PR in this repo; also invoke manually on '/pr-self-review', 'review this PR', 'self review', 'check this PR for critical issues'."
-version: "1.0.0"
+version: "1.1.0"
 allowed-tools: Bash, Read, Grep, Glob, Workflow
 ---
 
@@ -94,8 +94,27 @@ PR_NUMBER=$(gh pr view --json number -q .number)
 OWNER_REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
 FILES=$(gh pr view "$PR_NUMBER" --json files -q '.files[].path' \
   | grep -Ev '(^|/)(pnpm-lock\.yaml|package-lock\.json|.*\.snap|dist/|\.next/)')
-DIFF=$(gh pr diff "$PR_NUMBER")
+
+# Measure before fetching for real: `gh pr diff | wc -c` pipes the diff through the shell
+# internally and only returns you a byte count — the diff text itself never enters your
+# context here, unlike reading the file or piping it into a tool call would.
+DIFF_BYTES=$(gh pr diff "$PR_NUMBER" | wc -c)
+LARGE_DIFF=false
+if [ "$DIFF_BYTES" -gt 50000 ]; then LARGE_DIFF=true; fi
+
+if [ "$LARGE_DIFF" = "true" ]; then
+  DIFF=''  # deferred — see step 3's "Large diffs" note before fetching it for real
+else
+  DIFF=$(gh pr diff "$PR_NUMBER")
+fi
 ```
+
+**Large-diff deferral.** Above ~50KB (this repo's own dry-run precedent: a
+21-file, 175KB PR diff — see `docs/spec-creator-agent-plan.md`'s Round 3 —
+cost ~68K tokens to read in full, for a PR where nothing ultimately
+matched), don't fetch the diff text for real yet. `LARGE_DIFF=true` carries
+into step 3, which runs Match on `diff: ''` first and only pays the real
+fetch if something actually matches.
 
 **Mode:** `MODE=light` unless the invocation explicitly asked for `full`
 ("/pr-self-review full", "full review", "review all skills", "повний
@@ -144,10 +163,13 @@ reappearing.
 
 Call the `Workflow` tool with the script below, passing
 `args: { catalog: CATALOG, files: FILES.split('\n'), diff: DIFF, mode: MODE }`
-(`MODE` from step 1, `'light'` or `'full'`). This is the one genuine
-multi-agent orchestration step (one agent to match, one parallel subagent
-per matched skill to review) — everything before and after it is plain
-`Bash`/`gh` run directly by you, the calling agent.
+(`MODE` from step 1, `'light'` or `'full'`; `DIFF` is `''` when step 1 set
+`LARGE_DIFF=true`). This is the one genuine multi-agent orchestration step
+(one agent to match, one parallel subagent per matched skill to review) —
+everything before and after it is plain `Bash`/`gh` run directly by you,
+the calling agent. Note that the Match phase below never reads `diff` at
+all — only Review does — which is exactly what step 3's large-diff
+deferral relies on.
 
 ```js
 export const meta = {
@@ -407,6 +429,40 @@ below; the review body's own header text still says "Changes requested" as
 a plain-English status, it's just carried by a `COMMENT`-type review, not
 GitHub's `REQUEST_CHANGES` review state.
 
+### 3b. Large diffs: defer, then resume (only when `LARGE_DIFF=true`)
+
+If step 1 set `LARGE_DIFF=true`, the call above ran with `diff: ''` —
+Match still saw the real `catalog`/`files`, so its verdict is
+trustworthy, but Review (if dispatched) would have reviewed against an
+empty diff, which is wrong. Branch on the result:
+
+- **`matched: false`** — nothing to review. Skip straight to step 4 with
+  this result as-is; the real diff was never needed, and the ~50KB+ it
+  would have cost to inline was avoided entirely. This is the common case
+  for a docs/prompt/config-only PR (confirmed on this repo's own
+  `spec-creator` PR: 21 files, 175KB diff, zero matches, deferred diff
+  never fetched).
+- **`matched: true`** — something needs a real review. *Now* fetch the
+  diff for real (`DIFF=$(gh pr diff "$PR_NUMBER")`) and re-invoke the
+  same `Workflow` script via `resumeFromRunId` (the run id from the first
+  call), passing the **same** `catalog`/`files`/`mode` plus the now-real
+  `diff`:
+
+  ```
+  Workflow({ scriptPath: <the persisted script path from the first call>,
+             resumeFromRunId: <run id from the first call>,
+             args: { catalog: CATALOG, files: FILES.split('\n'), diff: DIFF, mode: MODE } })
+  ```
+
+  The Match `agent()` call's `(prompt, opts)` is unchanged (`diff` never
+  entered its prompt), so it replays from cache instantly at zero extra
+  cost — only the Review `agent()` calls run fresh, now against the real
+  diff. Use **this** result for step 4, not the first call's.
+
+Skip this step entirely when `LARGE_DIFF` was never set to `true` — the
+single call in step 3 already carried a real diff and its result is
+final.
+
 ### 4. Post the result (Bash, no agent)
 
 Take the Workflow result (`matched`, `body`, `comments`, `gateTripped`,
@@ -512,6 +568,14 @@ clean comment / clear the label on a run that didn't finish.
   always renders as its own row (`⏭️ skipped (light mode)`) in the posted
   table and gets named in the chat report — never quietly absent, even
   though its review subagent never ran.
+- **Eagerly inlining a large diff before Match has had a chance to return
+  zero matches.** `Workflow`'s script has no filesystem access, so any
+  `diff` value has to pass through the calling agent's own context to
+  reach `args` — for a large, docs/prompt-only PR that cost is pure waste
+  when nothing was ever going to match. Step 1's `LARGE_DIFF` check +
+  step 3b's deferred-fetch-and-resume exist specifically to avoid this
+  (see `docs/retros/ledger.md`'s `pr-self-review-pr20-match` row for the
+  real cost this pattern was retired to prevent).
 
 ## References
 
@@ -527,3 +591,8 @@ clean comment / clear the label on a run that didn't finish.
 - `server/src/adapters/github/octokit.ts` (`postReview`,
   `createReviewComment`) — the API shape `gh api .../reviews` mirrors.
 - `.claude/skills/README.md` — the catalog this skill matches against.
+- `docs/retros/ledger.md` (`pr-self-review-pr20-match` row) — the
+  `/workflow-retro` run that measured the real cost of eagerly inlining a
+  large diff (~$0.07 wasted on a placeholder-args false start, plus the
+  avoided ~68K-token cost of reading a 175KB diff for a PR that matched
+  nothing) and motivated step 1/3b's large-diff deferral.
