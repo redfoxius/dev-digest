@@ -161,6 +161,17 @@ that route, and a client tab to render it.
   first, add the single LLM call (if at all) as a separate follow-up once
   the core tab is verified. Exactly one call if added, per the acceptance
   criteria — never more.
+
+  **Verified current state (2026-08-18):** this optional LLM pass was never
+  built — it's still deferred, not just "capped at one call." Today
+  `BlastService.buildSummary` (`server/src/modules/blast/service.ts:86-108`)
+  is 100% deterministic string formatting (`Set` counts + a template
+  string), and `BlastService.getBlastRadius`
+  (`server/src/modules/blast/service.ts:19-83`) makes zero LLM-SDK calls —
+  confirmed by grep, only comments reference "LLM" in that file. So "no LLM
+  on the main path" holds unconditionally; "exactly one call for the
+  optional summary" isn't a runtime guarantee yet, it's a constraint on
+  whoever builds that follow-up.
 - **New route-to-file:line mapping** — `extractEndpoints` (`codeindex/extract.ts:182`)
   only returns `"METHOD /path"` strings today, no file:line for the route
   *handler* itself. The mockup's endpoint chips aren't shown as clickable

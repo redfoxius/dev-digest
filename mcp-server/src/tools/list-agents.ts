@@ -8,7 +8,9 @@ import type { ToolCallResult, ToolDefinition, ToolDeps } from '../tool-contract.
  * pick a valid `agent` id/name for `run_agent_on_pr` (docs/mcp-server-plan.md's
  * Work Item 5). `types.ts`'s `AgentSummary` is already this narrow shape
  * (drops `description`/`output_schema`/`strategy`/`ci_fail_on`/`repo_intel`/
- * `skills_count`/`version`), so no further mapping is needed here.
+ * `skills_count`/`version`, and — deliberately — `provider`: an internal
+ * routing detail an MCP client has no use for and this tool must never leak),
+ * so no further mapping is needed here.
  */
 
 const ListAgentsInputSchema = z.object({}).strict();
