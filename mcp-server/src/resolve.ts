@@ -1,0 +1,55 @@
+import { DomainError } from './errors.js';
+import type { DevDigestApiClient } from './ports.js';
+
+/**
+ * owner/repo + PR number → internal DevDigest uuid resolution. Depends on
+ * the `DevDigestApiClient` PORT TYPE (`ports.ts`), never on
+ * `http-client.ts`'s concrete `FetchDevDigestApiClient` directly — the
+ * onion-architecture fix from docs/mcp-server-plan.md's "Port & Composition
+ * Root" section.
+ */
+
+/** Parses `owner/name` into its parts — the one shared repo-format check
+ *  every tool taking a `repo` input uses, so they can't independently drift
+ *  on what counts as a valid repo string (findings-driven consolidation:
+ *  `get_conventions` used to skip this check entirely). */
+export function parseRepo(repo: string): { owner: string; name: string } {
+  const parts = repo.split('/');
+  if (parts.length !== 2 || !parts[0] || !parts[1]) {
+    throw new DomainError(`Repo '${repo}' must be in 'owner/name' format, e.g. 'acme/payments-api'.`);
+  }
+  return { owner: parts[0], name: parts[1] };
+}
+
+export async function resolveRepo(
+  client: DevDigestApiClient,
+  owner: string,
+  name: string,
+): Promise<{ repoId: string }> {
+  const fullName = `${owner}/${name}`;
+  const repos = await client.getRepos();
+  const match = repos.find((r) => r.fullName.toLowerCase() === fullName.toLowerCase());
+  if (!match) {
+    throw new DomainError(
+      `Repo '${fullName}' is not imported into DevDigest yet. Add it first via POST /repos ` +
+        `(or the studio's 'Add Repo' flow), then retry.`,
+    );
+  }
+  return { repoId: match.id };
+}
+
+export async function resolvePull(
+  client: DevDigestApiClient,
+  repoId: string,
+  prNumber: number,
+): Promise<{ pullId: string }> {
+  const pulls = await client.getRepoPulls(repoId);
+  const match = pulls.find((p) => p.number === prNumber);
+  if (!match) {
+    throw new DomainError(
+      `PR #${prNumber} is not imported into DevDigest for this repo yet. Verify the PR ` +
+        `number, or import/refresh the repo's pull requests first, then retry.`,
+    );
+  }
+  return { pullId: match.id };
+}

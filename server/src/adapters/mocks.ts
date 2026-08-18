@@ -252,11 +252,21 @@ export interface MockGitOptions {
   head?: string;
   /** Head `currentHead()` returns AFTER `sync()` runs — simulates fetch+reset advancing HEAD. */
   syncedHead?: string;
+  /** Force `fetchPullHead()` to throw — simulates an unreachable remote / no clone yet
+   *  (diff-loader.ts Layer 1's best-effort reindex; docs/pr-diff-reindex-plan.md). */
+  fetchPullHeadThrows?: boolean;
+  /** Force `diff()` to throw instead of returning a fixture — simulates the "unknown
+   *  revision" failure diff-loader.ts's Layer 1 is meant to route around. `true` throws
+   *  a generic Error; pass an `Error` for a specific message. */
+  diffThrows?: boolean | Error;
 }
 
 export class MockGitClient implements GitClient {
   public cloned: { repo: RepoRef; url: string }[] = [];
   public syncs: { repo: RepoRef; branch: string }[] = [];
+  /** Every `fetchPullHead()` call, in order — asserts diff-loader.ts's Layer 1
+   *  actually attempted the active reindex before falling back. */
+  public fetchPullHeadCalls: { repo: RepoRef; n: number }[] = [];
   private syncedHead?: string;
 
   constructor(private opts: MockGitOptions = {}) {}
@@ -268,7 +278,10 @@ export class MockGitClient implements GitClient {
     this.cloned.push({ repo, url });
     return { path: this.clonePathFor(repo) };
   }
-  async fetchPullHead(): Promise<void> {}
+  async fetchPullHead(repo: RepoRef, n: number): Promise<void> {
+    this.fetchPullHeadCalls.push({ repo, n });
+    if (this.opts.fetchPullHeadThrows) throw new Error('fetchPullHead failed (mock)');
+  }
   async sync(repo: RepoRef, branch: string): Promise<{ head: string }> {
     this.syncs.push({ repo, branch });
     // After a sync, HEAD advances to syncedHead (or stays at head if unset).
@@ -282,6 +295,11 @@ export class MockGitClient implements GitClient {
     return this.opts.diffNameOnly ?? [];
   }
   async diff(): Promise<UnifiedDiff> {
+    if (this.opts.diffThrows) {
+      throw this.opts.diffThrows instanceof Error
+        ? this.opts.diffThrows
+        : new Error('git diff failed (mock): unknown revision');
+    }
     const raw =
       this.opts.diff ??
       'diff --git a/src/config.ts b/src/config.ts\n--- a/src/config.ts\n+++ b/src/config.ts\n@@ -10,3 +10,4 @@\n   port: 3000,\n+  stripeKey: "sk_live_xxx",\n   redisUrl: x,';

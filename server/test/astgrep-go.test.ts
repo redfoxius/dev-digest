@@ -80,6 +80,31 @@ describe('parseSymbols (Go)', () => {
   it('returns [] for a non-Go file', () => {
     expect(parseSymbols('main.py', SRC)).toEqual([]);
   });
+
+  it("indexes non-func-literal top-level const/var as 'const' symbols", () => {
+    // Mirrors astgrep.test.ts's TS/JS coverage of the identical, intentionally
+    // kept-consistent gap: a top-level const/var whose value isn't a func
+    // literal used to be silently dropped, undercounting cross-file callers
+    // for const-heavy exports (docs/blast-radius-plan.md).
+    const src = `package main
+
+const MaxPlayers = 16
+
+var Colliders = map[string]int{"wall": 1}
+
+func Handler() {}
+`;
+    const syms = parseSymbols('main.go', src);
+    const maxPlayers = syms.find((x) => x.name === 'MaxPlayers');
+    expect(maxPlayers?.kind).toBe('const');
+    expect(maxPlayers?.exported).toBe(true);
+
+    const colliders = syms.find((x) => x.name === 'Colliders');
+    expect(colliders?.kind).toBe('const');
+
+    const handler = syms.find((x) => x.name === 'Handler');
+    expect(handler?.kind).toBe('function');
+  });
 });
 
 describe('parseReferences (Go)', () => {

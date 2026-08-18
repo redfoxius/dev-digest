@@ -403,6 +403,25 @@ export class RepoIntelService implements RepoIntel {
     }
     callers.sort((a, b) => b.rank - a.rank);
 
+    // Cap PER CHANGED SYMBOL (`viaSymbol`), not globally across the whole PR
+    // — the constant's own name/doc already says "per changed symbol", but a
+    // flat `callers.slice(0, N)` here previously capped the WHOLE PR's caller
+    // list instead. For a PR touching many symbols, a handful of
+    // highest-rank callers all reaching one or two symbols could exhaust the
+    // entire budget, leaving every other changed symbol showing zero callers
+    // even when real ones exist (found via docs/blast-radius-plan.md's live
+    // verification — a 193-symbol PR showed 0 callers for ~180 of them).
+    // Iterating the already rank-sorted `callers` and counting per symbol
+    // keeps global rank order while capping each symbol's own allotment.
+    const cappedCallers: BlastCallerRow[] = [];
+    const countBySymbol = new Map<string, number>();
+    for (const c of callers) {
+      const n = countBySymbol.get(c.viaSymbol) ?? 0;
+      if (n >= MAX_CALLERS_PER_SYMBOL) continue;
+      countBySymbol.set(c.viaSymbol, n + 1);
+      cappedCallers.push(c);
+    }
+
     // Precomputed facts per caller file (endpoints + crons), so consumers can
     // attribute them to the changed symbol whose callers live in that file.
     const facts = await this.repo.getFileFacts(repoId, callerFiles);
@@ -415,7 +434,7 @@ export class RepoIntelService implements RepoIntel {
 
     return {
       changedSymbols,
-      callers: callers.slice(0, MAX_CALLERS_PER_SYMBOL),
+      callers: cappedCallers,
       impactedEndpoints: [...endpoints],
       factsByFile,
       degraded: false,

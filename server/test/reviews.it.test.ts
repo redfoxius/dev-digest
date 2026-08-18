@@ -5,7 +5,13 @@ import { waitForPrRuns } from './helpers/runs.js';
 import { buildApp } from '../src/app.js';
 import { loadConfig } from '../src/platform/config.js';
 import { seed } from '../src/db/seed.js';
-import { MockLLMProvider, MockEmbedder, MockGitClient, MockIntentDeriver } from '../src/adapters/mocks.js';
+import {
+  MockLLMProvider,
+  MockEmbedder,
+  MockGitClient,
+  MockIntentDeriver,
+  MockSecretsProvider,
+} from '../src/adapters/mocks.js';
 import * as t from '../src/db/schema.js';
 import { eq } from 'drizzle-orm';
 import type {
@@ -737,6 +743,137 @@ d('A2 reviews + agents (Testcontainers pg)', () => {
 
     // Exactly one completeStructured call — no second LLM call introduced.
     expect(mockLlm.calls.filter((c) => c.method === 'completeStructured')).toHaveLength(1);
+
+    await app.close();
+  });
+
+  // ---- PR #18 regression (docs/pr-diff-reindex-plan.md, Work Item 8) ------
+  // The bug: a review triggered without the PR ever being opened in the
+  // studio UI first (e.g. via the MCP `run_agent_on_pr` tool) silently
+  // reported approve/score 100/0 findings, because the diff pipeline
+  // degraded to an empty diff without anyone being told it had failed. Fixed
+  // by diff-loader.ts's three self-heal layers: an active git reindex, a
+  // live GitHub refresh, then a fail-loud `DiffUnavailableError` if both
+  // still leave the diff empty.
+
+  async function setupRepoAndPrNoFiles(db: PgFixture['handle']['db'], workspaceId: string) {
+    const name = `payments-api-${repoSeq++}`;
+    const [repo] = await db
+      .insert(t.repos)
+      .values({ workspaceId, owner: 'acme', name, fullName: `acme/${name}` })
+      .returning();
+    const [pr] = await db
+      .insert(t.pullRequests)
+      .values({
+        workspaceId,
+        repoId: repo!.id,
+        number: 483,
+        title: 'Add rate limiting',
+        author: 'marisa.koch',
+        branch: 'feat/rl2',
+        base: 'main',
+        headSha: 'a1b2c3d4',
+        additions: 1,
+        deletions: 0,
+        filesCount: 1,
+        status: 'needs_review',
+        body: 'Add rate limiting.',
+      })
+      .returning();
+    // Deliberately NO pr_files insert — simulates a PR reviewed via MCP that
+    // was never opened in the studio UI first (GET /pulls/:id never ran).
+    return { repo: repo!, pr: pr! };
+  }
+
+  it('PR #18 regression: no pr_files, stale clone (git diff throws), no GitHub token — the run fails loud instead of a silent approve/100/0-findings verdict', async () => {
+    const app = await buildApp({
+      config: config(),
+      db: pg.handle.db,
+      overrides: {
+        embedder: new MockEmbedder(),
+        intentDeriver: new MockIntentDeriver(undefined),
+        // Layer 1 fails: simulates a clone that never fetched this PR's headSha.
+        git: new MockGitClient({ diffThrows: true }),
+        // Layer 2 fails too: no `github` override + no token configured, so
+        // container.github() throws ConfigError inside PullsSyncService.
+        secrets: new MockSecretsProvider({}),
+        llm: { openai: new MockLLMProvider('openai', { structured: REVIEW_FIXTURE }) },
+      },
+    });
+    const { pr } = await setupRepoAndPrNoFiles(pg.handle.db, workspaceId);
+
+    const agent = (
+      await app.inject({
+        method: 'POST',
+        url: '/agents',
+        payload: { name: 'Sec2', provider: 'openai', model: 'gpt-4.1', system_prompt: 'sec2' },
+      })
+    ).json();
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/pulls/${pr.id}/review`,
+      payload: { agentId: agent.id },
+    });
+    expect(res.statusCode).toBe(200);
+    const runId = res.json().runs[0].run_id;
+
+    const runs = await waitForPrRuns(pg.handle.db, pr.id, { expected: 1 });
+    const run = runs.find((r) => r.id === runId);
+
+    // The exact false-positive this plan eliminates: NOT status 'done' with
+    // an approve/100/0-findings verdict.
+    expect(run!.status).toBe('failed');
+    expect(run!.error).toMatch(/diff/i);
+    expect(run!.findingsCount ?? 0).toBe(0);
+
+    const reviews = (await app.inject({ method: 'GET', url: `/pulls/${pr.id}/reviews` })).json();
+    expect(reviews).toHaveLength(0);
+
+    await app.close();
+  });
+
+  it('no regression: pr_files pre-seeded (today\'s only working path) — the run still succeeds even with the same git-diff/no-token failures', async () => {
+    const app = await buildApp({
+      config: config(),
+      db: pg.handle.db,
+      overrides: {
+        embedder: new MockEmbedder(),
+        intentDeriver: new MockIntentDeriver(undefined),
+        git: new MockGitClient({ diffThrows: true }),
+        secrets: new MockSecretsProvider({}),
+        llm: { openai: new MockLLMProvider('openai', { structured: REVIEW_FIXTURE }) },
+      },
+    });
+    // Reuses the SAME setupRepoAndPr as every other test in this file —
+    // seeds one pr_files row, which is exactly the pre-existing (pre-plan)
+    // recovery path this test proves is unaffected by the new guardrail.
+    const { pr } = await setupRepoAndPr(pg.handle.db, workspaceId);
+
+    const agent = (
+      await app.inject({
+        method: 'POST',
+        url: '/agents',
+        payload: { name: 'Sec3', provider: 'openai', model: 'gpt-4.1', system_prompt: 'sec3' },
+      })
+    ).json();
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/pulls/${pr.id}/review`,
+      payload: { agentId: agent.id },
+    });
+    expect(res.statusCode).toBe(200);
+    const runId = res.json().runs[0].run_id;
+
+    const runs = await waitForPrRuns(pg.handle.db, pr.id, { expected: 1 });
+    const run = runs.find((r) => r.id === runId);
+
+    expect(run!.status).toBe('done');
+    expect(run!.error).toBeNull();
+
+    const reviews = (await app.inject({ method: 'GET', url: `/pulls/${pr.id}/reviews` })).json();
+    expect(reviews).toHaveLength(1);
 
     await app.close();
   });

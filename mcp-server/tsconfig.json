@@ -1,0 +1,32 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "moduleDetection": "force",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "verbatimModuleSyntax": false,
+    "declaration": true,
+    "sourceMap": true,
+    "composite": false,
+    "outDir": "dist",
+    "types": ["node"],
+    "lib": ["ES2022"],
+    "paths": {
+      "@devdigest/shared": ["../server/src/vendor/shared/index.ts"],
+      "@devdigest/shared/*": ["../server/src/vendor/shared/*"],
+      "@devdigest/reviewer-core": ["../reviewer-core/src/index.ts"],
+      "@devdigest/reviewer-core/*": ["../reviewer-core/src/*"],
+      "@devdigest/server/diff-parser": ["../server/src/adapters/git/diff-parser.ts"],
+      "@devdigest/server/review-defaults": ["../server/src/db/seed-prompts.ts"],
+      "@devdigest/server/review-constants": ["../server/src/modules/reviews/constants.ts"]
+    }
+  },
+  "include": ["src/**/*.ts"]
+}

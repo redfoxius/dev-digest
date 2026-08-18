@@ -91,6 +91,37 @@ export enum Color { RED, BLUE }
     expect(syms.find((s) => s.name === 'Color')?.kind).toBe('enum');
   });
 
+  it('indexes non-function top-level const/let/var as \'const\' symbols, skips destructuring', () => {
+    // blast-radius-plan.md's live verification found `export const COLLIDERS =
+    // {...}` (an object-literal const) was invisible to reference resolution
+    // — the `isFunctionLike` gate silently dropped any non-function value.
+    const src = `
+export const COLLIDERS = { wall: 1, floor: 2 };
+const LOCAL_TABLE = [1, 2, 3];
+let mutableCount = 0;
+export const { a, b } = someCall();
+`;
+    const syms = parseSymbols('src/consts.ts', src);
+    const names = syms.map((s) => s.name);
+
+    expect(names).toContain('COLLIDERS');
+    expect(names).toContain('LOCAL_TABLE');
+    expect(names).toContain('mutableCount');
+    // Destructured names never become their own symbol under this v1 rule —
+    // only the (unusable) pattern text would be captured, so it's skipped
+    // entirely rather than emitting a garbled name.
+    expect(names).not.toContain('a');
+    expect(names).not.toContain('b');
+
+    const colliders = syms.find((s) => s.name === 'COLLIDERS')!;
+    expect(colliders.kind).toBe('const');
+    expect(colliders.exported).toBe(true);
+
+    const local = syms.find((s) => s.name === 'LOCAL_TABLE')!;
+    expect(local.kind).toBe('const');
+    expect(local.exported).toBe(false);
+  });
+
   it('handles `export default class` and `export { X }` re-exports', () => {
     const src = `
 class Hidden {}

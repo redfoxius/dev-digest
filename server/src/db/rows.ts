@@ -10,6 +10,7 @@ import * as t from './schema.js';
  * re-exports its row from here to keep its public type API unchanged.
  */
 export type AgentRow = typeof t.agents.$inferSelect;
+export type RepoRow = typeof t.repos.$inferSelect;
 export type AgentVersionRow = typeof t.agentVersions.$inferSelect;
 export type FindingRow = typeof t.findings.$inferSelect;
 export type FileSummaryRow = typeof t.reviewFileSummaries.$inferSelect;
