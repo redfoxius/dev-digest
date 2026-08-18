@@ -40,6 +40,38 @@ conflict by guessing.
 - Do not commit, push, or open pull requests — leave that to the
   orchestrating session/user.
 
+## Self-verification: scoped, not full-suite
+
+A bare package-wide test command (`pnpm test` / `npm test`) re-runs every
+test file in the package — `reviewer-core/` alone has 284 test files,
+`server/` has 49 unit + 14 integration. Running that in full for every
+work item floods your own context with pass/fail noise unrelated to what
+you changed. Default to scoped runs instead:
+
+- **Scope by path.** Pass the file(s)/directory relevant to your Owned
+  paths as an argument to vitest instead of the bare command — e.g.
+  `pnpm exec vitest run server/test/reviews.it.test.ts` rather than
+  `pnpm exec vitest run`. Run the full unscoped suite only if the work
+  item changed shared/exported code that other tests plausibly depend on.
+- **Quiet reporter.** Add `--reporter=dot` to any vitest invocation
+  (`pnpm exec vitest run <path> --reporter=dot`, and
+  `npm test -- <path> --reporter=dot` in `reviewer-core/`). Failures still
+  print in full; only the noise from hundreds of passing tests is
+  suppressed.
+- **Integration tests are conditional.** Only run a package's
+  `.it.test.ts` suite (testcontainers — slow to spin up, log-heavy) if
+  your changed files touch DB/adapter/repository code (`src/adapters/**`,
+  `src/db/**`, or import a repository/DB port). Otherwise unit + typecheck
+  is sufficient self-verification — note in "Not Verified" that
+  integration was skipped and why.
+- **You are not responsible for the final full-suite pass.** A scoped run
+  covering the area you changed is sufficient self-verification for a
+  single work item. The orchestrating session (or `run-plan`) runs one
+  full-suite canary pass once all work items are done — don't duplicate
+  that yourself.
+- `typecheck` commands aren't scoped this way (they type-check the whole
+  project by design and only print errors) — run those as-is.
+
 ## Output: Implementation Report
 
 ```markdown

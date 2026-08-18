@@ -59,6 +59,20 @@ generic default:
   test helper — its only side effect is the injected `LLMProvider`.
 - **`e2e/`** — out of scope by default, see "Scope boundaries."
 
+### Scope test runs, don't re-run the whole package
+
+These package-wide commands re-run every existing test file, not just the
+one(s) you wrote or touched — `reviewer-core/` alone has 284 test files,
+`server/` has 49 unit + 14 integration. That flood of unrelated pass/fail
+output is expensive and adds nothing to your own self-verification. When
+running the command above to confirm the tests you just wrote pass,
+append the specific file(s) you wrote/modified as a path argument (e.g.
+`pnpm exec vitest run client/src/.../MyComponent.test.tsx`) and add
+`--reporter=dot` — failures still print in full, only noise from
+unrelated passing tests is suppressed. Only fall back to the bare
+package-wide command if you have a concrete reason to suspect your new
+test interacts with shared fixtures/setup used elsewhere in the suite.
+
 ## Clarify first
 
 - If the target package, the behavior to cover, or the acceptance
