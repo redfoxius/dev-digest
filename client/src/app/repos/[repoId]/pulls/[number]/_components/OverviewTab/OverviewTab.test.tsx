@@ -23,6 +23,15 @@ vi.mock("./_components/PrBriefBanner", () => ({
   },
 }));
 
+// BlastRadiusCard fetches via usePrBlastRadius (React Query) — mocked out for
+// the same reason IntentCard is: this test only exercises OverviewTab's own
+// composition/prop-threading, not the card's own data-fetching logic.
+vi.mock("./_components/BlastRadiusCard", () => ({
+  BlastRadiusCard: ({ prId }: { prId: string | null | undefined }) => (
+    <div data-testid="blast-radius-card">{prId}</div>
+  ),
+}));
+
 import { OverviewTab } from "./OverviewTab";
 
 afterEach(cleanup);
@@ -47,6 +56,9 @@ describe("OverviewTab", () => {
         score={65}
         findings={FINDINGS}
         latestRunCostUsd={0.003}
+        onOpenBlast={() => {}}
+        onViewInDiff={() => {}}
+        prFilePaths={new Set()}
       />,
     );
     const order = Array.from(container.querySelectorAll("[data-testid], section")).map((el) =>
@@ -66,6 +78,9 @@ describe("OverviewTab", () => {
         score={100}
         findings={FINDINGS}
         latestRunCostUsd={0.01}
+        onOpenBlast={() => {}}
+        onViewInDiff={() => {}}
+        prFilePaths={new Set()}
       />,
     );
     expect(prBriefBannerMock).toHaveBeenCalledWith({
@@ -85,6 +100,9 @@ describe("OverviewTab", () => {
         score={null}
         findings={null}
         latestRunCostUsd={null}
+        onOpenBlast={() => {}}
+        onViewInDiff={() => {}}
+        prFilePaths={new Set()}
       />,
     );
     expect(screen.getByTestId("intent-card")).toHaveTextContent("pr-42");
@@ -99,6 +117,9 @@ describe("OverviewTab", () => {
         score={null}
         findings={null}
         latestRunCostUsd={null}
+        onOpenBlast={() => {}}
+        onViewInDiff={() => {}}
+        prFilePaths={new Set()}
       />,
     );
     expect(screen.queryByText("Description")).not.toBeInTheDocument();

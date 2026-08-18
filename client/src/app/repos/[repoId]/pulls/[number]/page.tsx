@@ -14,13 +14,15 @@ import { PrDetailHeader } from "./_components/PrDetailHeader";
 import { OverviewTab } from "./_components/OverviewTab";
 import { FindingsTab } from "./_components/FindingsTab";
 import { DiffTab } from "./_components/DiffTab";
+import { BlastTab } from "./_components/BlastTab";
 import RunTraceDrawer from "./_components/RunTraceDrawer";
 import { usePullDetail, usePulls } from "../../../../../lib/hooks";
 import { useQueryClient } from "@tanstack/react-query";
 import { usePrReviews, useCancelRun, usePrActiveRuns, usePrRuns, useDeleteRun } from "../../../../../lib/hooks/reviews";
+import { usePrBlastRadius } from "@/lib/hooks/blast";
 import { useActiveRepo, useRepoNotFound } from "../../../../../lib/repo-context";
 import { ApiError } from "../../../../../lib/api";
-import { githubPrUrl } from "../../../../../lib/github-urls";
+import { githubPrUrl, githubBlobUrl } from "../../../../../lib/github-urls";
 import type { FindingRecord } from "@devdigest/shared";
 import type { ScrollTarget } from "../../../../../components/diff-viewer";
 
@@ -102,6 +104,37 @@ export default function PRDetailPage() {
     setTab("diff");
   }
 
+  // Blast Radius callers are frequently files this PR never touched, and
+  // even for a caller file that IS part of the diff, repo-intel's `line`
+  // numbers reflect whatever commit was last (re)indexed — not necessarily
+  // this PR's own head SHA (a merged/older PR's diff is frozen at its own
+  // commit; the index reflects the default branch's current state). "View in
+  // Diff" can only be trusted when `indexed_sha` exactly matches this PR's
+  // head SHA (the diff view renders that exact same file content); otherwise
+  // the file is opened on GitHub at `indexed_sha`, where the line number is
+  // guaranteed to be the one repo-intel actually parsed.
+  const { data: blastData } = usePrBlastRadius(prId);
+  const prFilePaths = React.useMemo(
+    () => new Set((pr?.files ?? []).map((f) => f.path)),
+    [pr?.files],
+  );
+  const blastMatchesDiffSnapshot = !!blastData?.indexed_sha && !!pr && blastData.indexed_sha === pr.head_sha;
+  // What onViewInDiff below will actually treat as an in-app jump — empty
+  // whenever the blast index doesn't match this PR's exact head SHA, even
+  // though those files are technically in `pr.files` (see
+  // blastMatchesDiffSnapshot's comment above).
+  const inAppJumpFiles = blastMatchesDiffSnapshot ? prFilePaths : new Set<string>();
+  function handleCallerClick(file: string, line: number) {
+    if (blastMatchesDiffSnapshot && prFilePaths.has(file)) {
+      handleViewInDiff(file, line);
+      return;
+    }
+    const sha = blastData?.indexed_sha ?? pr?.head_sha;
+    if (repoFullName && sha) {
+      window.open(githubBlobUrl(repoFullName, sha, file, line), "_blank", "noopener,noreferrer");
+    }
+  }
+
   // Reviews come newest-first; each is its own run (grouped into accordions).
   const runs = reviews ?? [];
   const allFindings: FindingRecord[] = React.useMemo(
@@ -178,6 +211,9 @@ export default function PRDetailPage() {
             score={pr.score}
             findings={pr.findings}
             latestRunCostUsd={pr.latest_run_cost_usd}
+            onOpenBlast={() => setTab("blast")}
+            onViewInDiff={handleCallerClick}
+            prFilePaths={inAppJumpFiles}
           />
         )}
 
@@ -211,6 +247,10 @@ export default function PRDetailPage() {
             canComment={pr.status === "open"}
             scrollTarget={diffScrollTarget}
           />
+        )}
+
+        {tab === "blast" && (
+          <BlastTab prId={prId} onViewInDiff={handleCallerClick} prFilePaths={inAppJumpFiles} />
         )}
       </div>
 

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { Finding, Verdict } from './findings.js';
-import { Intent, SmartDiff } from './brief.js';
+import { BlastRadius, Intent, SmartDiff } from './brief.js';
 
 /**
  * A2 — Review-Core API surface contracts. These extend the core
@@ -64,3 +64,29 @@ export type PrIntentRecord = z.infer<typeof PrIntentRecord>;
 /** Smart-diff response for a PR (the SmartDiff). */
 export const SmartDiffResponse = SmartDiff;
 export type SmartDiffResponse = z.infer<typeof SmartDiffResponse>;
+
+/**
+ * Blast-radius response for a PR (`GET /pulls/:id/blast`,
+ * docs/blast-radius-plan.md) — `BlastRadius`'s core shape (changed symbols +
+ * per-symbol downstream callers/endpoints/crons) plus the repo-intel
+ * degraded-state fields every object-returning `RepoIntel` facade method
+ * carries (`server/src/modules/repo-intel/types.ts`'s DEGRADED CONTRACT).
+ * `reason`'s literal union is hand-copied from that file's `DegradedReason`
+ * — this contract can't import a server-internal module type (it's
+ * hand-copied into `client/` too), same DRIFT RISK treatment as every other
+ * enum this file mirrors.
+ */
+export const BlastRadiusResponse = BlastRadius.extend({
+  degraded: z.boolean().optional(),
+  reason: z
+    .enum(['flag_off', 'index_failed', 'index_partial', 'repo_too_large', 'no_data'])
+    .optional(),
+  /** The commit repo-intel's `callers[].line` numbers were parsed from —
+   *  not necessarily this PR's own head SHA (the index reflects whatever
+   *  was last (re)synced). Clients must only trust a caller's line against
+   *  this PR's own diff view when `indexed_sha` equals the PR's head SHA;
+   *  otherwise line numbers may have drifted and a caller should be opened
+   *  at `indexed_sha` directly instead (e.g. a GitHub blob link). */
+  indexed_sha: z.string().nullable(),
+});
+export type BlastRadiusResponse = z.infer<typeof BlastRadiusResponse>;

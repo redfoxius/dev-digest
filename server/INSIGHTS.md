@@ -23,6 +23,26 @@ workflow and quality bar.
   reconnect handling needs to solve replay itself.
   (`server/src/platform/sse.ts:63-68`)
 
+- 2026-08-17 — Adding a new `AppError` subclass (`DiffUnavailableError`,
+  `platform/errors.ts`) and throwing it from `diff-loader.ts`'s `loadDiff()`
+  required ZERO changes to either of its two call sites' error handling:
+  `run-executor.ts:96-105`'s existing `try { ... } catch (err) { ... await
+  failAll(...) }` around `loadDiff()` already marks every queued job
+  `status: 'failed'` with the thrown message, and `reviews/service.ts`'s
+  `deriveIntent()` (no try/catch of its own around its `loadDiff()` call)
+  already propagates any thrown `AppError` correctly as its own `statusCode`
+  (502 here) via `app.ts`'s `setErrorHandler`'s `err instanceof AppError`
+  branch (`app.ts:153-158`) — Fastify's async-handler-throw-to-error-handler
+  wiring needs no per-route opt-in. Confirmed by tracing (per this plan's
+  explicit "verify, don't assume" acceptance criterion), not by re-deriving
+  from docs. Generalizable: a new domain error that extends `AppError` is a
+  zero-plumbing addition as long as its throw site is already inside code a
+  route handler awaits (directly, or transitively via an already-caught
+  background job like `run-executor.ts`'s pre-work step).
+  (`server/src/platform/errors.ts` — `DiffUnavailableError`,
+  `server/src/modules/reviews/run-executor.ts:96-105`,
+  `server/src/modules/reviews/service.ts:221-238`, `server/src/app.ts:153-158`)
+
 ## What Doesn't Work
 
 - 2026-08-14 — `RunBus`'s `buffers`/`seq`/`completed` Maps
@@ -99,7 +119,35 @@ workflow and quality bar.
   (`server/src/modules/conventions/service.ts`,
   `server/src/modules/conventions/langs/index.ts:languageForConfigFile`)
 
+- 2026-08-17 — `SimpleGitClient.fetchPullHead(repo, n)`
+  (`src/adapters/git/simple-git.ts:72-75`, declared on the `GitClient` port
+  at `src/vendor/shared/adapters.ts:219`) sat as dead code for at least one
+  prior feature landing (repo-wide grep found it called nowhere in `src`
+  outside its own no-op stub in `adapters/mocks.ts`) — a real fix for "clone
+  doesn't have this PR's headSha yet" already existed on the port/adapter but
+  was never wired into the one call site that needed it
+  (`reviews/diff-loader.ts`'s `loadDiff()`). This was the direct root cause
+  of the PR #18 false-clean-verdict bug (docs/pr-diff-reindex-plan.md): a
+  clone missing `headSha` made `git diff` throw, and nothing upstream ever
+  tried the already-available reindex first. Before assuming a port method
+  with no callers is "not needed yet", grep for `.methodName(` across `src`
+  — a port interface having a method doesn't mean any service actually
+  invokes it.
+  (`server/src/adapters/git/simple-git.ts:72-75`,
+  `server/src/modules/reviews/diff-loader.ts` — now calls it as Layer 1)
+
 ## Codebase Patterns
+
+- 2026-08-18 — `DEFAULT_PROVIDER`/`DEFAULT_MODEL` (the built-in reviewer
+  agents' `openrouter`/`deepseek-v4-flash` default) moved from a local,
+  unexported const in `seed.ts` to an export in `seed-prompts.ts` alongside
+  `GENERAL_REVIEWER_PROMPT`, so a consumer that only needs the pure prompt
+  constants (no DB/`dotenv/config` side effects) doesn't have to import
+  `seed.ts` — `mcp-server`'s new `devdigest review --mode working` CLI is
+  that consumer (`mcp-server/src/cli/review.ts`, via a narrow tsconfig
+  alias). `seed.ts` now imports both from `seed-prompts.ts` instead of
+  declaring `DEFAULT_PROVIDER`/`DEFAULT_MODEL` itself — if you're looking
+  for them and only checked `seed.ts`, check `seed-prompts.ts` too.
 
 - 2026-08-14 — `docs/smart-diff-plan.md` Phase 2 describes `SmartDiffService`
   as "constructed with `Container` … composes: 1. Files … 2. Latest review's
@@ -484,6 +532,46 @@ workflow and quality bar.
   guard, `server/test/smart-diff-service.it.test.ts:233,269` — reverted to
   `[]`, `:347-350` — the real-data singleton case, unaffected)
 
+- 2026-08-17 — `reviews/repository.ts`'s documented ownership
+  ("the ONLY layer touching the DB for the review domain … reviews,
+  findings, pr_intent, agent_runs, run_traces", `reviews/repository.ts:6-7`)
+  does NOT extend to WRITING `pr_files`/`pr_commits`/`pull_requests` detail
+  fields, even though `reviews/repository/pull.repo.ts` already reads all
+  three for the review flow (`getPrFiles`, `getPrCommits`, plus one write —
+  `markReviewed`). Those three tables' live-GitHub-refresh WRITE path now
+  lives in a new sibling module, `pulls/repository.ts` +
+  `pulls/service.ts`'s `PullsSyncService`, wired onto `Container` as
+  `pullsSync` (mirrors `repoIntel`/`intentDeriver`). Before adding a new
+  write for a table a repository already reads, check which module actually
+  "wrote first" for that table historically (`pulls/routes.ts` did, inline,
+  before this change) rather than assuming the module that reads it most is
+  the right owner for a new write.
+  (`server/src/modules/reviews/repository.ts:6-7`,
+  `server/src/modules/reviews/repository/pull.repo.ts`,
+  `server/src/modules/pulls/repository.ts`,
+  `server/src/modules/pulls/service.ts`)
+
+- 2026-08-17 — Unit-testing (no Docker) a `Container`-composed service that
+  chains a port call + a repository DB write (`PullsSyncService
+  .refreshFromGitHub` — `container.github()` then 3 `pulls/repository.ts`
+  writes) only works cleanly two ways, NOT by handing `Container` a
+  functional fake `Db`: (1) drive the failure through the PORT before any DB
+  write is attempted — e.g. `secrets: new MockSecretsProvider({})` with no
+  `github` override makes `container.github()` throw `ConfigError`
+  synchronously, so the real `PullsSyncService` never reaches
+  `pulls/repository.ts` at all; or (2) inject a hand-written fake
+  `ContainerOverrides.pullsSync` (implementing the `PullsSync` port
+  directly) when the test needs a SUCCESSFUL refresh without a real
+  Postgres — `diff-loader.ts`'s `loadDiff()` takes its `ReviewRepository`
+  as a plain parameter (not via `container.reviewRepo`), so a fake repo
+  object controls what `diffFromPrFiles()` reads back independent of
+  whether the fake `PullsSync.refreshFromGitHub` "persisted" anything for
+  real. A generic `{} as unknown as Db` stub only works for path (1); it is
+  NOT a general-purpose way to exercise a real write-path service without
+  Docker.
+  (`server/test/diff-loader.test.ts`,
+  `server/src/modules/pulls/service.ts`)
+
 ## Tool & Library Notes
 
 - 2026-08-13 — `server/src/adapters/llm/openai.ts:15` and `anthropic.ts:16`'s
@@ -853,6 +941,18 @@ workflow and quality bar.
   worth adding, or does the course intentionally keep this manual?
 
 ## Session Notes
+
+- 2026-08-17 — Implemented `docs/pr-diff-reindex-plan.md` in full (all 8 work
+  items): `diff-loader.ts`'s three self-heal layers, the new `pulls/`
+  repository+service split wired as `container.pullsSync`, and
+  `DiffUnavailableError`. New `server/test/diff-loader.test.ts` (3 unit
+  cases) + extended `pulls.it.test.ts` (+1) / `reviews.it.test.ts` (+2,
+  including the PR #18 regression scenario). Full unit suite (333 tests) and
+  `pnpm typecheck` green. Integration suite: 77/78 passing —
+  `smart-diff-service.it.test.ts`'s Phase 6 clustering test was ALREADY
+  failing before this session's changes (confirmed by re-running it against
+  a `git stash` of this session's diff) — unrelated to this plan's touched
+  files, not investigated further here.
 
 - 2026-08-14 — Implemented `docs/run-status-plan.md`'s server-side item:
   `RunBus` eviction (`src/platform/sse.ts`), alongside the client-side

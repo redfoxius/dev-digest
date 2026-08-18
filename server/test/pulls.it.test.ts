@@ -7,6 +7,7 @@
  * route at all before this file.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { eq } from 'drizzle-orm';
 import type { z } from 'zod';
 import { startPg, dockerAvailable, type PgFixture } from './helpers/pg.js';
 import { waitForPrRuns } from './helpers/runs.js';
@@ -265,6 +266,42 @@ d('GET /pulls/:id — PR Brief banner aggregate (Testcontainers pg)', () => {
     // Confirms the offline path really was taken (persisted body served, not
     // a fresh GitHub fetch) — same PR body seeded by setupRepoAndPr.
     expect(detail.body).toBe('Add rate limiting. Closes #471.');
+
+    await app.close();
+  });
+
+  it('live-refresh branch: pr_files rows are actually REPLACED in the DB (Work Item 6 — Layer 2 extraction is behavior-preserving)', async () => {
+    // setupRepoAndPr seeds one pr_files row (src/config.ts); the GitHub mock
+    // below returns a DIFFERENT file set, so this proves the live refresh
+    // really replaced the persisted rows (not merely that the HTTP response
+    // looked right) — the exact side effect diff-loader.ts's Layer 2 depends
+    // on for the review self-heal flow (docs/pr-diff-reindex-plan.md).
+    const app = await buildApp({
+      config: config(),
+      db: pg.handle.db,
+      overrides: {
+        embedder: new MockEmbedder(),
+        intentDeriver: new MockIntentDeriver(undefined),
+        git: new MockGitClient({ diff: DIFF }),
+        github: new MockGitHubClient({
+          detail: {
+            files: [
+              { path: 'src/new-file.ts', additions: 2, deletions: 0, patch: '@@ -0,0 +1,2 @@\n+a\n+b' },
+            ],
+          },
+        }),
+      },
+    });
+    const { pr } = await setupRepoAndPr(pg.handle.db, workspaceId);
+
+    const before = await pg.handle.db.select().from(t.prFiles).where(eq(t.prFiles.prId, pr.id));
+    expect(before.map((f) => f.path)).toEqual(['src/config.ts']);
+
+    const res = await app.inject({ method: 'GET', url: `/pulls/${pr.id}` });
+    expect(res.statusCode).toBe(200);
+
+    const after = await pg.handle.db.select().from(t.prFiles).where(eq(t.prFiles.prId, pr.id));
+    expect(after.map((f) => f.path)).toEqual(['src/new-file.ts']);
 
     await app.close();
   });

@@ -8,6 +8,11 @@
  * editing a prompt here only affects freshly seeded workspaces.
  */
 
+/** Default provider/model for the built-in reviewer agents (also the default
+ *  `devdigest review --mode working` CLI reviews with — mcp-server/src/cli). */
+export const DEFAULT_PROVIDER = 'openrouter' as const;
+export const DEFAULT_MODEL = 'deepseek/deepseek-v4-flash';
+
 export const GENERAL_REVIEWER_PROMPT = `# Role
 You are a pragmatic senior engineer reviewing a pull-request diff. You receive
 the full PR diff in one pass. Find defects that would break correctness,
