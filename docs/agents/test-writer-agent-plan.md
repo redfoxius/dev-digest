@@ -6,7 +6,7 @@
 
 This is a meta-task: the "code" being written is a new Claude Code subagent
 definition, `.claude/agents/test-writer.md`, that pairs with the existing
-`planner` → `implementer` → (review) chain. Per the user's brief, `test-writer`
+`implementation-planner` → `implementer` → (review) chain. Per the user's brief, `test-writer`
 writes tests for UI and backend code and uses the relevant project skills. It
 does not write or fix production code — that stays `implementer`'s job — and
 it is a natural instance of the Writer/Reviewer decoupling Anthropic
@@ -18,8 +18,8 @@ Design was researched via a `researcher` invocation (external: Anthropic's
 own subagent/best-practices docs on self-verification and least-privilege
 scoping; academic/practitioner sources on LLM-generated-test pitfalls —
 overfitting, over-mocking, weak assertions) run in parallel with an internal
-repo-research pass, both feeding into this `planner` invocation. I read all
-three existing agent definitions (`.claude/agents/planner.md`,
+repo-research pass, both feeding into this `implementation-planner` invocation. I read all
+three existing agent definitions (`.claude/agents/implementation-planner.md`,
 `.claude/agents/implementer.md`, `.claude/agents/researcher.md`) to keep
 frontmatter shape, tone, and section structure consistent, and the prior
 `docs/agents/*-agent-plan.md` docs (`docs/agents/implementer-agent-plan.md`)
@@ -33,7 +33,7 @@ to match this doc's own precedent format.
   integration tests).
 - Out of scope: writing any actual test code right now (that happens the
   first time the new agent is invoked, not during this planning/authoring
-  step); modifying `implementer.md`/`planner.md`/`researcher.md`; changing
+  step); modifying `implementer.md`/`implementation-planner.md`/`researcher.md`; changing
   `.claude/settings.json` permissions; browser e2e (`e2e/`) test authoring by
   default (see "Scope boundaries" below — deliberate exclusion, justified,
   not an open question).
@@ -42,7 +42,7 @@ to match this doc's own precedent format.
 
 - `.claude/agents/test-writer.md` (new file) — must match the frontmatter/
   section-structure precedent of `.claude/agents/implementer.md:1-6` and
-  `.claude/agents/planner.md:1-6`.
+  `.claude/agents/implementation-planner.md:1-6`.
 - `docs/agents/test-writer-agent-plan.md` (this file, saved by the
   orchestrating session per root `CLAUDE.md`'s "Feature planning" convention
   — `CLAUDE.md:60-71` — with a `**Status:**` line, matching the precedent in
@@ -180,8 +180,8 @@ external-research role, unlike `researcher.md:4`).
    - Read `TESTING.md` for the suite's philosophy and conventions
      (`TESTING.md:8-23,79-94`) — typological coverage, not exhaustive.
    - Read the touched package's `INSIGHTS.md` for test-specific gotchas
-     (explicitly not auto-loaded, per the `planner`/`implementer` precedent
-     — `.claude/agents/planner.md:18-20`).
+     (explicitly not auto-loaded, per the `implementation-planner`/`implementer` precedent
+     — `.claude/agents/implementation-planner.md:18-20`).
    - Load the governing skill(s) via `Skill`: `react-testing-library` for
      any `client/` work; `fastify-best-practices`, `onion-architecture`,
      `drizzle-orm-patterns` where structurally relevant for `server/`/
@@ -193,7 +193,7 @@ external-research role, unlike `researcher.md:4`).
 3. **`## Clarify first`**
    - If the target package, the behavior to cover, or the acceptance
      criteria are unclear, use `AskUserQuestion` before writing anything —
-     same discipline as `planner.md:26-30` and `researcher.md:24-33`.
+     same discipline as `implementation-planner.md:26-30` and `researcher.md:24-33`.
    - If asked to write **e2e** (`e2e/`) coverage, treat that as a scope
      question requiring `AskUserQuestion` before proceeding rather than
      silently attempting a `.flow.json`.
@@ -358,7 +358,7 @@ flag it in Verification as something to spot-check, not assume.
 ---
 
 **Sources consulted:**
-- `.claude/agents/planner.md`, `.claude/agents/implementer.md`,
+- `.claude/agents/implementation-planner.md`, `.claude/agents/implementer.md`,
   `.claude/agents/researcher.md` (frontmatter/structure precedent)
 - `.claude/skills/README.md`, `.claude/skills/react-testing-library/SKILL.md`,
   `.claude/skills/fastify-best-practices/rules/testing.md`,

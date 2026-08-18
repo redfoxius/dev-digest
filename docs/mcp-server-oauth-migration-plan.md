@@ -69,5 +69,5 @@ plan for this phase are deliberately not written yet — they depend on
 decisions only worth making once a second real user is actually onboarding
 (which IdP, whether DevDigest issues its own tokens vs. proxies an external
 one, whether `client/` needs multi-tenant UI changes too). Write those out as
-a proper Development Plan (via the `planner` agent, per this repo's session
+a proper Development Plan (via the `implementation-planner` agent, per this repo's session
 protocol) at that point, using this doc as the starting context.
