@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { toToolError } from '../errors.js';
 import { parseRepo, resolveRepo } from '../resolve.js';
 import { RepoField } from '../schemas.js';
-import { ConventionCategory, ConventionStatus } from '../types.js';
+import { ConventionCategory } from '../types.js';
 import type { ToolCallResult, ToolDefinition, ToolDeps } from '../tool-contract.js';
 
 /**
@@ -12,8 +12,14 @@ import type { ToolCallResult, ToolDefinition, ToolDeps } from '../tool-contract.
  * An empty `conventions` array is a normal success (extraction hasn't run
  * yet for this repo), never an error.
  *
- * `status`/`category` reuse `types.ts`'s `ConventionStatus`/`ConventionCategory`
- * zod enums directly (already the local mirror of
+ * Always filters `status:'accepted'` server-side — `status` is deliberately
+ * NOT a caller-supplied input. A calling model has no way to judge whether a
+ * `pending`/`rejected` convention is trustworthy, so surfacing those risks
+ * the model treating an unreviewed or explicitly-rejected rule as if it were
+ * an accepted project convention.
+ *
+ * `category` reuses `types.ts`'s `ConventionCategory` zod enum directly
+ * (already the local mirror of
  * `server/src/vendor/shared/contracts/knowledge.ts` per that file's own
  * DRIFT RISK note) rather than redefining a second copy here.
  */
@@ -21,7 +27,6 @@ import type { ToolCallResult, ToolDefinition, ToolDeps } from '../tool-contract.
 const GetConventionsInputSchema = z
   .object({
     repo: RepoField,
-    status: ConventionStatus.optional(),
     category: ConventionCategory.optional(),
     language: z.string().optional(),
   })
@@ -32,8 +37,9 @@ export function createGetConventionsTool(): ToolDefinition<GetConventionsInput> 
   return {
     name: 'get_conventions',
     description:
-      "List the coding conventions DevDigest has extracted for a repository. Returns an empty " +
-      "list if convention extraction hasn't been run for this repo yet — that's not an error.",
+      "List the ACCEPTED coding conventions DevDigest has extracted for a repository (pending and " +
+      "rejected candidates are never returned). Returns an empty list if extraction hasn't been run " +
+      'for this repo yet, or nothing has been accepted — that\'s not an error.',
     inputSchema: GetConventionsInputSchema,
     annotations: {
       readOnlyHint: true,
@@ -45,7 +51,7 @@ export function createGetConventionsTool(): ToolDefinition<GetConventionsInput> 
         const { owner, name } = parseRepo(input.repo);
         const { repoId } = await resolveRepo(client, owner, name);
         const conventions = await client.getRepoConventions(repoId, {
-          status: input.status,
+          status: 'accepted',
           category: input.category,
           language: input.language,
         });

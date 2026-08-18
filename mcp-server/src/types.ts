@@ -27,11 +27,13 @@ import { z } from 'zod';
 
 // ---- Agents (GET /agents) --------------------------------------------------
 
+// `provider` (e.g. `openrouter`, `anthropic`) is deliberately NOT parsed here
+// — it's an internal routing detail, not something an MCP client needs to
+// pick a valid `agent` id/name, and `list_agents` must never leak it.
 export const AgentSummarySchema = z.object({
   id: z.string(),
   name: z.string(),
   enabled: z.boolean(),
-  provider: z.string(),
   model: z.string(),
 });
 export type AgentSummary = z.infer<typeof AgentSummarySchema>;
@@ -133,11 +135,17 @@ export const ConciseFindingSchema = z.object({
 export type ConciseFinding = z.infer<typeof ConciseFindingSchema>;
 
 /** Raw shape of one item from `GET /pulls/:id/reviews`, narrowed to the
- *  fields `mappers.ts`'s `mapReviewToConciseResult` reads — the full
- *  `ReviewDto` also carries `id`/`pr_id`/`agent_id`/`agent_name`/`kind`/
- *  `model`/`cost_usd`/`created_at`, none of which this package surfaces. */
+ *  fields `mappers.ts` reads — the full `ReviewDto` also carries `id`/
+ *  `pr_id`/`kind`/`model`/`cost_usd`/`created_at`, none of which this
+ *  package surfaces. `agent_id`/`agent_name` are read by `get_findings`'
+ *  per-agent dedup (`tools/get-findings.ts`) — `GET /pulls/:id/reviews`
+ *  returns rows ordered newest-first (`desc(createdAt)`,
+ *  `server/src/modules/reviews/repository/review.repo.ts:93`), which that
+ *  dedup relies on to keep the first occurrence per agent. */
 export const ReviewRecordSchema = z.object({
   run_id: z.string().nullish(),
+  agent_id: z.string().nullish(),
+  agent_name: z.string().nullish(),
   verdict: z.string().nullish(),
   summary: z.string().nullish(),
   score: z.number().nullish(),
@@ -156,6 +164,27 @@ export const ConciseReviewResultSchema = z.object({
   findings: z.array(ConciseFindingSchema),
 });
 export type ConciseReviewResult = z.infer<typeof ConciseReviewResultSchema>;
+
+/** One review within `get_findings`' `{reviews:[...]}` output — unlike
+ *  `ConciseReviewResult` (one already-known run), this must carry the
+ *  agent identity since `get_findings` returns every agent's review for a
+ *  PR in one call. */
+export const FindingsReviewItemSchema = z.object({
+  run_id: z.string().nullable(),
+  agent_id: z.string().nullable(),
+  agent_name: z.string().nullable(),
+  verdict: z.string().nullable(),
+  summary: z.string().nullable(),
+  score: z.number().nullable(),
+  findings: z.array(ConciseFindingSchema),
+});
+export type FindingsReviewItem = z.infer<typeof FindingsReviewItemSchema>;
+
+export const GetFindingsResultSchema = z.object({
+  reviews: z.array(FindingsReviewItemSchema),
+  total_findings: z.number().int(),
+});
+export type GetFindingsResult = z.infer<typeof GetFindingsResultSchema>;
 
 // ---- Blast radius (GET /pulls/:id/blast) -----------------------------------
 // Hand-copied from server/src/vendor/shared/contracts/review-api.ts's
