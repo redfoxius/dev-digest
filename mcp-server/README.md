@@ -39,8 +39,8 @@ internally to DevDigest's DB uuids, so no MCP client ever has to know them.
 | --- | --- |
 | `devdigest_list_agents` | Lists the reviewer agents configured in this workspace. Call first to get a valid `agent` id/name for `run_agent_on_pr`. |
 | `devdigest_run_agent_on_pr` | Runs one agent on a PR and returns its verdict + findings in one call (creates the run, polls until done or timeout — up to ~45s by default). |
-| `devdigest_get_findings` | Fetches the findings/verdict of an already-completed run by `run_id` — no re-run needed. |
-| `devdigest_get_conventions` | Lists the coding conventions DevDigest has extracted for a repo. Empty list if extraction hasn't run yet — not an error. |
+| `devdigest_get_findings` | Fetches findings/verdicts for a whole PR, across every agent that has reviewed it — one entry per agent (latest run) by default, or the full run history with `all_runs:true`. |
+| `devdigest_get_conventions` | Lists the ACCEPTED coding conventions DevDigest has extracted for a repo (pending/rejected candidates are never returned). Empty list if extraction hasn't run yet, or nothing's been accepted — not an error. |
 | `devdigest_get_blast_radius` | Fetches the impact map (`GET /pulls/:id/blast`) for the PR's changed symbols. |
 
 ## Configuration
@@ -73,8 +73,13 @@ npm run dev   # tsx watch src/index.ts
 
 ## Pointing an MCP client at it
 
-For Claude Desktop / Claude Code, add a stdio server entry pointing at the
-built entrypoint (adjust the path to this checkout):
+Claude Code auto-connects to this server via the repo-root `.mcp.json`
+(relative path to `mcp-server/dist/index.js`) — just run `npm install &&
+npm run build` in this directory once so `dist/` exists, then reopen/reload
+the project.
+
+For Claude Desktop, or any other client, add a stdio server entry pointing
+at the built entrypoint (adjust the path to this checkout):
 
 ```json
 {

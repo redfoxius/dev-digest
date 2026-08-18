@@ -153,6 +153,31 @@ drive this server via `npx @modelcontextprotocol/inspector node dist/index.js`
   shipped (`server/src/modules/blast/`, docs/blast-radius-plan.md) and this
   tool now proxies it via `client.getBlastRadius(pullId)`
   (`tools/get-blast-radius.ts`), same resolve+call shape as every other tool.
+- **2026-08-18 correction:** `get_findings`' original design
+  (docs/mcp-server-plan.md's Work Item 7 — required `run_id`, one already-
+  known run in, one review out) is superseded by product decision. It now
+  takes `{repo, pr, all_runs?}` (no `run_id`), fetches every review for the
+  PR (`GET /pulls/:id/reviews`), and returns `{reviews:[...], total_findings}`
+  — one entry per agent (its most recent run) by default, deduped via
+  `dedupeByAgent` (`tools/get-findings.ts`), or the full run history when
+  `all_runs:true`. The dedup leans on the server already returning reviews
+  newest-first; if that ordering ever changes, dedup silently starts keeping
+  the *oldest* run per agent instead of the latest — check
+  `server/src/modules/reviews/repository/review.repo.ts`'s `reviewsForPull`
+  first if a `get_findings` result looks stale. `types.ts`'s
+  `ReviewRecordSchema` now also parses `agent_id`/`agent_name` (previously
+  dropped) since the dedup key and per-review attribution both need them.
+- **2026-08-18 correction:** `get_conventions`' `status` filter is no longer
+  a caller-supplied input — it always sends `status:'accepted'` to
+  `GET /repos/:id/conventions` (`tools/get-conventions.ts`). A calling model
+  has no way to judge whether a `pending`/`rejected` convention is
+  trustworthy, so exposing that choice risked a model treating an unreviewed
+  or explicitly-rejected rule as a real project convention.
+- **2026-08-18 correction:** `list_agents`' output no longer includes each
+  agent's `provider` field — `types.ts`'s `AgentSummarySchema` doesn't parse
+  it at all now, so it can't leak through even if a tool forgets to trim it.
+  It's an internal routing detail (which LLM vendor backs an agent), not
+  something a calling model needs to pick a valid `agent` id/name.
 - The 10/min rate limit on `POST /pulls/:id/review`
   (`server/src/modules/reviews/routes.ts`) is keyed by IP and shared with
   any browser-triggered run from the same host — `run_agent_on_pr` surfaces
