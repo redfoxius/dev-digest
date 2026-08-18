@@ -16,10 +16,13 @@ comments through a bounded fix loop. It never pushes or merges.
 ```
 args: plan:<path>  [mode:multi|single]  [max-fix:N]
   └─ read plan (tasks · DAG · owned paths · execution mode)
-       └─ implementer ×N   (multi-agent by DAG / non-overlapping owned paths, or single-agent)
-            └─ architecture-reviewer ‖ plan-verifier   (parallel, read-only, Sonnet)
-                 └─ fix loop ×≤max-fix   (implementer fixes crit/high + missing/partial → re-review changed files)
-                      └─ final report  +  "run pr-self-review before push"
+       └─ AC-N preflight   (mechanical grep/diff, spec ↔ plan — no agent, stops here on a gap)
+            └─ implementer ×N   (multi-agent by DAG / non-overlapping owned paths, or single-agent)
+                 └─ test-writer ×(touched packages)   (once, against the full changed set — not per task)
+                      └─ architecture-reviewer ‖ plan-verifier   (parallel, read-only, Sonnet)
+                           └─ fix loop ×≤max-fix   (implementer fixes crit/high + missing/partial → re-review changed files)
+                                └─ final canary   (plain Bash, full suite per package, quiet reporter — no agent)
+                                     └─ final report  +  "run pr-self-review before push"
 ```
 
 ## When to invoke
@@ -40,21 +43,28 @@ args: plan:<path>  [mode:multi|single]  [max-fix:N]
 
 | Stage | Agent | Model | Role |
 |-------|-------|-------|------|
-| Build | `implementer` ×N | sonnet | One task each; parallel by non-overlapping owned paths; self-verifies |
+| Preflight | — (mechanical) | — | `grep`/diff spec `AC-N`s vs. plan `satisfies:` — no agent spawned |
+| Build | `implementer` ×N | sonnet | One task each; parallel by non-overlapping owned paths; scoped self-verify |
+| Test | `test-writer` ×(packages) | sonnet | One per touched package, once, against the full changed set — never per task |
 | Review | `architecture-reviewer` | sonnet | Structural contracts (read-only) |
 | Review | `plan-verifier` | sonnet | Requirement traceability / completeness (read-only) |
 | Fix | `implementer` ×N | sonnet | Resolve critical/high + missing/partial findings |
+| Canary | — (mechanical) | — | One full-suite pass per package, plain `Bash`, quiet reporter — no agent |
 
-**Not invoked here:** `spec-creator`, `implementation-planner` (run manually beforehand), and
-`test-writer` (dedicated test authoring is intentionally disabled to save tokens — coverage comes
-from each implementer's self-verification).
+**Not invoked here:** `spec-creator`, `implementation-planner` (run manually beforehand).
 
 ## Guardrails
 
 - Starts from a plan — never authors a spec or a plan.
+- AC-N preflight and the final canary are plain mechanical steps run by the orchestrator itself —
+  never spawn an agent for either.
+- `test-writer` runs once per touched package after all implementers finish, never once per task —
+  that would multiply the same unscoped-test-run cost this workflow is designed to avoid.
+- Every test-running agent (`implementer`, `test-writer`) scopes its self-verification to the files
+  it touched and uses a quiet reporter — never a bare package-wide test command.
 - Never `git push`, merge, or open a PR — ends with a recommendation to run `pr-self-review`.
 - Fix loop is bounded by `max-fix`; remaining findings are reported for a human, never looped forever.
-- Concurrent implementers must own non-overlapping paths.
+- Concurrent implementers (build, test-writer, or fix loop) must own non-overlapping paths.
 - Orchestrator keeps only short agent reports in context — heavy work stays isolated per agent.
 
 ## File structure
