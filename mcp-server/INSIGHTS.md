@@ -48,6 +48,20 @@ workflow and quality bar.
 
 ## Codebase Patterns
 
+- 2026-08-18: `reviewer-core`'s own test suite already cross-imports
+  `server/src/adapters/mocks.ts` in-process via a plain relative path
+  (`reviewer-core/test/run.test.ts`) — no tsconfig alias needed for that,
+  since it's a relative import, not a bare specifier. `mcp-server/test/cli/
+  review.test.ts` reuses the same `MockLLMProvider` the same way. Vitest does
+  **not** read `tsconfig.json`'s `paths` on its own, though — the bare
+  specifiers (`@devdigest/reviewer-core`, `@devdigest/shared`,
+  `@devdigest/server/*`) needed a hand-written `vitest.config.ts` with
+  `resolve.alias` mirroring `tsconfig.json`'s paths exactly (same pattern
+  `reviewer-core/vitest.config.ts` already uses for `@devdigest/shared`).
+  Forgetting to update one when the other changes silently breaks tests with
+  "Cannot find module", not a type error. See `mcp-server/vitest.config.ts`,
+  `mcp-server/tsconfig.json`.
+
 - 2026-08-17: `tools/index.ts`'s `getAllToolDefinitions()` must cast each
   factory's return value with `as ToolDefinition` (widening from
   `ToolDefinition<SpecificInput>` to the default `ToolDefinition<unknown>`)
@@ -61,6 +75,34 @@ workflow and quality bar.
   `mcp-server/src/tool-contract.ts:42-54`.
 
 ## Tool & Library Notes
+
+- 2026-08-18: `tsx`, `tsc --noEmit`, and Vitest all resolve `tsconfig.json`'s
+  `paths` fine, but a plain `node dist/cli/index.js` run of the actual `bin`
+  entrypoint does NOT — Node has no idea what `@devdigest/reviewer-core`
+  means. A bare `tsc -p tsconfig.json` build of an aliased entrypoint
+  type-checks clean and even emits files, then throws
+  `ERR_MODULE_NOT_FOUND` the instant the compiled output actually runs.
+  Caught only by actually running the built binary, not by typecheck alone.
+  Fixed with a second build step, `esbuild --bundle` on the CLI entry only
+  (`mcp-server/package.json`'s `build:cli`), which inlines the resolved
+  path-aliased sources into one file. `reviewer-core/README.md` already
+  documents this exact split for its OTHER TS-source consumer (server
+  consumes it via tsx-in-dev / vitest-in-tests / `@vercel/ncc` bundle for
+  the CI runner) — this is the same shape, just `esbuild` instead of `ncc`.
+- 2026-08-18: `esbuild --bundle` with no `--packages=external` pulled `openai`
+  (a real npm dependency, needed because `reviewer-core`'s `OpenRouterProvider`
+  imports it) into the same bundle as the path-aliased local sources. `openai`
+  transitively pulls in `node-fetch@2`, a CJS package that does
+  `require('stream')` at module-load time — esbuild's ESM output wraps that
+  as a runtime `Dynamic require of "stream" is not supported` throw the
+  moment the bundle's entrypoint executes (not a build-time error). Fixed by
+  adding `--packages=external`: everything reachable from `node_modules`
+  (the real npm deps) is left external and resolved normally by Node at
+  runtime; only the tsconfig-path-aliased sources (which live OUTSIDE
+  `node_modules`) still get inlined. Bundle size dropped 1.1MB → 71.9KB, and
+  `node dist/cli/index.js review --mode working` then actually ran (real
+  OpenRouter call, real structured output, real grounding). See
+  `mcp-server/package.json`'s `build:cli`.
 
 - 2026-08-17: `@modelcontextprotocol/sdk@1.30.0`'s
   `McpServer.registerTool(name, config, cb)` accepts a full zod schema
@@ -141,3 +183,21 @@ workflow and quality bar.
   `clone_path` is `null` for `acme/payments-api`, so an empty-diff verdict
   is expected seed-data behavior, not a bug) and a follow-up `get_findings`
   call on the resulting `run_id`.
+- 2026-08-18: Implemented `devdigest review --mode working` (`src/cli/`),
+  reusing `reviewer-core`'s `reviewPullRequest` in-process (new, narrow
+  tsconfig aliases — see AGENTS.md's amended Non-default conventions entry
+  and `docs/cli-working-review-plan.md`). Dogfooded the CLI against this
+  session's own real uncommitted diff mid-implementation (real OpenRouter
+  call, `~/.devdigest/secrets.json` key): it correctly surfaced the
+  pre-`--packages=external` bundling gap above as a CRITICAL finding on its
+  own PR. A later run also returned a CRITICAL finding claiming
+  `tsconfig.json`'s `paths` needs `baseUrl` alongside it or every tool
+  silently ignores `paths` — empirically false in this repo (`tsc`, `tsx`,
+  and `esbuild` all resolved the paths correctly with no `baseUrl` present,
+  confirmed by the passing typecheck and the real successful runs above);
+  a reminder that a grounded citation (real file:line) is not the same as a
+  factually correct claim — grounding only proves the finding cites real
+  diff content, not that its claim about that content is true. `npm run
+  typecheck` and `npm test` (14 new hermetic tests, `test/cli/`) both pass;
+  `server/`'s own typecheck also re-verified clean after moving
+  `DEFAULT_PROVIDER`/`DEFAULT_MODEL` into `seed-prompts.ts`.

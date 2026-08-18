@@ -138,6 +138,17 @@ workflow and quality bar.
 
 ## Codebase Patterns
 
+- 2026-08-18 — `DEFAULT_PROVIDER`/`DEFAULT_MODEL` (the built-in reviewer
+  agents' `openrouter`/`deepseek-v4-flash` default) moved from a local,
+  unexported const in `seed.ts` to an export in `seed-prompts.ts` alongside
+  `GENERAL_REVIEWER_PROMPT`, so a consumer that only needs the pure prompt
+  constants (no DB/`dotenv/config` side effects) doesn't have to import
+  `seed.ts` — `mcp-server`'s new `devdigest review --mode working` CLI is
+  that consumer (`mcp-server/src/cli/review.ts`, via a narrow tsconfig
+  alias). `seed.ts` now imports both from `seed-prompts.ts` instead of
+  declaring `DEFAULT_PROVIDER`/`DEFAULT_MODEL` itself — if you're looking
+  for them and only checked `seed.ts`, check `seed-prompts.ts` too.
+
 - 2026-08-14 — `docs/smart-diff-plan.md` Phase 2 describes `SmartDiffService`
   as "constructed with `Container` … composes: 1. Files … 2. Latest review's
   findings … (a query joined to `agent_runs`, ordered by `created_at DESC`)" —
