@@ -5,7 +5,7 @@
 ## Context
 
 The repo already runs a three-agent pipeline — `researcher` (read-only
-research) → `planner` (produces a `docs/<slug>-plan.md`, no code) →
+research) → `implementation-planner` (produces a `docs/<slug>-plan.md`, no code) →
 `implementer` (executes the plan, `client/`/`server/`, no commit/push/PR).
 Architectural/security review is deliberately left to skills
 (`onion-architecture`, `security`, `pr-self-review`), not an agent.
@@ -30,7 +30,7 @@ without touching the sections of `README.md`/`TESTING.md` that already own
 quick-start and test-strategy content (`CLAUDE.md:73-77`).
 
 Design grounding (external research supplied by a parallel `researcher`
-pass; `planner` itself has no WebFetch/WebSearch):
+pass; `implementation-planner` itself has no WebFetch/WebSearch):
 
 - Anthropic, [sub-agents](https://code.claude.com/docs/en/sub-agents) —
   focused single-purpose subagent, least-privilege tools; no dedicated
@@ -80,7 +80,7 @@ pass; `planner` itself has no WebFetch/WebSearch):
   orchestrating session per `CLAUDE.md:60-71` (`**Status:**` line
   required).
 - (Flagged, not required by this plan) `.claude/agents/README.md` —
-  catalog table currently lists only `researcher`/`planner`/`implementer`;
+  catalog table currently lists only `researcher`/`implementation-planner`/`implementer`;
   falls outside this task's "modules touched" boundary, treated as
   optional/follow-up.
 
@@ -95,7 +95,7 @@ pass; `planner` itself has no WebFetch/WebSearch):
   cross-referencing. `doc-writer`'s output must follow the same
   cross-referencing discipline in the other direction: every doc it writes
   must link back to the plan/PR/commit it was drawn from.
-- `.claude/agents/planner.md:1`, `.claude/agents/implementer.md:1`,
+- `.claude/agents/implementation-planner.md:1`, `.claude/agents/implementer.md:1`,
   `.claude/agents/researcher.md:1` — established frontmatter shape (`name`,
   one-paragraph `description` stating trigger + scope boundary + what it
   does NOT do, `tools:`, `model: sonnet`) that `doc-writer.md` must match.
@@ -155,7 +155,7 @@ explanation.
 ```yaml
 ---
 name: doc-writer
-description: Use this agent to turn an already-implemented feature — a plan doc, a PR, or a commit range — into feature-facing documentation with diagrams, and to decide where in docs/ it belongs. It reads the source material (docs/<slug>-plan.md, git log/diff, PR description), the target module's AGENTS.md/INSIGHTS.md for context, and CLAUDE.md's Docs map, then writes or updates reference/explanation-style documentation that links back to its source and links out to (never restates) README.md's and TESTING.md's owned content. Uses the mermaid-diagram skill for any diagrams, capped at ~20 nodes and one concept per diagram. Does not write or edit code, and does not author pre-implementation docs/<slug>-plan.md files — that is the planner agent's output, saved by the orchestrating session, per this repo's plan-saving convention. If the source feature or its correct docs/ placement is unclear, it asks clarifying questions first rather than guessing.
+description: Use this agent to turn an already-implemented feature — a plan doc, a PR, or a commit range — into feature-facing documentation with diagrams, and to decide where in docs/ it belongs. It reads the source material (docs/<slug>-plan.md, git log/diff, PR description), the target module's AGENTS.md/INSIGHTS.md for context, and CLAUDE.md's Docs map, then writes or updates reference/explanation-style documentation that links back to its source and links out to (never restates) README.md's and TESTING.md's owned content. Uses the mermaid-diagram skill for any diagrams, capped at ~20 nodes and one concept per diagram. Does not write or edit code, and does not author pre-implementation docs/<slug>-plan.md files — that is the implementation-planner agent's output, saved by the orchestrating session, per this repo's plan-saving convention. If the source feature or its correct docs/ placement is unclear, it asks clarifying questions first rather than guessing.
 tools: Read, Grep, Glob, Bash, Write, Edit, Skill, AskUserQuestion
 model: sonnet
 ---
@@ -163,7 +163,7 @@ model: sonnet
 
 Rationale for `tools`: `Read, Grep, Glob` to inspect implemented code and
 existing docs; `Bash` for `git log`/`git diff`/`gh pr view` source
-traceability (mirrors `planner`'s `Bash` grant); `Write, Edit` to author
+traceability (mirrors `implementation-planner`'s `Bash` grant); `Write, Edit` to author
 docs (mirrors `implementer`'s grant shape, scoped by prompt discipline per
 the Open Question above); `Skill` for `mermaid-diagram`; `AskUserQuestion`
 for ambiguous placement/source.
@@ -263,7 +263,7 @@ for ambiguous placement/source.
    "Duplication Check" section that forces an explicit answer.
 
 8. **Assemble and cross-check the full `doc-writer.md` file.** Depends on:
-   1–7. Read the assembled file end-to-end against `planner.md`,
+   1–7. Read the assembled file end-to-end against `implementation-planner.md`,
    `implementer.md`, `researcher.md` for tone/section-header consistency.
    Acceptance: file structurally parallels the three existing agent files;
    no section merely restates another agent's job.
@@ -279,7 +279,7 @@ for ambiguous placement/source.
 - Frontmatter parses with `name`, `description`, `tools`, `model` keys
   present.
 - Structural diff check: `.claude/agents/doc-writer.md` has the same
-  top-level heading set shape as `.claude/agents/planner.md`.
+  top-level heading set shape as `.claude/agents/implementation-planner.md`.
 - **Dry-run against a real already-implemented feature in this repo**:
   pick `docs/skills-feature-plan.md` (Status: implemented). Have
   `doc-writer` (once created) produce a documentation draft for this
@@ -297,7 +297,7 @@ for ambiguous placement/source.
 ---
 
 **Sources consulted:**
-- `.claude/agents/planner.md`, `.claude/agents/implementer.md`,
+- `.claude/agents/implementation-planner.md`, `.claude/agents/implementer.md`,
   `.claude/agents/researcher.md`
 - `.claude/skills/mermaid-diagram/SKILL.md`
 - `CLAUDE.md`, `docs/agent-prompts/README.md`, `docs/skills-feature-plan.md`
