@@ -6,11 +6,9 @@ import {
   GENERAL_REVIEWER_PROMPT,
   SECURITY_REVIEWER_PROMPT,
   PERFORMANCE_REVIEWER_PROMPT,
+  DEFAULT_PROVIDER,
+  DEFAULT_MODEL,
 } from './seed-prompts.js';
-
-/** Default provider/model for the built-in reviewer agents. */
-const DEFAULT_PROVIDER = 'openrouter' as const;
-const DEFAULT_MODEL = 'deepseek/deepseek-v4-flash';
 
 /**
  * Seed the starter's demo data. Idempotent: re-running upserts the default

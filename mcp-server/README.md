@@ -1,16 +1,23 @@
 # @devdigest/mcp-server
 
-A local [MCP](https://modelcontextprotocol.io) server that lets an MCP
-client (Claude Desktop, Claude Code, etc.) drive DevDigest's PR review
-workflow — list agents, kick off a review run, fetch findings, list a
-repo's extracted conventions — without leaving the chat. It talks to
-DevDigest's existing Fastify API (`server/`, `http://localhost:3001` by
-default) over plain HTTP; it never imports `server/` code in-process, and it
-requires no new secrets.
+Two things live here:
 
-See [docs/mcp-server-plan.md](../docs/mcp-server-plan.md) for the full
-design rationale, and [AGENTS.md](AGENTS.md) for this package's own
-conventions.
+1. A local [MCP](https://modelcontextprotocol.io) server that lets an MCP
+   client (Claude Desktop, Claude Code, etc.) drive DevDigest's PR review
+   workflow — list agents, kick off a review run, fetch findings, list a
+   repo's extracted conventions — without leaving the chat. It talks to
+   DevDigest's existing Fastify API (`server/`, `http://localhost:3001` by
+   default) over plain HTTP; it never imports `server/` code in-process, and
+   it requires no new secrets.
+2. The `devdigest` CLI (`devdigest review --mode working`) — moves that same
+   review earlier, into your local working copy before `git push`, by
+   reusing the exact same reviewer engine **in-process**. Needs no running
+   API/DB, but does need `OPENROUTER_API_KEY`. See [CLI](#cli) below.
+
+See [docs/mcp-server-plan.md](../docs/mcp-server-plan.md) (the MCP tools) and
+[docs/cli-working-review-plan.md](../docs/cli-working-review-plan.md) (the
+CLI) for the full design rationale, and [AGENTS.md](AGENTS.md) for this
+package's own conventions.
 
 ## Prerequisites
 
@@ -34,7 +41,7 @@ internally to DevDigest's DB uuids, so no MCP client ever has to know them.
 | `devdigest_run_agent_on_pr` | Runs one agent on a PR and returns its verdict + findings in one call (creates the run, polls until done or timeout — up to ~45s by default). |
 | `devdigest_get_findings` | Fetches the findings/verdict of an already-completed run by `run_id` — no re-run needed. |
 | `devdigest_get_conventions` | Lists the coding conventions DevDigest has extracted for a repo. Empty list if extraction hasn't run yet — not an error. |
-| `devdigest_get_blast_radius` | **Not yet implemented.** Always returns an error explaining the gap; stays registered so it's discoverable. Use `get_findings`/`get_conventions` instead for now. |
+| `devdigest_get_blast_radius` | Fetches the impact map (`GET /pulls/:id/blast`) for the PR's changed symbols. |
 
 ## Configuration
 
@@ -88,3 +95,45 @@ For manual, client-free verification, use the MCP Inspector:
 ```sh
 npx @modelcontextprotocol/inspector node dist/index.js
 ```
+
+## CLI
+
+`devdigest review --mode working` reviews your **local working tree** —
+staged + unstaged changes to tracked files (`git diff HEAD`) — with the same
+`reviewPullRequest` engine and built-in General Reviewer prompt/model
+`server/` uses for a PR, run **in-process** (no Postgres/API needs to be
+running). See
+[docs/cli-working-review-plan.md](../docs/cli-working-review-plan.md) for
+the full design.
+
+```sh
+npm run build
+node dist/cli/index.js review --mode working
+```
+
+or, without a build step:
+
+```sh
+npm run cli -- review --mode working
+```
+
+Requires `OPENROUTER_API_KEY`, read the same way `server/`'s
+`LocalSecretsProvider` does — from `~/.devdigest/secrets.json`, falling back
+to the environment.
+
+**Only tracked changes are reviewed.** `git diff HEAD` doesn't see untracked
+files by design; if any exist, the command prints a `WARNING` naming them so
+their exclusion is never silent. `git add` them (or wait for `--mode
+staged`, not yet implemented) to include them.
+
+**Exit codes** (a deliberate contract, not an accident — never a silent
+false-clean):
+
+| Code | Meaning |
+| --- | --- |
+| `0` | Review completed; no CRITICAL finding (or there was nothing to review). |
+| `1` | Review completed; at least one CRITICAL finding was reported. |
+| `2` | The review could not be completed — not a git repo, a `git` failure, a missing `OPENROUTER_API_KEY`, or an LLM/parse error. |
+
+`--mode staged` and `--mode branch` are recognized by the arg parser as
+future work but currently exit `2` with "not yet implemented."
