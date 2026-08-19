@@ -8,6 +8,7 @@ import type { ReviewRepository, FindingRow, PullRow, ReviewRow } from './reposit
 import { REVIEW_STRATEGY } from './constants.js';
 import { taskLine, buildStackFraming } from './helpers.js';
 import { loadDiff } from './diff-loader.js';
+import { resolveContextDocs } from '../context-docs/resolve.js';
 
 /** Thrown by a run when the user cancels it mid-flight (between map files). */
 export class RunCancelledError extends Error {
@@ -183,6 +184,9 @@ export class ReviewRunExecutor {
     // below can reflect whatever was actually resolved before a later
     // failure, instead of always falling back to nothing.
     let resolvedSkills: string[] = [];
+    // Project Context Folder (spec AC-33) — same "reflect whatever was
+    // resolved before a later failure" contract as `resolvedSkills` above.
+    let resolvedSpecsRead: string[] = [];
 
     try {
       // Resolve the agent's LLM provider. (container.llm throws if the provider
@@ -234,7 +238,31 @@ export class ReviewRunExecutor {
         );
       }
 
-      const task = taskLine(pull) + rankNote;
+      // Project Context Folder (spec §6.7, docs/project-context-folder-plan.md
+      // Work Item 10) — resolved fresh on every run (same posture as
+      // linkedSkills above): agent's own attached docs, then each enabled
+      // linked skill's own attached docs, de-duped, read straight off the
+      // repo's working tree — never `code_chunks`/`Embedder` (AC-12). Missing
+      // files are skipped with a warning, never a thrown error (AC-30).
+      const resolvedContextDocs = await resolveContextDocs(agent.id, repo.id, repo.clonePath, this.container);
+      const resolvedSpecs = resolvedContextDocs.specs;
+      resolvedSpecsRead = resolvedContextDocs.specsRead;
+      if (resolvedSpecs.length > 0) {
+        runLog.info(`context docs: ${resolvedSpecs.length} attached`);
+      }
+      for (const warning of resolvedContextDocs.warnings) {
+        runLog.info(`context docs: ${warning}`);
+      }
+
+      // AC-32 — one trusted (non-untrusted) framing sentence, composed
+      // server-side alongside the existing taskLine/rankNote framing, never
+      // inside wrapUntrusted/INJECTION_GUARD. Present iff documents resolved.
+      const citationNote =
+        resolvedSpecs.length > 0
+          ? '\n\nWhen a finding is grounded in a rule stated by one of the attached project-context documents below, cite that document by its filename (e.g. "architecture-invariants.md") in the finding\'s rationale.'
+          : '';
+
+      const task = taskLine(pull) + rankNote + citationNote;
 
       // Phase 4 (docs/go-language-support-plan.md) — the seeded system prompts
       // are written language-neutral; this appends the actual language(s)
@@ -265,6 +293,12 @@ export class ReviewRunExecutor {
         // (not an empty array) when nothing resolved, matching the
         // callers/repoMap omit-when-empty contract above.
         ...(resolvedSkills.length ? { skills: resolvedSkills } : {}),
+        // Project Context Folder — resolved attached documents (agent's own
+        // + linked skills'), full text, path-labeled. Omitted (not an empty
+        // array) when nothing resolved, matching the skills/callers/repoMap
+        // omit-when-empty contract. This is the ONLY place `resolvedSpecs`
+        // is consumed — never into `systemPrompt`/`task` (AC-39).
+        ...(resolvedSpecs.length ? { specs: resolvedSpecs } : {}),
         // PR author's description/body — untrusted; assemblePrompt wraps +
         // truncates it. Omitted when the PR has no body.
         ...(pull.body ? { prDescription: pull.body } : {}),
@@ -361,7 +395,9 @@ export class ReviewRunExecutor {
         })),
         raw_output: outcome.raw,
         memory_pulled: [],
-        specs_read: [],
+        // AC-33 — the repo-relative path of every document actually
+        // injected into this run (post-dedup, post-missing-file-skip).
+        specs_read: resolvedSpecsRead,
         // Persisted log = the run's FULL event buffer (incl. shared pre-work:
         // diff load + intent), not just events recorded inside this method.
         log: runLog.logFor(runId),
@@ -393,7 +429,15 @@ export class ReviewRunExecutor {
       await this.repo
         .saveRunTrace(
           runId,
-          this.traceFromBuffer(runId, pull, agent, '0/0 passed', Date.now() - start, resolvedSkills),
+          this.traceFromBuffer(
+            runId,
+            pull,
+            agent,
+            '0/0 passed',
+            Date.now() - start,
+            resolvedSkills,
+            resolvedSpecsRead,
+          ),
         )
         .catch(() => undefined);
       this.container.runBus.complete(runId);
@@ -500,6 +544,7 @@ export class ReviewRunExecutor {
     grounding: string,
     durationMs = 0,
     resolvedSkills: string[] = [],
+    resolvedSpecsRead: string[] = [],
   ): RunTrace {
     return {
       config: {
@@ -519,13 +564,18 @@ export class ReviewRunExecutor {
         // the failure-path trace lie about what would have been injected.
         skills: resolvedSkills.length > 0 ? resolvedSkills.join('\n\n') : null,
         memory: null,
-        specs: null,
+        // Same "reflects whatever was resolved before the failure" contract
+        // as `skills` above — was hardcoded `null` regardless. Threaded from
+        // paths (not full text) since that's all `resolvedSpecsRead` carries;
+        // good enough for a failure-path trace naming what would have been
+        // injected, without redundantly re-reading/re-truncating file text.
+        specs: resolvedSpecsRead.length > 0 ? resolvedSpecsRead.join('\n\n') : null,
         user: '',
       },
       tool_calls: [],
       raw_output: '',
       memory_pulled: [],
-      specs_read: [],
+      specs_read: resolvedSpecsRead,
       log: this.container.runBus.buffer(runId).map((e) => ({ t: e.t, kind: e.kind, msg: e.msg })),
     };
   }

@@ -9,6 +9,7 @@ import React from "react";
 import { EmptyState, Tabs } from "@devdigest/ui";
 import type { Skill } from "@devdigest/shared";
 import { ConfigTab } from "./_components/ConfigTab";
+import { ContextTab } from "./_components/ContextTab";
 import { PreviewTab } from "./_components/PreviewTab";
 import { SkillStatsTab } from "./_components/SkillStatsTab";
 import { VersionsTab } from "./_components/VersionsTab";
@@ -44,6 +45,7 @@ export function SkillDetail({
       </div>
       <div style={s.body}>
         {activeTab === "config" && <ConfigTab key={skill.id} skill={skill} />}
+        {activeTab === "context" && <ContextTab skill={skill} />}
         {activeTab === "preview" && <PreviewTab skill={skill} />}
         {activeTab === "evals" && (
           <EmptyState

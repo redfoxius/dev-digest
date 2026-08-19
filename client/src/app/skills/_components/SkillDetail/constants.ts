@@ -12,6 +12,7 @@ export interface DetailTab {
 
 export const TABS: readonly DetailTab[] = [
   { key: "config", label: "Config", icon: "Settings" },
+  { key: "context", label: "Context", icon: "FileText" },
   { key: "preview", label: "Preview", icon: "Eye" },
   { key: "evals", label: "Evals", icon: "FlaskConical" },
   { key: "stats", label: "Stats", icon: "BarChart" },
