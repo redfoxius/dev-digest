@@ -190,4 +190,92 @@ d('onboarding module', () => {
     expect(statuses.slice(0, 10).every((s) => s === 200)).toBe(true);
     expect(statuses[10]).toBe(429);
   });
+
+  // ---- Gap-fill additions (audit pass, see the onboarding test-audit report) ----
+  // The unit suite (`test/onboarding.test.ts`) only ever asserts on the
+  // THROWN exception type (`rejects.toBeInstanceOf(NotIndexedError)` /
+  // `ExternalServiceError`) — never on the actual HTTP status code a real
+  // client receives, nor on a real Postgres row surviving byte-identical.
+  // AC-6's and AC-9's own `Verify:` clauses explicitly say "POST responds
+  // 422"/"response is 502" and "the seeded row is byte-identical
+  // afterward" — that needs a real route + real DB, not a service-level
+  // exception-type check alone.
+
+  it('AC-6 — Regenerate on a never-indexed repo responds 422 not_indexed, makes zero LLM calls, and leaves an existing persisted tour row completely unmodified', async () => {
+    const llm = new MockLLMProvider('openai', { structured: fixtureTour() });
+    const app = await makeApp({ llm });
+    const repo = await makeRepo('acme/never-indexed');
+    // Deliberately NOT seeding repo_index_state — `getIndexState` then
+    // synthesises a degraded row with `lastIndexedSha: ''` (unresolved),
+    // exactly the precondition AC-6 targets.
+
+    const seededTour = fixtureTour();
+    await pg.handle.db.insert(t.onboarding).values({
+      repoId: repo.id,
+      json: seededTour,
+      indexedSha: 'old-sha',
+      fileCount: 9,
+      provider: 'openrouter',
+      model: 'deepseek/deepseek-v4-flash',
+      tokensIn: 10,
+      tokensOut: 20,
+    });
+
+    const res = await app.inject({ method: 'POST', url: `/repos/${repo.id}/onboarding/regenerate` });
+
+    expect(res.statusCode).toBe(422);
+    expect(res.json().error.code).toBe('not_indexed');
+    expect(llm.calls).toHaveLength(0);
+
+    const [rowAfter] = await pg.handle.db.select().from(t.onboarding).where(eq(t.onboarding.repoId, repo.id));
+    expect(rowAfter?.indexedSha).toBe('old-sha');
+    expect(rowAfter?.fileCount).toBe(9);
+    expect(rowAfter?.json).toEqual(seededTour);
+  });
+
+  it('AC-9 — a failed Regenerate (LLM throws) responds 502 and leaves an existing persisted tour row byte-identical', async () => {
+    const llm = new MockLLMProvider('openai');
+    llm.completeStructured = async () => {
+      throw new Error('provider unreachable');
+    };
+    const app = await makeApp({ llm });
+    const repo = await makeRepo('acme/regen-fails');
+    await seedIndexState(repo.id, 'sha-1');
+    await pg.handle.db.insert(t.onboarding).values({
+      repoId: repo.id,
+      json: fixtureTour(),
+      indexedSha: 'sha-1',
+      fileCount: 5,
+      provider: 'openrouter',
+      model: 'deepseek/deepseek-v4-flash',
+      tokensIn: 11,
+      tokensOut: 22,
+    });
+    const [before] = await pg.handle.db.select().from(t.onboarding).where(eq(t.onboarding.repoId, repo.id));
+
+    const res = await app.inject({ method: 'POST', url: `/repos/${repo.id}/onboarding/regenerate` });
+
+    expect(res.statusCode).toBe(502);
+    expect(res.json().error.code).toBe('external_service_error');
+    const [after] = await pg.handle.db.select().from(t.onboarding).where(eq(t.onboarding.repoId, repo.id));
+    expect(after).toEqual(before); // byte-identical — never partially overwritten
+  });
+
+  it("AC-32 — GET is NOT subject to the POST route's 10/min rate limit: 11 GETs within the window all succeed", async () => {
+    // Deliberately the SAME request count that trips 429 on the POST route
+    // in the AC-31 test above — this is the regression AC-32 actually
+    // guards against (a copy-pasted `config.rateLimit` accidentally applied
+    // to GET too), not merely "GET works a few times".
+    const app = await makeApp({ nodeEnv: 'development' });
+    const repo = await makeRepo('acme/get-unrestricted');
+    await seedIndexState(repo.id, 'sha-1');
+
+    const statuses: number[] = [];
+    for (let i = 0; i < 11; i++) {
+      const res = await app.inject({ method: 'GET', url: `/repos/${repo.id}/onboarding` });
+      statuses.push(res.statusCode);
+    }
+
+    expect(statuses.every((s) => s === 200)).toBe(true);
+  });
 });
