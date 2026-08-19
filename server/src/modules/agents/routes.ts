@@ -97,7 +97,7 @@ const SetSkillEnabledBody = z.object({ enabled: z.boolean() });
 
 /** Full ordered list of attached document paths — mirrors `SetSkillsBody`'s
  *  `skill_ids` bulk-reorder contract (AC-20). */
-const SetAgentContextDocsBody = z.object({ paths: z.array(z.string()) });
+const SetAgentContextDocsBody = z.object({ paths: z.array(z.string().min(1)) });
 
 const SetAgentContextDocEnabledBody = z.object({ enabled: z.boolean() });
 

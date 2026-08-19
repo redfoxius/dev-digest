@@ -1,0 +1,2 @@
+CREATE INDEX "agent_context_docs_repo_id_idx" ON "agent_context_docs" USING btree ("repo_id");--> statement-breakpoint
+CREATE INDEX "skill_context_docs_repo_id_idx" ON "skill_context_docs" USING btree ("repo_id");

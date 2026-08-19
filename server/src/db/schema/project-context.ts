@@ -7,6 +7,7 @@ import {
   timestamp,
   primaryKey,
   uniqueIndex,
+  index,
 } from 'drizzle-orm/pg-core';
 import { now } from './_shared';
 import { repos } from './repos';
@@ -78,7 +79,14 @@ export const agentContextDocs = pgTable(
     // Uncheck preserves the row (AC-19) — same semantics as agent_skills.enabled.
     enabled: boolean('enabled').notNull().default(true),
   },
-  (t) => ({ pk: primaryKey({ columns: [t.agentId, t.repoId, t.path] }) }),
+  (t) => ({
+    pk: primaryKey({ columns: [t.agentId, t.repoId, t.path] }),
+    // `repo_id` is the FK to `repos.id` but sits second in the composite PK,
+    // so it isn't a usable leftmost-prefix index — Postgres doesn't
+    // auto-index FK columns. Without this, a cascade delete on `repos`
+    // (or any repo-scoped lookup) has to scan this table.
+    repoIdIdx: index('agent_context_docs_repo_id_idx').on(t.repoId),
+  }),
 );
 
 /**
@@ -98,5 +106,9 @@ export const skillContextDocs = pgTable(
     order: integer('order').notNull().default(0),
     enabled: boolean('enabled').notNull().default(true),
   },
-  (t) => ({ pk: primaryKey({ columns: [t.skillId, t.repoId, t.path] }) }),
+  (t) => ({
+    pk: primaryKey({ columns: [t.skillId, t.repoId, t.path] }),
+    // Same rationale as `agent_context_docs`'s `repoIdIdx` above.
+    repoIdIdx: index('skill_context_docs_repo_id_idx').on(t.repoId),
+  }),
 );
