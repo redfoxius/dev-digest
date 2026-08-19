@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, rmSync, mkdirSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { resolveContextDocs, MAX_SPEC_CHARS } from '../src/modules/context-docs/resolve.js';
@@ -199,6 +199,41 @@ describe('resolveContextDocs', () => {
     expect(
       (container as { agentsRepo: { linkedContextDocs: ReturnType<typeof vi.fn> } }).agentsRepo.linkedContextDocs,
     ).not.toHaveBeenCalled();
+  });
+
+  it('security regression: skips a symlink that resolves outside clonePath instead of injecting its target content', async () => {
+    // Regression guard for the CRITICAL finding from pr-self-review's
+    // security review of PR #21: an attached path is never required to
+    // already be a discovered `context_documents` row (AC-22 allows
+    // attaching before discovery), and `reader.ts`'s own scan deliberately
+    // skips symlinks — so nothing before this point would ever reject a
+    // hand-crafted `agent_context_docs` row pointing at a tracked symlink.
+    // Without the read-time realpath check, this would have read
+    // `secret.md`'s content and injected it into the LLM prompt via
+    // `specs`, wrongly labeled `### docs/evil.md`.
+    const outsideDir = mkdtempSync(join(tmpdir(), 'devdigest-resolve-outside-'));
+    const secretFile = join(outsideDir, 'secret.md');
+    writeFileSync(secretFile, 'TOP SECRET — outside the clone', 'utf8');
+    mkdirSync(join(clonePath, 'docs'), { recursive: true });
+    symlinkSync(secretFile, join(clonePath, 'docs', 'evil.md'));
+    write('specs/legit.md', 'legit content');
+
+    const container = fakeContainer({
+      linkedContextDocs: [
+        { path: 'docs/evil.md', order: 0, enabled: true },
+        { path: 'specs/legit.md', order: 1, enabled: true },
+      ],
+    });
+
+    const result = await resolveContextDocs('agent-1', 'repo-1', clonePath, container);
+
+    expect(result.specsRead).toEqual(['specs/legit.md']);
+    expect(result.specs).toHaveLength(1);
+    expect(result.specs.join('\n')).not.toContain('TOP SECRET');
+    expect(result.warnings).toHaveLength(1);
+    expect(result.warnings[0]).toContain('docs/evil.md');
+
+    rmSync(outsideDir, { recursive: true, force: true });
   });
 
   it('AC-12 regression: succeeds and injects full text for documents never indexed/embedded, Embedder at call count 0', async () => {
