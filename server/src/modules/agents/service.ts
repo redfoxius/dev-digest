@@ -1,6 +1,7 @@
 import type { Container } from '../../platform/container.js';
 import type {
   Agent,
+  AgentContextDocLink,
   AgentSkillLink,
   AgentVersion,
   CiFailOn,
@@ -198,6 +199,108 @@ export class AgentsService {
     if (!agent) return undefined;
     await this.repo.setSkillEnabled(agentId, skillId, enabled);
     return this.skillLinks(agentId);
+  }
+
+  /** Attached context docs for an agent within one repo, as
+   *  AgentContextDocLink[] (ordered), each joined against the current
+   *  `context_documents` catalog to populate `document` (`null` once a path
+   *  no longer resolves — AC-22's backend half). */
+  private async contextDocLinks(agentId: string, repoId: string): Promise<AgentContextDocLink[]> {
+    const links = await this.repo.linkedContextDocs(agentId, repoId);
+    if (links.length === 0) return [];
+    const paths = new Set(links.map((l) => l.path));
+    // Cross-module read of the `context_documents` catalog via
+    // `container.contextDocsRepo` (not this module's own repository.ts —
+    // onion-architecture: repositories stay drizzle-only, cross-module
+    // orchestration lives here in the service). No batch-by-paths method
+    // exists on `ContextDocsRepository`, so `listByRepo` is filtered
+    // client-side to the paths this agent has attached.
+    const [allDocs, usedByCounts] = await Promise.all([
+      this.container.contextDocsRepo.listByRepo(repoId),
+      this.container.contextDocsRepo.usedByCounts(repoId),
+    ]);
+    const docsByPath = new Map(allDocs.filter((d) => paths.has(d.path)).map((d) => [d.path, d]));
+    return links.map((l) => {
+      const doc = docsByPath.get(l.path);
+      const usedBy = usedByCounts.get(l.path) ?? { agents: 0, skills: 0 };
+      return {
+        path: l.path,
+        order: l.order,
+        enabled: l.enabled,
+        document: doc
+          ? {
+              id: doc.id,
+              path: doc.path,
+              root: doc.root,
+              size_bytes: doc.sizeBytes,
+              chunk_count: doc.chunkCount,
+              index_status: doc.indexStatus,
+              used_by_agents: usedBy.agents,
+              used_by_skills: usedBy.skills,
+              last_indexed_at: doc.lastIndexedAt.toISOString(),
+            }
+          : null,
+      };
+    });
+  }
+
+  /** Resolves the workspace-scoped agent AND the workspace-scoped repo (a
+   *  repo id from another workspace never resolves — AC-40), returning
+   *  `undefined` (route → 404) if either check fails. */
+  private async assertAgentAndRepoInWorkspace(
+    workspaceId: string,
+    agentId: string,
+    repoId: string,
+  ): Promise<boolean> {
+    const [agent, repo] = await Promise.all([
+      this.repo.getById(workspaceId, agentId),
+      this.container.reposRepo.getById(workspaceId, repoId),
+    ]);
+    return Boolean(agent) && Boolean(repo);
+  }
+
+  /** GET /agents/:id/context-docs — the Agent Editor Context tab's list. */
+  async getContextDocLinks(
+    workspaceId: string,
+    agentId: string,
+    repoId: string,
+  ): Promise<AgentContextDocLink[] | undefined> {
+    if (!(await this.assertAgentAndRepoInWorkspace(workspaceId, agentId, repoId))) return undefined;
+    return this.contextDocLinks(agentId, repoId);
+  }
+
+  /**
+   * POST /agents/:id/context-docs — bulk set/reorder (AC-20). Replaces the
+   * full ordered list; a not-previously-attached path defaults to
+   * `enabled: false` (never silently enables an unrelated unchecked row —
+   * see `AgentsRepository.setAgentContextDocs`).
+   */
+  async setContextDocs(
+    workspaceId: string,
+    agentId: string,
+    repoId: string,
+    paths: string[],
+  ): Promise<AgentContextDocLink[] | undefined> {
+    if (!(await this.assertAgentAndRepoInWorkspace(workspaceId, agentId, repoId))) return undefined;
+    await this.repo.setAgentContextDocs(agentId, repoId, paths);
+    return this.contextDocLinks(agentId, repoId);
+  }
+
+  /**
+   * PATCH /agents/:id/context-docs/:path — the Context tab checkbox: attach
+   * + enable (if not yet attached) or toggle `enabled` (if attached), never
+   * deleting the row on uncheck (AC-18, AC-19).
+   */
+  async setContextDocEnabled(
+    workspaceId: string,
+    agentId: string,
+    repoId: string,
+    path: string,
+    enabled: boolean,
+  ): Promise<AgentContextDocLink[] | undefined> {
+    if (!(await this.assertAgentAndRepoInWorkspace(workspaceId, agentId, repoId))) return undefined;
+    await this.repo.setAgentContextDocEnabled(agentId, repoId, path, enabled);
+    return this.contextDocLinks(agentId, repoId);
   }
 
   /**

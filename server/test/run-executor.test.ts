@@ -23,6 +23,26 @@ vi.mock('@devdigest/reviewer-core', () => ({
   countBlockers: (...args: unknown[]) => countBlockers(...args),
 }));
 
+/**
+ * Project Context Folder (docs/project-context-folder-plan.md Work Item
+ * 10-11) — `resolveContextDocs` is mocked at the module boundary so this
+ * stays a pure unit test of run-executor's wiring/threading logic (task
+ * framing, `specs` omit-when-empty, `RunTrace.specs_read`), not of
+ * `resolveContextDocs`'s own fs-read/dedupe/truncation behavior — that's
+ * already covered end-to-end by `test/context-docs-resolve.test.ts`.
+ */
+const resolveContextDocs = vi.fn();
+vi.mock('../src/modules/context-docs/resolve.js', () => ({
+  resolveContextDocs: (...args: unknown[]) => resolveContextDocs(...args),
+}));
+
+// Default: no context docs resolved, for every test in this file (including
+// the pre-existing Agent Skills suite below, which doesn't care about this
+// feature) — individual tests below override via `mockResolvedValue`.
+beforeEach(() => {
+  resolveContextDocs.mockReset().mockResolvedValue({ specs: [], specsRead: [], warnings: [] });
+});
+
 const { ReviewRunExecutor } = await import('../src/modules/reviews/run-executor.js');
 
 const FIXED_REVIEW: Review = {
@@ -219,5 +239,217 @@ describe('ReviewRunExecutor — Agent Skills resolution', () => {
 
     const trace = repo.saveRunTrace.mock.calls[0]![1] as { prompt_assembly: { skills: string | null } };
     expect(trace.prompt_assembly.skills).toBeNull();
+  });
+});
+
+/**
+ * Project Context Folder (spec §6.7, docs/project-context-folder-plan.md
+ * Work Item 10-11, AC-12/AC-26–AC-33/AC-39) — `resolveContextDocs` itself
+ * (fs reads, dedupe, truncation) is covered by
+ * `test/context-docs-resolve.test.ts`; this suite covers only what
+ * `run-executor.ts` does with its result: threading `specs` into
+ * `reviewPullRequest`'s input (omit-when-empty), appending the citation-
+ * framing sentence to `task` iff something resolved, and populating
+ * `RunTrace.specs_read` on both the success and failure paths.
+ */
+describe('ReviewRunExecutor — Project Context Folder resolution', () => {
+  let repo: {
+    insertReview: ReturnType<typeof vi.fn>;
+    insertFindings: ReturnType<typeof vi.fn>;
+    completeAgentRun: ReturnType<typeof vi.fn>;
+    saveRunTrace: ReturnType<typeof vi.fn>;
+    recordRunSkills: ReturnType<typeof vi.fn>;
+  };
+  let agents: { linkedSkills: ReturnType<typeof vi.fn> };
+  let container: { runBus: RunBus; llm: ReturnType<typeof vi.fn>; config: { promptAssemblyDebug: boolean } };
+  let executor: InstanceType<typeof ReviewRunExecutor>;
+  let runId: string;
+  let seq = 0;
+
+  const pull = { id: 'pr-1', number: 42, title: 'Fix things', author: 'octo', repoId: 'repo-1', base: 'main', headSha: 'sha1', body: null } as never;
+  const repoRow = { id: 'repo-1', owner: 'acme', name: 'widgets', clonePath: '/fake/clone' } as never;
+
+  function agentFixture() {
+    return {
+      id: 'agent-1',
+      name: 'Test Agent',
+      provider: 'openai',
+      model: 'gpt-4.1',
+      systemPrompt: 'You are a reviewer.',
+      strategy: 'single-pass',
+      ciFailOn: 'critical',
+      repoIntel: false,
+      version: 1,
+    } as never;
+  }
+
+  beforeEach(() => {
+    reviewPullRequest.mockReset();
+    countBlockers.mockReset().mockReturnValue(0);
+    reviewPullRequest.mockResolvedValue(makeOutcome());
+
+    agents = { linkedSkills: vi.fn().mockResolvedValue([]) };
+    repo = {
+      insertReview: vi.fn().mockResolvedValue({ id: 'review-1' }),
+      insertFindings: vi.fn().mockResolvedValue([]),
+      completeAgentRun: vi.fn().mockResolvedValue(undefined),
+      saveRunTrace: vi.fn().mockResolvedValue(undefined),
+      recordRunSkills: vi.fn().mockResolvedValue(undefined),
+    };
+    container = {
+      runBus: new RunBus(),
+      llm: vi.fn().mockResolvedValue({}),
+      config: { promptAssemblyDebug: false },
+    };
+    executor = new (ReviewRunExecutor as unknown as new (
+      container: unknown,
+      repo: unknown,
+      agents: unknown,
+    ) => InstanceType<typeof ReviewRunExecutor>)(container, repo, agents);
+    runId = `run-${seq++}`;
+  });
+
+  async function runOneAgent(agent: unknown) {
+    const parentLog = new RunLogger(container.runBus, [runId]);
+    return (executor as unknown as { runOneAgent: (...a: unknown[]) => Promise<unknown> }).runOneAgent(
+      'ws-1',
+      pull,
+      repoRow,
+      DIFF,
+      agent,
+      runId,
+      parentLog,
+    );
+  }
+
+  it('includes the citation-framing sentence in `task` when at least one context doc resolves', async () => {
+    resolveContextDocs.mockResolvedValue({
+      specs: ['### specs/a.md\n\nRule A'],
+      specsRead: ['specs/a.md'],
+      warnings: [],
+    });
+
+    await runOneAgent(agentFixture());
+
+    const call = reviewPullRequest.mock.calls[0]![0] as { task: string };
+    expect(call.task).toContain(
+      'When a finding is grounded in a rule stated by one of the attached project-context documents below, cite that document by its filename (e.g. "architecture-invariants.md") in the finding\'s rationale.',
+    );
+  });
+
+  it('omits the citation-framing sentence from `task` when nothing resolves', async () => {
+    resolveContextDocs.mockResolvedValue({ specs: [], specsRead: [], warnings: [] });
+
+    await runOneAgent(agentFixture());
+
+    const call = reviewPullRequest.mock.calls[0]![0] as { task: string };
+    expect(call.task).not.toContain('attached project-context documents');
+  });
+
+  it('omits the `specs` key entirely (not an empty array) when nothing resolves', async () => {
+    resolveContextDocs.mockResolvedValue({ specs: [], specsRead: [], warnings: [] });
+
+    await runOneAgent(agentFixture());
+
+    const call = reviewPullRequest.mock.calls[0]![0] as Record<string, unknown>;
+    expect(call).not.toHaveProperty('specs');
+  });
+
+  it("threads resolved specs through to reviewPullRequest's `specs` key", async () => {
+    resolveContextDocs.mockResolvedValue({
+      specs: ['### specs/a.md\n\nRule A', '### specs/b.md\n\nRule B'],
+      specsRead: ['specs/a.md', 'specs/b.md'],
+      warnings: [],
+    });
+
+    await runOneAgent(agentFixture());
+
+    const call = reviewPullRequest.mock.calls[0]![0] as { specs?: string[] };
+    expect(call.specs).toEqual(['### specs/a.md\n\nRule A', '### specs/b.md\n\nRule B']);
+  });
+
+  it('populates the saved RunTrace.specs_read with exactly the resolved paths on success', async () => {
+    resolveContextDocs.mockResolvedValue({
+      specs: ['### specs/a.md\n\nRule A'],
+      specsRead: ['specs/a.md'],
+      warnings: [],
+    });
+
+    await runOneAgent(agentFixture());
+
+    expect(repo.saveRunTrace).toHaveBeenCalledTimes(1);
+    const trace = repo.saveRunTrace.mock.calls[0]![1] as { specs_read: string[] };
+    expect(trace.specs_read).toEqual(['specs/a.md']);
+  });
+
+  it('failure-path trace reflects the resolved specs_read (and prompt_assembly.specs) instead of empty/null', async () => {
+    resolveContextDocs.mockResolvedValue({
+      specs: ['### specs/a.md\n\nRule A'],
+      specsRead: ['specs/a.md'],
+      warnings: [],
+    });
+    reviewPullRequest.mockRejectedValue(new Error('LLM exploded'));
+
+    await expect(runOneAgent(agentFixture())).rejects.toThrow('LLM exploded');
+
+    expect(repo.saveRunTrace).toHaveBeenCalledTimes(1);
+    const trace = repo.saveRunTrace.mock.calls[0]![1] as {
+      specs_read: string[];
+      prompt_assembly: { specs: string | null };
+    };
+    expect(trace.specs_read).toEqual(['specs/a.md']);
+    expect(trace.prompt_assembly.specs).toBe('specs/a.md');
+  });
+
+  it('failure-path trace has `specs_read: []` / `prompt_assembly.specs: null` when nothing resolved before the failure', async () => {
+    resolveContextDocs.mockResolvedValue({ specs: [], specsRead: [], warnings: [] });
+    reviewPullRequest.mockRejectedValue(new Error('LLM exploded'));
+
+    await expect(runOneAgent(agentFixture())).rejects.toThrow('LLM exploded');
+
+    const trace = repo.saveRunTrace.mock.calls[0]![1] as {
+      specs_read: string[];
+      prompt_assembly: { specs: string | null };
+    };
+    expect(trace.specs_read).toEqual([]);
+    expect(trace.prompt_assembly.specs).toBeNull();
+  });
+
+  it('AC-12 regression: a run against an agent with never-indexed/embedded context docs still succeeds, injects the resolved specs, and never touches an embedding path', async () => {
+    // Stands in for the chunk/embedding mechanism (AC-12): resolveContextDocs
+    // itself is proven never to call this in test/context-docs-resolve.test.ts;
+    // here we additionally confirm run-executor's own wiring never reaches for
+    // it either — the resolved specs come solely from the mocked function's
+    // return value, never a fallback embed/re-index path.
+    const embedderSpy = vi.fn();
+    (container as unknown as { embedder: typeof embedderSpy }).embedder = embedderSpy;
+    resolveContextDocs.mockResolvedValue({
+      specs: ['### specs/never-indexed.md\n\nThis document was never chunked or embedded.'],
+      specsRead: ['specs/never-indexed.md'],
+      warnings: [],
+    });
+
+    const outcome = (await runOneAgent(agentFixture())) as { review: unknown };
+
+    expect(outcome.review).toBeDefined();
+    const call = reviewPullRequest.mock.calls[0]![0] as { specs?: string[] };
+    expect(call.specs).toEqual(['### specs/never-indexed.md\n\nThis document was never chunked or embedded.']);
+    expect(embedderSpy).not.toHaveBeenCalled();
+  });
+
+  it('AC-39 regression: resolved spec content never leaks into `task`/`systemPrompt` — only the static citation sentence does, specs travel solely via the `specs` key', async () => {
+    const specBody = '### specs/secret-rule.md\n\nUNIQUE_MARKER_TEXT_1234';
+    resolveContextDocs.mockResolvedValue({
+      specs: [specBody],
+      specsRead: ['specs/secret-rule.md'],
+      warnings: [],
+    });
+
+    await runOneAgent(agentFixture());
+
+    const call = reviewPullRequest.mock.calls[0]![0] as { task: string; systemPrompt: string; specs?: string[] };
+    expect(call.task).not.toContain('UNIQUE_MARKER_TEXT_1234');
+    expect(call.systemPrompt).not.toContain('UNIQUE_MARKER_TEXT_1234');
+    expect(call.specs).toEqual([specBody]);
   });
 });

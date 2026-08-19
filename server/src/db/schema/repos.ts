@@ -14,6 +14,9 @@ export const repos = pgTable(
     fullName: text('full_name').notNull(),
     defaultBranch: text('default_branch').notNull().default('main'),
     clonePath: text('clone_path'),
+    // Per-repo search-root globs for Project Context document discovery.
+    // `null` -> default glob `**/{specs,docs,insights}/**/*.md` applies (AC-5).
+    contextSearchGlobs: text('context_search_globs').array(),
     lastPolledAt: timestamp('last_polled_at', { withTimezone: true }),
     createdBy: uuid('created_by').references(() => users.id),
     createdAt: now(),

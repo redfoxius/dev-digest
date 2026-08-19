@@ -46,6 +46,7 @@
     "tabs": {
       "config": "Config",
       "skills": "Skills",
+      "context": "Context",
       "evals": "Evals",
       "stats": "Stats",
       "ci": "CI"
@@ -94,6 +95,19 @@
     "orderHint": "Order matters — earlier skills appear earlier in the assembled prompt. Toggle to attach.",
     "loadError": "Couldn't load skills for this agent.",
     "resultCount": "{count, plural, =0 {No skills found} =1 {1 skill found} other {# skills found}}"
+  },
+  "context": {
+    "title": "Project context",
+    "attachedCount": "{attached} of {total} attached",
+    "filterPlaceholder": "Filter documents…",
+    "orderHint": "Order matters — earlier documents appear earlier in the assembled prompt. Toggle to attach.",
+    "loadError": "Couldn't load context documents for this agent.",
+    "resultCount": "{count, plural, =0 {No documents found} =1 {1 document found} other {# documents found}}",
+    "empty": "No documents match this filter.",
+    "missing": "missing",
+    "preview": "Preview",
+    "previewLoadError": "Couldn't load preview.",
+    "tokensEstimate": "≈ {count} tokens"
   },
   "mount": {
     "body": "Mount point for {owner}. The Agent Editor shell + tab routing are wired by A2 — {owner} renders this tab."
