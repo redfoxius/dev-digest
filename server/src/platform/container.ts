@@ -29,6 +29,7 @@ import { AgentsRepository } from '../modules/agents/repository.js';
 import { ReviewRepository } from '../modules/reviews/repository.js';
 import { SkillsRepository } from '../modules/skills/repository.js';
 import { RepoRepository } from '../modules/repos/repository.js';
+import { ContextDocsRepository } from '../modules/context-docs/repository.js';
 import type { RepoIntel } from '../modules/repo-intel/types.js';
 import { RepoIntelService } from '../modules/repo-intel/service.js';
 import type { IntentDeriver } from '../modules/intent/types.js';
@@ -89,6 +90,7 @@ export class Container {
   private _reviewRepo?: ReviewRepository;
   private _skillsRepo?: SkillsRepository;
   private _reposRepo?: RepoRepository;
+  private _contextDocsRepo?: ContextDocsRepository;
   private _repoIntel?: RepoIntel;
   private _intentDeriver?: IntentDeriver;
   private _pullsSync?: PullsSync;
@@ -126,6 +128,16 @@ export class Container {
 
   get reposRepo(): RepoRepository {
     return (this._reposRepo ??= new RepoRepository(this.db));
+  }
+
+  /**
+   * Project Context Folder (`docs/project-context-folder-plan.md` Work Item
+   * 3) — `context_documents`/`code_chunks` data access, for OTHER modules'
+   * cross-reads (this module's own `service.ts` constructs its own instance
+   * directly, same convention as `RepoService`/`AgentsService`).
+   */
+  get contextDocsRepo(): ContextDocsRepository {
+    return (this._contextDocsRepo ??= new ContextDocsRepository(this.db));
   }
 
   get codeIndex(): CodeIndex {

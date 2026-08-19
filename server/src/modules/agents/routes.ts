@@ -22,6 +22,19 @@ const AgentSkillParams = z.object({
   skillId: z.string().uuid(),
 });
 
+/** `/agents/:id/context-docs/:path` — id is a uuid, path a repo-relative
+ *  file path (e.g. `specs/public-api.md`), percent-encoded by the client
+ *  since it may itself contain `/`. */
+const AgentContextDocParams = z.object({
+  id: z.string().uuid(),
+  path: z.string().min(1),
+});
+
+/** Context-doc endpoints are per-(agent, repo) — `agents` is workspace-scoped
+ *  while discovered documents are repo-scoped (spec §4), so every
+ *  context-docs route takes the client's active repo as a query param. */
+const RepoIdQuery = z.object({ repo_id: z.string().uuid() });
+
 /**
  * A2 — agents module (owner A2).
  *   GET    /agents                  → list (workspace-scoped)
@@ -35,6 +48,10 @@ const AgentSkillParams = z.object({
  *   PATCH  /agents/:id/skills/:skillId → attach+enable (if unlinked) or toggle
  *                                       enabled (if linked) — the Skills-tab
  *                                       checkbox action
+ *   GET    /agents/:id/context-docs → attached context docs for one repo (?repo_id=)
+ *   POST   /agents/:id/context-docs → set/reorder full attached-doc list (?repo_id=)
+ *   PATCH  /agents/:id/context-docs/:path → attach+enable (if unattached) or
+ *                                       toggle enabled (if attached), (?repo_id=)
  *   GET    /agents/:id/models       → dynamic model list for the agent's provider
  *   GET    /providers/:id/models    → dynamic model list for a provider (editor)
  */
@@ -77,6 +94,12 @@ const SetSkillsBody = z
   });
 
 const SetSkillEnabledBody = z.object({ enabled: z.boolean() });
+
+/** Full ordered list of attached document paths — mirrors `SetSkillsBody`'s
+ *  `skill_ids` bulk-reorder contract (AC-20). */
+const SetAgentContextDocsBody = z.object({ paths: z.array(z.string()) });
+
+const SetAgentContextDocEnabledBody = z.object({ enabled: z.boolean() });
 
 export default async function agentsRoutes(appBase: FastifyInstance) {
   const app = appBase.withTypeProvider<ZodTypeProvider>();
@@ -184,6 +207,64 @@ export default async function agentsRoutes(appBase: FastifyInstance) {
         workspaceId,
         req.params.id,
         req.params.skillId,
+        req.body.enabled,
+      );
+      if (!links) throw new NotFoundError('Agent not found');
+      return links;
+    },
+  );
+
+  app.get(
+    '/agents/:id/context-docs',
+    { schema: { params: IdParams, querystring: RepoIdQuery } },
+    async (req) => {
+      const { workspaceId } = await getContext(app.container, req);
+      const links = await service.getContextDocLinks(
+        workspaceId,
+        req.params.id,
+        req.query.repo_id,
+      );
+      if (!links) throw new NotFoundError('Agent not found');
+      return links;
+    },
+  );
+
+  app.post(
+    '/agents/:id/context-docs',
+    { schema: { params: IdParams, querystring: RepoIdQuery, body: SetAgentContextDocsBody } },
+    async (req) => {
+      const { workspaceId } = await getContext(app.container, req);
+      const links = await service.setContextDocs(
+        workspaceId,
+        req.params.id,
+        req.query.repo_id,
+        req.body.paths,
+      );
+      if (!links) throw new NotFoundError('Agent not found');
+      return links;
+    },
+  );
+
+  app.patch(
+    '/agents/:id/context-docs/:path',
+    {
+      schema: {
+        params: AgentContextDocParams,
+        querystring: RepoIdQuery,
+        body: SetAgentContextDocEnabledBody,
+      },
+    },
+    async (req) => {
+      const { workspaceId } = await getContext(app.container, req);
+      // The path segment may itself contain `/` (e.g. "specs/public-api.md")
+      // percent-encoded by the client — decode explicitly rather than rely
+      // on the router's own segment decoding.
+      const path = decodeURIComponent(req.params.path);
+      const links = await service.setContextDocEnabled(
+        workspaceId,
+        req.params.id,
+        req.query.repo_id,
+        path,
         req.body.enabled,
       );
       if (!links) throw new NotFoundError('Agent not found');

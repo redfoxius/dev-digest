@@ -41,7 +41,9 @@ export const codeChunks = pgTable(
     path: text('path').notNull(),
     content: text('content').notNull(),
     embedding: vector('embedding', { dimensions: 1536 }),
-    source: text('source', { enum: ['code', 'docs', 'spec'] }).notNull().default('code'),
+    source: text('source', { enum: ['code', 'docs', 'spec', 'insights'] })
+      .notNull()
+      .default('code'),
   },
   (t) => ({ repoIdx: index('code_chunks_repo_idx').on(t.repoId) }),
 );

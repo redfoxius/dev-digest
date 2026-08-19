@@ -49,6 +49,16 @@ export interface LinkedSkillRow {
   enabled: boolean;
 }
 
+/** An agent's own context-doc attachment row (path-based; no document join
+ *  here — resolving the `document` field against the `context_documents`
+ *  catalog is cross-module orchestration done in `service.ts` via
+ *  `container.contextDocsRepo`, not this repository). */
+export interface AgentContextDocRow {
+  path: string;
+  order: number;
+  enabled: boolean;
+}
+
 export class AgentsRepository {
   constructor(private db: Db) {}
 
@@ -323,6 +333,98 @@ export class AgentsRepository {
         });
       await this.bumpVersionAfterSkillChange(agentId, tx);
     });
+  }
+
+  // ---- agent_context_docs link table (mirrors agent_skills — Work Item 8) --
+
+  /** Documents attached to an agent for one repo, `order` ascending, with
+   *  each link's `enabled`. Scoped to `repoId` because attachment is
+   *  per-(agent, repo) — `agents` itself is workspace-scoped, but discovered
+   *  documents are repo-scoped (spec §4/§9). Accepts a tx handle so callers
+   *  can read consistent state mid-transaction. */
+  async linkedContextDocs(
+    agentId: string,
+    repoId: string,
+    dbOrTx: Db = this.db,
+  ): Promise<AgentContextDocRow[]> {
+    return dbOrTx
+      .select({
+        path: t.agentContextDocs.path,
+        order: t.agentContextDocs.order,
+        enabled: t.agentContextDocs.enabled,
+      })
+      .from(t.agentContextDocs)
+      .where(
+        and(eq(t.agentContextDocs.agentId, agentId), eq(t.agentContextDocs.repoId, repoId)),
+      )
+      .orderBy(asc(t.agentContextDocs.order));
+  }
+
+  /**
+   * Replace the full set of attached document paths for an agent within one
+   * repo, assigning order = index — the Context tab's drag-reorder bulk call
+   * (AC-20). Mirrors `setSkills` exactly: each path's current `enabled`
+   * state (from any existing row for this agent+repo) is preserved across
+   * the replace — a pure reorder must never silently flip an unrelated,
+   * currently-unchecked document to `enabled: true` just because it appears
+   * in the reordered array (the documented `agent_skills` bulk-POST-vs-PATCH
+   * split). Paths with no prior row default to `enabled: false`. Paths not
+   * in `paths` are unlinked for this (agent, repo) pair only.
+   *
+   * Delete + re-insert run in ONE transaction — a failed insert rolls the
+   * delete back too, instead of leaving the agent with zero attached docs.
+   */
+  async setAgentContextDocs(agentId: string, repoId: string, paths: string[]): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      const existing = await tx
+        .select({ path: t.agentContextDocs.path, enabled: t.agentContextDocs.enabled })
+        .from(t.agentContextDocs)
+        .where(
+          and(eq(t.agentContextDocs.agentId, agentId), eq(t.agentContextDocs.repoId, repoId)),
+        );
+      const enabledByPath = new Map(existing.map((r) => [r.path, r.enabled]));
+
+      await tx
+        .delete(t.agentContextDocs)
+        .where(
+          and(eq(t.agentContextDocs.agentId, agentId), eq(t.agentContextDocs.repoId, repoId)),
+        );
+      if (paths.length > 0) {
+        await tx.insert(t.agentContextDocs).values(
+          paths.map((path, i) => ({
+            agentId,
+            repoId,
+            path,
+            order: i,
+            enabled: enabledByPath.get(path) ?? false,
+          })),
+        );
+      }
+    });
+  }
+
+  /**
+   * Upsert the per-agent `enabled` state for one attached document —
+   * checking a not-yet-attached document in the Context tab both attaches it
+   * (appended at the end of the current order for this agent+repo) AND
+   * enables it in one call (AC-18); unchecking an attached document flips
+   * `enabled` off on its existing row without touching its `order`, and
+   * never deletes the row (AC-19). Mirrors `setSkillEnabled` exactly.
+   */
+  async setAgentContextDocEnabled(
+    agentId: string,
+    repoId: string,
+    path: string,
+    enabled: boolean,
+  ): Promise<void> {
+    const existing = await this.linkedContextDocs(agentId, repoId);
+    await this.db
+      .insert(t.agentContextDocs)
+      .values({ agentId, repoId, path, order: existing.length, enabled })
+      .onConflictDoUpdate({
+        target: [t.agentContextDocs.agentId, t.agentContextDocs.repoId, t.agentContextDocs.path],
+        set: { enabled },
+      });
   }
 
   /**

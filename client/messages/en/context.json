@@ -20,5 +20,24 @@
     "loadError": "Couldn’t load spec",
     "save": "Save",
     "saving": "Saving…"
+  },
+  "page": {
+    "crumbLab": "Lab",
+    "crumbContext": "Project Context",
+    "headingPrefix": "Project Context — ",
+    "subtitle": "{count} documents discovered",
+    "coverageLabel": "Coverage",
+    "statusLine": "Indexed: {files} files · {chunks} · last refreshed {when}",
+    "loadError": "Couldn't load this repo's project context.",
+    "usedBy": "{agents, plural, one {# agent} other {# agents}} · {skills, plural, one {# skill} other {# skills}}",
+    "notIndexed": {
+      "title": "Repo not indexed yet",
+      "body": "This repo hasn't been cloned/synced yet. Once it's synced, come back to discover its specs/docs/insights documents."
+    },
+    "empty": {
+      "title": "No documents discovered",
+      "body": "No markdown files were found under this repo's configured search roots (specs/, docs/, insights/). Check the search-root configuration, or trigger a reindex if the repo was recently updated.",
+      "cta": "Reindex"
+    }
   }
 }

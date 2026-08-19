@@ -6,8 +6,10 @@ import type { ReadEntry } from 'tar';
 import type { Container } from '../../platform/container.js';
 import type {
   CommunitySkill,
+  ContextDocument,
   ImportCandidate,
   Skill,
+  SkillContextDocLink,
   SkillSource,
   SkillStats,
   SkillType,
@@ -15,6 +17,7 @@ import type {
 } from '@devdigest/shared';
 import { AppError, ExternalServiceError, NotFoundError, ValidationError } from '../../platform/errors.js';
 import { SkillsRepository } from './repository.js';
+import type { ContextDocumentRow } from '../context-docs/repository.js';
 import {
   detectArchiveKind,
   deriveSkillNameFromBody,
@@ -194,6 +197,98 @@ export class SkillsService {
     const skill = await this.repo.getById(workspaceId, skillId);
     if (!skill) return undefined;
     return this.repo.getStats(workspaceId, skillId, days);
+  }
+
+  // ---- skill_context_docs (Skill Editor's Context tab — Project Context
+  // Folder, docs/project-context-folder-plan.md Work Item 9) ----------------
+
+  /**
+   * Context docs attached to a skill for `repoId`, ordered, each with its
+   * `document` resolved against the latest `context_documents` scan (`null`
+   * when the path no longer resolves — AC-22). Workspace-scoped: undefined
+   * when either the skill or the repo isn't in this workspace (route → 404),
+   * mirroring `listVersions`/`getStats`'s existing 404 pattern.
+   */
+  async contextDocLinks(
+    workspaceId: string,
+    skillId: string,
+    repoId: string,
+  ): Promise<SkillContextDocLink[] | undefined> {
+    const skill = await this.repo.getById(workspaceId, skillId);
+    if (!skill) return undefined;
+    const repo = await this.container.reposRepo.getById(workspaceId, repoId);
+    if (!repo) return undefined;
+    return this.buildContextDocLinks(skillId, repoId);
+  }
+
+  /**
+   * Set / reorder the skill's attached context docs (bulk, full ordered
+   * list — mirrors `AgentsService.setSkills`). Each path's current `enabled`
+   * state is preserved across the replace (see
+   * `SkillsRepository.setSkillContextDocs`'s doc comment) — a pure reorder
+   * never silently re-enables an unrelated, currently-unchecked path.
+   */
+  async setContextDocs(
+    workspaceId: string,
+    skillId: string,
+    repoId: string,
+    paths: string[],
+  ): Promise<SkillContextDocLink[] | undefined> {
+    const skill = await this.repo.getById(workspaceId, skillId);
+    if (!skill) return undefined;
+    const repo = await this.container.reposRepo.getById(workspaceId, repoId);
+    if (!repo) return undefined;
+    await this.repo.setSkillContextDocs(skillId, repoId, paths);
+    return this.buildContextDocLinks(skillId, repoId);
+  }
+
+  /**
+   * The Skill Editor's Context tab checkbox: checking a not-yet-attached
+   * document both attaches it (appended at the end of the current order) AND
+   * enables it in one call; unchecking an attached document flips `enabled`
+   * off without detaching it (mirrors `AgentsService.setSkillEnabled`).
+   */
+  async setContextDocEnabled(
+    workspaceId: string,
+    skillId: string,
+    repoId: string,
+    path: string,
+    enabled: boolean,
+  ): Promise<SkillContextDocLink[] | undefined> {
+    const skill = await this.repo.getById(workspaceId, skillId);
+    if (!skill) return undefined;
+    const repo = await this.container.reposRepo.getById(workspaceId, repoId);
+    if (!repo) return undefined;
+    await this.repo.setSkillContextDocEnabled(skillId, repoId, path, enabled);
+    return this.buildContextDocLinks(skillId, repoId);
+  }
+
+  /** Shared assembly: link rows + their resolved `document` (joined against
+   *  `context_documents` + used-by counts), in `order` ascending. */
+  private async buildContextDocLinks(skillId: string, repoId: string): Promise<SkillContextDocLink[]> {
+    const links = await this.repo.skillContextDocs(skillId, repoId);
+    if (links.length === 0) return [];
+    const paths = new Set(links.map((l) => l.path));
+    // Cross-module read of the `context_documents` catalog via
+    // `container.contextDocsRepo` (not this module's own repository.ts —
+    // onion-architecture: repositories stay drizzle-only, cross-module
+    // orchestration lives here in the service). No batch-by-paths method
+    // exists on `ContextDocsRepository`, so `listByRepo` is filtered
+    // client-side to the paths this skill has attached.
+    const [allDocs, usedByPath] = await Promise.all([
+      this.container.contextDocsRepo.listByRepo(repoId),
+      this.container.contextDocsRepo.usedByCounts(repoId),
+    ]);
+    const docsByPath = new Map(allDocs.filter((d) => paths.has(d.path)).map((d) => [d.path, d]));
+    return links.map((l) => {
+      const docRow = docsByPath.get(l.path);
+      return {
+        path: l.path,
+        order: l.order,
+        enabled: l.enabled,
+        document: docRow ? toContextDocumentDto(docRow, usedByPath.get(l.path)) : null,
+      };
+    });
   }
 
   // ---- import: file upload / archive (in-memory only) --------------------
@@ -568,6 +663,25 @@ async function readBodyWithLimit(res: Response, url: string): Promise<Buffer> {
     clearTimeout(timeout);
   }
   return Buffer.concat(chunks.map((c) => Buffer.from(c)));
+}
+
+/** Map a `context_documents` row (+ its resolved used-by counts) to the
+ *  public `ContextDocument` DTO. */
+function toContextDocumentDto(
+  row: ContextDocumentRow,
+  usedBy: { agents: number; skills: number } | undefined,
+): ContextDocument {
+  return {
+    id: row.id,
+    path: row.path,
+    root: row.root,
+    size_bytes: row.sizeBytes,
+    chunk_count: row.chunkCount,
+    index_status: row.indexStatus,
+    used_by_agents: usedBy?.agents ?? 0,
+    used_by_skills: usedBy?.skills ?? 0,
+    last_indexed_at: row.lastIndexedAt.toISOString(),
+  };
 }
 
 function safeUrlPathname(url: string): string {
