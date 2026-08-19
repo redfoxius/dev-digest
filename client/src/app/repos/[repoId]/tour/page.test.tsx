@@ -267,7 +267,7 @@ describe("OnboardingTourPage", () => {
     expect(button).toBeDisabled();
   });
 
-  it("a malformed diagram string on the architecture section renders the section's body/links normally and throws nothing (AC-17)", () => {
+  it("a malformed diagram string on the architecture section renders the section's body/links normally, hides the diagram region, and throws nothing (AC-17)", () => {
     useOnboardingTourMock.mockReturnValue({
       data: tourFixture({
         tour: {
@@ -288,5 +288,60 @@ describe("OnboardingTourPage", () => {
 
     expect(() => renderPage()).not.toThrow();
     expect(screen.getByText("System layout.")).toBeInTheDocument();
+    // AC-17's actual Verify clause: "the diagram region is empty/absent
+    // rather than throwing" — a real mermaid render writes an <svg> into the
+    // DOM (`MermaidDiagram.tsx`'s `ref.current.innerHTML = svg`); the
+    // "invalid" branch renders `null` and never touches the ref at all, so
+    // no <svg> should ever appear INSIDE the architecture section — scoped
+    // to that section specifically, since the page header's own "Share
+    // link"/"Regenerate" buttons legitimately render unrelated lucide
+    // <svg> icons. A last-resort `querySelector` (no accessible role exists
+    // for a decorative diagram) — same accepted exception documented in
+    // client/INSIGHTS.md's Badge/lucide-icon entry.
+    const architectureHeading = screen.getByRole("heading", { name: "Architecture overview" });
+    const architectureSection = architectureHeading.closest("section")!;
+    expect(architectureSection.querySelector("svg")).not.toBeInTheDocument();
+  });
+
+  it("AC-36 — a successful Regenerate announces 'Tour regenerated.' via the aria-live region", () => {
+    useOnboardingTourMock.mockReturnValue({
+      data: tourFixture(),
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    regenerateMutate.mockImplementation((_vars: unknown, opts?: { onSuccess?: () => void }) => {
+      opts?.onSuccess?.();
+    });
+    renderPage();
+
+    const liveRegion = screen.getByRole("status");
+    expect(liveRegion).toHaveTextContent("");
+
+    fireEvent.click(screen.getByRole("button", { name: "Regenerate" }));
+
+    expect(liveRegion).toHaveTextContent("Tour regenerated.");
+  });
+
+  it("AC-36 — a failed Regenerate announces the same distinct failure message via the aria-live region, not a generic one", () => {
+    useOnboardingTourMock.mockReturnValue({
+      data: tourFixture(),
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    regenerateMutate.mockImplementation((_vars: unknown, opts?: { onError?: (err: unknown) => void }) => {
+      opts?.onError?.(
+        Object.assign(new Error("provider unreachable"), { name: "ApiError", code: "external_service_error" }),
+      );
+    });
+    renderPage();
+
+    fireEvent.click(screen.getByRole("button", { name: "Regenerate" }));
+
+    const liveRegion = screen.getByRole("status");
+    expect(liveRegion.textContent).toContain("Generation failed");
   });
 });
