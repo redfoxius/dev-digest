@@ -1,6 +1,6 @@
 # Development Plan: Project Context Folder
 
-**Status:** not started
+**Status:** done — implemented, reviewed (architecture-reviewer + plan-verifier), fix-loop closed, full-suite canary green. See PR #21.
 
 ## Spec
 - [specs/cross-cutting/project-context-folder/spec.md](../specs/cross-cutting/project-context-folder/spec.md) (SPEC-2026-08-19-project-context-folder, 42 ACs, no open `[NEEDS CLARIFICATION]` markers)
