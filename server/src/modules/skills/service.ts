@@ -6,7 +6,6 @@ import type { ReadEntry } from 'tar';
 import type { Container } from '../../platform/container.js';
 import type {
   CommunitySkill,
-  ContextDocument,
   ImportCandidate,
   Skill,
   SkillContextDocLink,
@@ -17,7 +16,6 @@ import type {
 } from '@devdigest/shared';
 import { AppError, ExternalServiceError, NotFoundError, ValidationError } from '../../platform/errors.js';
 import { SkillsRepository } from './repository.js';
-import type { ContextDocumentRow } from '../context-docs/repository.js';
 import {
   detectArchiveKind,
   deriveSkillNameFromBody,
@@ -281,12 +279,25 @@ export class SkillsService {
     ]);
     const docsByPath = new Map(allDocs.filter((d) => paths.has(d.path)).map((d) => [d.path, d]));
     return links.map((l) => {
-      const docRow = docsByPath.get(l.path);
+      const doc = docsByPath.get(l.path);
+      const usedBy = usedByPath.get(l.path) ?? { agents: 0, skills: 0 };
       return {
         path: l.path,
         order: l.order,
         enabled: l.enabled,
-        document: docRow ? toContextDocumentDto(docRow, usedByPath.get(l.path)) : null,
+        document: doc
+          ? {
+              id: doc.id,
+              path: doc.path,
+              root: doc.root,
+              size_bytes: doc.sizeBytes,
+              chunk_count: doc.chunkCount,
+              index_status: doc.indexStatus,
+              used_by_agents: usedBy.agents,
+              used_by_skills: usedBy.skills,
+              last_indexed_at: doc.lastIndexedAt.toISOString(),
+            }
+          : null,
       };
     });
   }
@@ -663,25 +674,6 @@ async function readBodyWithLimit(res: Response, url: string): Promise<Buffer> {
     clearTimeout(timeout);
   }
   return Buffer.concat(chunks.map((c) => Buffer.from(c)));
-}
-
-/** Map a `context_documents` row (+ its resolved used-by counts) to the
- *  public `ContextDocument` DTO. */
-function toContextDocumentDto(
-  row: ContextDocumentRow,
-  usedBy: { agents: number; skills: number } | undefined,
-): ContextDocument {
-  return {
-    id: row.id,
-    path: row.path,
-    root: row.root,
-    size_bytes: row.sizeBytes,
-    chunk_count: row.chunkCount,
-    index_status: row.indexStatus,
-    used_by_agents: usedBy?.agents ?? 0,
-    used_by_skills: usedBy?.skills ?? 0,
-    last_indexed_at: row.lastIndexedAt.toISOString(),
-  };
 }
 
 function safeUrlPathname(url: string): string {

@@ -30,7 +30,7 @@ const SkillContextDocParams = z.object({ id: z.string().uuid(), path: z.string()
 const ContextDocsQuery = z.object({ repo_id: z.string().uuid() });
 
 /** Bulk set/reorder — mirrors `SetSkillsBody.skill_ids`'s full-ordered-list contract. */
-const SetContextDocsBody = z.object({ paths: z.array(z.string()) });
+const SetContextDocsBody = z.object({ paths: z.array(z.string().min(1)) });
 
 const SetContextDocEnabledBody = z.object({ enabled: z.boolean() });
 
