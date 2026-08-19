@@ -1,6 +1,6 @@
 # Onboarding Generator — Development Plan
 
-**Status:** not started
+**Status:** done
 
 ## Spec
 - `specs/cross-cutting/onboarding-generator/spec.md` (SPEC-2026-08-20-onboarding-generator, v0.2, AC-1..AC-38, no open `[NEEDS CLARIFICATION]` markers — all 3 blocking clarifications resolved in §13; the v0.2 revision closing AC-37/AC-38 is fully specified with no residual ambiguity)

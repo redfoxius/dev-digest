@@ -46,6 +46,20 @@ export const Onboarding = z.object({
 });
 export type Onboarding = z.infer<typeof Onboarding>;
 
+/** GET /repos/:repoId/onboarding and POST .../regenerate response envelope
+ *  (docs/onboarding-generator-plan.md Work Item 3, spec §10). `tour: null`
+ *  when never generated; `stale` is always `false` in that case. */
+export const OnboardingTourResponse = z.object({
+  tour: Onboarding.nullable(),
+  indexed_sha: z.string().nullable(),
+  file_count: z.number().int().nullable(),
+  generated_at: z.string().nullable(),
+  provider: z.string().nullable(),
+  model: z.string().nullable(),
+  stale: z.boolean(),
+});
+export type OnboardingTourResponse = z.infer<typeof OnboardingTourResponse>;
+
 // ---- Eval ----
 export const EvalPerTrace = z.object({
   name: z.string(),
