@@ -4,7 +4,7 @@
 
 ## Context
 
-Companion to `planner` (see [docs/planner-agent-plan.md](planner-agent-plan.md)):
+Companion to `implementation-planner` (see [docs/implementation-planner-agent-plan.md](implementation-planner-agent-plan.md)):
 `implementer` executes an already-written Development Plan across this
 repo's frontend (`../../client`) and backend (`../../server`) packages, selecting
 and applying the project skills relevant to each file it touches, and
@@ -24,7 +24,7 @@ researched via two parallel `researcher` invocations):
 - "Give Claude a way to verify its work" (tests/build as a pass/fail
   signal) as the bounded definition of `implementer`'s self-verification.
 - Skills discovered at runtime via the `Skill` tool, not hardcoded — same
-  rationale as `planner`.
+  rationale as `implementation-planner`.
 - No git commit/push/PR scope — those stay session-level conventions in
   root `../../CLAUDE.md` (`pr-self-review` gate, commit-only-when-asked), not
   delegated to this agent.
@@ -36,7 +36,7 @@ Create `../../.claude/agents/implementer.md`:
 ```yaml
 ---
 name: implementer
-description: Use this agent to execute an already-written Development Plan (from the planner agent or a docs/<slug>-plan.md file) across this repo's frontend (client/) and backend (server/) packages. It selects and applies the project skills relevant to each file it touches, makes the code changes the plan describes, and runs the existing test/typecheck commands for the packages it changed to self-verify — nothing more. It does not perform architectural or security review (separate agents handle that) and does not commit, push, or open pull requests. If the plan is ambiguous, missing an acceptance criterion, or conflicts with a module's AGENTS.md/INSIGHTS.md, it asks clarifying questions before proceeding.
+description: Use this agent to execute an already-written Development Plan (from the implementation-planner agent or a docs/<slug>-plan.md file) across this repo's frontend (client/) and backend (server/) packages. It selects and applies the project skills relevant to each file it touches, makes the code changes the plan describes, and runs the existing test/typecheck commands for the packages it changed to self-verify — nothing more. It does not perform architectural or security review (separate agents handle that) and does not commit, push, or open pull requests. If the plan is ambiguous, missing an acceptance criterion, or conflicts with a module's AGENTS.md/INSIGHTS.md, it asks clarifying questions before proceeding.
 tools: Read, Write, Edit, Bash, Grep, Glob, Skill, AskUserQuestion
 model: sonnet
 ---
@@ -91,7 +91,7 @@ Implementation Report template:
 - `cat .claude/agents/implementer.md` — frontmatter parses, `Write`/
   `Edit`/`Bash` present, no `Agent`/PR-creation tools.
 - Invoke via `Agent` with `subagent_type: implementer` against a real
-  `planner`-produced plan (or a small hand-written one) touching both
+  `implementation-planner`-produced plan (or a small hand-written one) touching both
   `../../client` and `../../server`; confirm it applies the right skills, runs real
   test commands, and its report's "Deferred" section explicitly declines
   architectural/security judgment rather than making one.
