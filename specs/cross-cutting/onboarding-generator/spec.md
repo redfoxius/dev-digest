@@ -199,14 +199,20 @@ no new public/anonymous surface is created.
   themselves need no change.
 - Migrations for the new `onboarding` columns (§9) are applied manually via
   `pnpm db:migrate` — this repo's server does not migrate on boot.
-- **No new isolation/injection-guard mechanism.** Every piece of
-  repository-derived content reaching the prompt (file tree, key-file
-  excerpts, script names, paths) is wrapped exclusively through
-  `platform/prompt.ts`'s re-exported `wrapUntrusted()`/`INJECTION_GUARD`
-  (`@devdigest/reviewer-core`) — the **same mechanism
-  `server/src/modules/intent/service.ts` already imports directly today**
-  for a non-review system feature, not something new invented for this
-  spec (§11).
+- **No new isolation mechanism.** *(v0.3 correction — see Metadata: `pr-self-review`'s
+  `onion-architecture` pass, and this feature's own implementation plan's
+  cross-model review before it, both found the prior wording here
+  unimplementable.)* Every piece of repository-derived content reaching the
+  prompt (file tree, key-file excerpts, script names, paths) is wrapped via
+  `wrapUntrusted()`, imported directly from `@devdigest/reviewer-core` —
+  matching **`server/src/modules/intent/service.ts:4`'s own import path
+  exactly**, not via `platform/prompt.ts` (which re-exports `wrapUntrusted`
+  but not `INJECTION_GUARD`) and not `INJECTION_GUARD` itself, which is a
+  module-private `const` in `reviewer-core/src/prompt.ts`, applied only
+  inside `assemblePrompt`, and not exported or reusable standalone by any
+  consumer. `intent/service.ts`'s own precedent already relies on
+  `wrapUntrusted()` alone, not the guard — this spec does the same, nothing
+  new invented (§11).
 - **Pre-existing routing/nav defect this feature must fix, found during
   design analysis (not introduced by this spec):**
   `client/src/components/app-shell/helpers.ts:29`'s `activeKeyFor` already
@@ -334,7 +340,7 @@ flowchart TD
 ## 7. Non-Functional Requirements
 
 **Performance:**
-- AC-30 (Ubiquitous): The system shall bound the Regenerate LLM call by the platform's existing default LLM call timeout (300000 ms) unless a tighter `timeoutMs` is explicitly configured for this feature. Verify: a unit test confirms the `completeStructured` call either omits `timeoutMs` (defers to the adapter default) or passes an explicitly configured value.
+- AC-30 (Ubiquitous) *(v0.3-corrected number — see Metadata; AC-ID and meaning unchanged)*: The system shall bound the Regenerate LLM call by the platform's existing default LLM call timeout (`DEFAULT_TIMEOUT = 900_000` ms, `server/src/adapters/llm/openai.ts:15` and `anthropic.ts:16` — this feature's own implementation plan's cross-model review caught the prior "300000 ms" figure as wrong) unless a tighter `timeoutMs` is explicitly configured for this feature. Verify: a unit test confirms the `completeStructured` call either omits `timeoutMs` (defers to the adapter default) or passes an explicitly configured value.
 - AC-38 (Unwanted behavior) *(v0.2, closes a review gap — very large repo)*: IF facts assembly (the `repo-intel` reads of AC-11 plus run-facts extraction, AC-12) does not complete within 20,000 ms wall-clock time, THEN the system shall abort the Regenerate request and respond `502`, exactly as for an LLM failure (AC-9) — including leaving any existing persisted tour row unmodified — without ever making the LLM call, bounding facts-assembly latency independently of the LLM call's own timeout (AC-30). This mirrors this codebase's existing precedent for bounding a non-LLM read step's own duration (`server/src/modules/intent/service.ts`'s `SPEC_BODY_READ_TIMEOUT_MS`), applied here to a slower, multi-read assembly step rather than a single fetch. Verify: a unit test with a mocked `repo-intel` facade whose reads stall past 20,000 ms confirms Regenerate responds 502, the mocked LLM adapter records zero calls, and a previously seeded tour row is byte-identical afterward.
 - AC-31 (Ubiquitous): The system shall rate-limit `POST /repos/:repoId/onboarding/regenerate` to at most 10 requests per minute per workspace, mirroring the existing `blast_summary`/`intent/derive` per-route rate-limit config. Verify: an 11th `POST` within 60 seconds from the same workspace returns `429`.
 - AC-32 (Ubiquitous): The system shall apply the default (unrestricted) rate limit to `GET /repos/:repoId/onboarding`, since it only reads already-persisted data. Verify: repeated `GET`s within the default global limit window all succeed.
@@ -342,7 +348,7 @@ flowchart TD
 **Security:**
 - AC-33 (Ubiquitous): The system shall scope every `GET`/`POST` onboarding route to the requesting workspace's own repos, mirroring `GET /pulls/:id/blast`'s existing ownership-check pattern. Verify: covered by AC-3 (a cross-workspace repo id returns 404 on both routes, never another workspace's tour).
 - AC-34 (Ubiquitous): The system shall never include repository secrets, environment-variable *values*, or `.env`/`.env.example` file *contents* in the LLM prompt — run-facts (AC-12) carry only file presence and script *names*, never file bodies. Verify: the prompt-assembly log lists only path/script-name/fact fields for the run-facts section, never an `.env*` file's actual content.
-- AC-35 (Ubiquitous): The system shall treat every piece of repository-derived content reaching the prompt (file tree, key-file excerpts, script names, paths) as untrusted input, wrapped exclusively via `platform/prompt.ts`'s re-exported `wrapUntrusted()`/`INJECTION_GUARD` (`@devdigest/reviewer-core`) — the same mechanism `intent/service.ts` already uses directly — never as trusted framing text. Verify: a unit test on the assembled prompt confirms every facts/file-content section is produced via a `wrapUntrusted(...)` call, matching `intent/service.ts`'s existing usage shape.
+- AC-35 (Ubiquitous) *(v0.3-corrected wording — see §4/Metadata; AC-ID and meaning unchanged)*: The system shall treat every piece of repository-derived content reaching the prompt (file tree, key-file excerpts, script names, paths) as untrusted input, wrapped via `wrapUntrusted()` imported directly from `@devdigest/reviewer-core` — the same import path `intent/service.ts:4` already uses — never as trusted framing text. This AC does **not** require `INJECTION_GUARD` (a module-private symbol, unusable outside `reviewer-core`'s own `assemblePrompt`) or routing through `platform/prompt.ts`. Verify: a unit test on the assembled prompt confirms every facts/file-content section is produced via a `wrapUntrusted(...)` call, matching `intent/service.ts`'s existing usage shape.
 
 **Availability:**
 - Covered by AC-9 (an LLM failure never corrupts or removes an existing persisted tour) and AC-6 (an unindexed repo is rejected explicitly rather than attempting a degraded generation) — this feature never makes `GET`'s own availability worse than serving whatever was last successfully persisted.
@@ -447,10 +453,12 @@ contributor could shape file/path names or file content to attempt prompt
 injection, the same threat model this codebase already treats for diffs, PR
 descriptions, and (per `specs/cross-cutting/project-context-folder/spec.md`)
 attached context documents. This content is isolated **exclusively** through
-`platform/prompt.ts`'s re-exported `wrapUntrusted()`/`INJECTION_GUARD`
-(`@devdigest/reviewer-core`) — the **same mechanism
-`server/src/modules/intent/service.ts` already imports and uses directly
-today** for a non-review "system feature" LLM call. This spec introduces
+`wrapUntrusted()`, imported directly from `@devdigest/reviewer-core` — the
+**same import path `server/src/modules/intent/service.ts:4` already uses
+today** for a non-review "system feature" LLM call, **not** via
+`platform/prompt.ts` and **not** `INJECTION_GUARD` (a module-private symbol
+internal to `reviewer-core`'s own `assemblePrompt`, unusable by any external
+consumer — v0.3 correction, see §4/Metadata). This spec introduces
 **no new isolation mechanism**. Separately, model *output* (not input) gets
 its own grounding safeguard beyond isolation: AC-19's link-filtering step
 drops any file path the model returns that wasn't actually present in the
