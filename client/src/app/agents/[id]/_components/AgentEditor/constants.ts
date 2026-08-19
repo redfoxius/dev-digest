@@ -14,3 +14,10 @@ export const TABS: readonly EditorTab[] = [
   { key: "skills", labelKey: "editor.tabs.skills", icon: "Sparkles" },
   { key: "context", labelKey: "editor.tabs.context", icon: "FileText" },
 ];
+
+/** Single source of truth for which `?tab=` values the page route accepts —
+   mirrors `SkillDetail/constants.ts`'s `VALID_DETAIL_TABS` derivation so a
+   new tab can never be added to `TABS` without the page route also
+   accepting it (a hardcoded, separately-maintained whitelist previously
+   drifted out of sync with this list when the Context tab was added). */
+export const VALID_TABS: readonly string[] = TABS.map((tb) => tb.key);

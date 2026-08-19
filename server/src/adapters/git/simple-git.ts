@@ -55,8 +55,16 @@ export class SimpleGitClient implements GitClient {
     const dest = this.clonePathFor(repo);
     await mkdir(join(this.cloneDir, repo.owner), { recursive: true });
     if (await this.exists(join(dest, '.git'))) {
-      // already cloned → fetch latest
-      await simpleGit(dest).fetch();
+      // already cloned → advance the working tree to the remote's current
+      // default branch tip. A bare `fetch` only moves the `origin/*`
+      // remote-tracking refs, never local HEAD or the worktree, so a repeat
+      // "refresh" against an existing clone silently left it stale forever —
+      // `origin/HEAD` is the symbolic ref `git clone` itself sets up to the
+      // remote's default branch, so no separate branch name needs threading
+      // through the job payload (mirrors `sync()`'s fetch+reset-hard shape).
+      const g = simpleGit(dest);
+      await g.fetch();
+      await g.reset(['--hard', 'origin/HEAD']);
       return { path: dest };
     }
     // A prior clone may have timed out mid-write, leaving a partial dir without
