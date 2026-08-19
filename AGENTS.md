@@ -51,14 +51,16 @@ package's own AGENTS.md for which.
 - Before touching a package, skim **that package's own** `INSIGHTS.md` (not the whole repo's).
 - After a non-trivial task, run the `engineering-insights` skill to update the
   touched package(s)' `INSIGHTS.md`.
-- Immediately after `gh pr create` succeeds, and again after any `git push`
-  to a branch with an open PR, invoke the `pr-self-review` skill against
-  that PR — not optional, and its posted GitHub review + `blocked-critical`
-  label are the actual merge gate, not chat text. Treat a resulting
-  "Changes requested" state (including an incomplete-review one) as a hard
-  stop on `gh pr merge` unless the user explicitly overrides in the same
-  session. This re-check is a session convention, not a real git hook — a
-  push made outside a Claude Code session won't re-trigger it.
+- `pr-self-review` is **manual-only** — never invoke it automatically after
+  `gh pr create` or a `git push`. Each run spawns several review subagents
+  and can cost hundreds of thousands of tokens, not worth paying on every
+  push, especially for docs-only or near-empty diffs. Instead, always
+  **offer** to run it before a `gh pr merge` ("want me to run pr-self-review
+  before merging?") and run it only on a yes, or on an explicit ask
+  (`/pr-self-review`, "review this PR"). When it does run and its posted
+  GitHub review + `blocked-critical` label show a "Changes requested" state
+  (including an incomplete-review one), treat that as a hard stop on
+  `gh pr merge` unless the user explicitly overrides in the same session.
 
 ## Feature planning
 
