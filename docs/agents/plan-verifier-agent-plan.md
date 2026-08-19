@@ -4,8 +4,8 @@
 
 ## Context
 
-Fourth stage bound to the existing `planner` → `implementer` pipeline:
-`planner` produces a Development Plan (`.claude/agents/planner.md:39-68`),
+Fourth stage bound to the existing `implementation-planner` → `implementer` pipeline:
+`implementation-planner` produces a Development Plan (`.claude/agents/implementation-planner.md:39-68`),
 `implementer` executes it and emits an Implementation Report
 (`.claude/agents/implementer.md:45-65`), but nothing in the repo today
 independently checks the *resulting code* against every point of that
@@ -27,7 +27,7 @@ Work Items or acceptance criteria; `plan-verifier` does nothing else. Both
 may run on the same PR without overlap.
 
 Design grounding (external research supplied by a parallel `researcher`
-pass; `planner` itself has no WebFetch/WebSearch):
+pass; `implementation-planner` itself has no WebFetch/WebSearch):
 
 - Anthropic, [best-practices](https://code.claude.com/docs/en/best-practices)
   — the documented adversarial-review template is almost exactly this
@@ -66,7 +66,7 @@ pass; `planner` itself has no WebFetch/WebSearch):
 - Out of scope: updating `.claude/agents/README.md`'s pipeline
   table/diagram to add `plan-verifier` as a fourth stage — flagged as a
   natural fast-follow, not authorized by this plan.
-- Out of scope: any change to `planner.md` or `implementer.md` themselves.
+- Out of scope: any change to `implementation-planner.md` or `implementer.md` themselves.
 - Out of scope: wiring `plan-verifier` into the `pr-self-review` skill's
   gate logic (`.claude/skills/pr-self-review/SKILL.md:119-128`) — separate,
   explicitly-scoped task.
@@ -94,7 +94,7 @@ pass; `planner` itself has no WebFetch/WebSearch):
 - `Skill` is included (read-only — the `Skill` tool only loads skill
   content) so that when checking a plan's "Architectural Constraints" or
   "Skills Implementer Will Need" sections, the verifier can load the
-  actual skill text the same way `planner.md:21-24` does, instead of
+  actual skill text the same way `implementation-planner.md:21-24` does, instead of
   asserting a rule from memory.
 - Fresh-context adversarial review pattern — `plan-verifier` runs as its
   own subagent invocation specifically so it does not inherit the
@@ -129,7 +129,7 @@ application code — none of the cataloged skills govern
 ```yaml
 ---
 name: plan-verifier
-description: Use this agent to check already-finished code against every point of an already-written Development Plan and its Implementation Report — never as a substitute for that check via generic advice or style opinions. Reads the plan in full (from the planner agent or a docs/<slug>-plan.md file) and the implementer's Implementation Report in full (or, if none was produced, reconstructs the equivalent from git diff/git log and by re-running the test/typecheck commands the plan or report cite — never trusting a report's claims without re-checking them), then produces one verdict per Work Item/acceptance criterion — MET, NOT MET, or UNVERIFIABLE — each backed by concrete evidence: a file:line citation or an actually-executed command and its real output, never a bare assertion. Explicitly re-checks whether the plan's "Architectural Constraints" section was honored in the resulting code by inspecting the code directly, closing the gap the implementer agent leaves open (implementer does not perform architectural/security review itself). Applies a strict verifiability test to every plan criterion — if two people could reasonably disagree on whether it passed, it is flagged UNVERIFIABLE rather than guessed. Does not fix, edit, or write anything; does not commit, push, or open PRs; does not perform a general/freeform code review beyond what the plan itself specifies. Findings route back to the user or the implementer agent to act on. Trigger on "verify this against the plan", "check the code against docs/<slug>-plan.md", "did the implementer actually finish X", "audit this PR/diff against its plan".
+description: Use this agent to check already-finished code against every point of an already-written Development Plan and its Implementation Report — never as a substitute for that check via generic advice or style opinions. Reads the plan in full (from the implementation-planner agent or a docs/<slug>-plan.md file) and the implementer's Implementation Report in full (or, if none was produced, reconstructs the equivalent from git diff/git log and by re-running the test/typecheck commands the plan or report cite — never trusting a report's claims without re-checking them), then produces one verdict per Work Item/acceptance criterion — MET, NOT MET, or UNVERIFIABLE — each backed by concrete evidence: a file:line citation or an actually-executed command and its real output, never a bare assertion. Explicitly re-checks whether the plan's "Architectural Constraints" section was honored in the resulting code by inspecting the code directly, closing the gap the implementer agent leaves open (implementer does not perform architectural/security review itself). Applies a strict verifiability test to every plan criterion — if two people could reasonably disagree on whether it passed, it is flagged UNVERIFIABLE rather than guessed. Does not fix, edit, or write anything; does not commit, push, or open PRs; does not perform a general/freeform code review beyond what the plan itself specifies. Findings route back to the user or the implementer agent to act on. Trigger on "verify this against the plan", "check the code against docs/<slug>-plan.md", "did the implementer actually finish X", "audit this PR/diff against its plan".
 tools: Read, Grep, Glob, Bash, Skill, AskUserQuestion
 model: sonnet
 ---
@@ -138,7 +138,7 @@ model: sonnet
 ## System-prompt outline (section by section)
 
 - **"Before verifying"**: (a) read the Development Plan in full, including
-  every section listed in `planner.md:39-68` — Context, Scope, Modules
+  every section listed in `implementation-planner.md:39-68` — Context, Scope, Modules
   Touched, Architectural Constraints, INSIGHTS.md Gotchas, Skills
   Implementer Will Need, Work Items, Verification; (b) locate and read the
   Implementation Report in full (`implementer.md:45-65` shape); if none
@@ -240,7 +240,7 @@ model: sonnet
    the body, contradicting its own `tools:` line; (b) every "Discipline"/
    "Anti-genericity" rule is actually enforced by a concrete instruction
    elsewhere in the prompt, not just asserted as a principle; (c) the file
-   is internally consistent with `planner.md`/`implementer.md`'s template
+   is internally consistent with `implementation-planner.md`/`implementer.md`'s template
    vocabulary (Work Items, Architectural Constraints, Modules Touched,
    Scope).
 
@@ -251,8 +251,8 @@ model: sonnet
   AskUserQuestion`; no `Write`, `Edit`, `Agent`, or `Task` anywhere.
 - Invoke via `Agent` with `subagent_type: plan-verifier` against a real,
   already-"done" plan+code pair already in this repo —
-  `docs/agents/planner-agent-plan.md` (Status: done) against
-  `.claude/agents/planner.md` — and confirm the output is a filled-in
+  `docs/agents/implementation-planner-agent-plan.md` (Status: done) against
+  `.claude/agents/implementation-planner.md` — and confirm the output is a filled-in
   per-criterion table with real `file:line`/command-output evidence, not
   a prose summary, and that its "Architectural Constraints Verdicts" table
   is populated from direct code inspection rather than restating the
@@ -273,7 +273,7 @@ model: sonnet
 ---
 
 **Sources consulted:**
-- `.claude/agents/planner.md`, `.claude/agents/implementer.md`,
+- `.claude/agents/implementation-planner.md`, `.claude/agents/implementer.md`,
   `.claude/agents/researcher.md`
 - `.claude/skills/pr-self-review/SKILL.md`
 - `CLAUDE.md`

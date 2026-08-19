@@ -5,7 +5,7 @@
 ## Context
 
 The user wants a fourth subagent, `.claude/agents/architecture-reviewer.md`,
-completing the `researcher` (read-only investigation) → `planner` (plan,
+completing the `researcher` (read-only investigation) → `implementation-planner` (plan,
 no code) → `implementer` (writes code) → **`architecture-reviewer`**
 (read-only post-hoc structural check) pipeline. Role brief: "без права
 запису, перевіряє архітектурні межі й повертає знахідки з доказами" — no
@@ -47,7 +47,7 @@ route to rather than duplicate:
   no in-repo guarantee it always exists.
 
 Design grounding (external research, no WebFetch/WebSearch available to
-`planner` itself — findings supplied by a parallel `researcher` pass):
+`implementation-planner` itself — findings supplied by a parallel `researcher` pass):
 
 - Anthropic, [sub-agents](https://code.claude.com/docs/en/sub-agents) — the
   read-only reviewer precedent uses `tools: Read, Grep, Glob, Bash` (no
@@ -106,18 +106,18 @@ by this plan)
 
 - `.claude/agents/architecture-reviewer.md` (new file) — must follow this
   repo's existing subagent frontmatter shape: `name`, `description`,
-  `tools`, `model` (precedent: `.claude/agents/planner.md:1-6`,
+  `tools`, `model` (precedent: `.claude/agents/implementation-planner.md:1-6`,
   `.claude/agents/implementer.md:1-6`, `.claude/agents/researcher.md:1-6`
   — all three use a comma-separated `tools:` allowlist, none use
   `disallowedTools`).
 - `docs/agents/architecture-reviewer-agent-plan.md` (this file) — follows
-  the existing `docs/agents/{planner,implementer,researcher}-agent-plan.md`
+  the existing `docs/agents/{implementation-planner,implementer,researcher}-agent-plan.md`
   precedent format and the root convention at `CLAUDE.md:60-71`.
 
 ## Architectural Constraints
 
 - `CLAUDE.md:60-71` — plan must be saved with a `**Status:**` line; this
-  agent (the planner persona) does not save files itself.
+  agent (the implementation-planner persona) does not save files itself.
 - `.claude/skills/onion-architecture/SKILL.md:61-67` — the skill's own
   Severity Levels (CRITICAL = breaks dependency rule / couples logic to
   infra / bypasses composition root; HIGH = wrong layer; MEDIUM =
@@ -169,7 +169,7 @@ Design decisions:
 - **No `ReportFindings`**: not added — see Clarification #2 above. Output
   contract instead uses a markdown/JSON block modeled on `pr-self-review`'s
   `FINDINGS_SCHEMA`.
-- **`AskUserQuestion` included**: mirrors `planner`/`researcher`'s "clarify
+- **`AskUserQuestion` included**: mirrors `implementation-planner`/`researcher`'s "clarify
   first" pattern for when no target (diff/PR/branch/directory) is
   specified.
 
@@ -292,7 +292,7 @@ to which files, and any "skipped" notes.
 ---
 
 **Sources consulted:**
-- `.claude/agents/planner.md`, `.claude/agents/implementer.md`,
+- `.claude/agents/implementation-planner.md`, `.claude/agents/implementer.md`,
   `.claude/agents/researcher.md`
 - `.claude/skills/onion-architecture/SKILL.md`,
   `.claude/skills/frontend-ui-architecture/SKILL.md`,

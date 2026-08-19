@@ -1,13 +1,29 @@
-# Add `planner` subagent
+# Add `implementation-planner` subagent
 
-**Status:** done — `../../.claude/agents/planner.md` created.
+**Status:** done — `../../.claude/agents/implementation-planner.md` created.
+
+**2026-08-19 — amended, not repealed:** this agent shipped under the name
+`planner`; renamed to `implementation-planner` (`git mv`, this file
+renamed alongside it) when the `spec-creator` agent was introduced ahead
+of it in the pipeline. The frontmatter/prompt body/template shown below
+describe the **original** shipped behavior and are historically accurate,
+but no longer match the current `.claude/agents/implementation-planner.md`:
+`AskUserQuestion` was dropped from `tools:`, the "Clarify first" section
+was removed entirely (this agent now trusts an already-clarified
+`spec-creator` spec and stops/reports rather than asking on an unresolved
+`[NEEDS CLARIFICATION]`), the template gained a `Spec` field, and every
+Work Item now must cite a `satisfies: AC-N`. Full rationale:
+[`../spec-creator-agent-plan.md`](../spec-creator-agent-plan.md). Current
+source of truth for actual behavior is always
+[`../../.claude/agents/implementation-planner.md`](../../.claude/agents/implementation-planner.md)
+itself, not this doc.
 
 ## Context
 
-Part of a two-agent pipeline (`planner` + `implementer`) that sits between
+Part of a two-agent pipeline (`implementation-planner` + `implementer`) that sits between
 the existing `researcher` subagent (read-only research, no code) and the
 repo's existing architecture/security review skills (`onion-architecture`,
-`security`, etc. — invoked separately, not by these agents). `planner`
+`security`, etc. — invoked separately, not by these agents). `implementation-planner`
 turns a feature/bugfix request into a structured Development Plan before
 any code is written, grounded in this repo's actual modules, skill
 catalog, `INSIGHTS.md` gotchas, and architectural constraints — so the
@@ -29,9 +45,9 @@ that chat turn for the full research citations. Key grounding points:
 - Skills are discovered at runtime via the `Skill` tool
   (description-matching, progressive disclosure) rather than hardcoded
   into an agent's own prompt — so the catalog can grow without editing
-  `planner`/`implementer`.
+  `implementation-planner`/`implementer`.
 - The repo's own `docs/<feature-slug>-plan.md` + `**Status:**` line
-  convention (root `../../CLAUDE.md`) is the save target — `planner` itself
+  convention (root `../../CLAUDE.md`) is the save target — `implementation-planner` itself
   stays read-only and returns the plan; the orchestrating session saves
   it, mirroring how this very session already handles plan-mode output.
 - SPEC.md self-containment checklist (name files/interfaces, state
@@ -41,11 +57,11 @@ that chat turn for the full research citations. Key grounding points:
 
 ## Approach
 
-Create `../../.claude/agents/planner.md`:
+Create `../../.claude/agents/implementation-planner.md`:
 
 ```yaml
 ---
-name: planner
+name: implementation-planner
 description: Use this agent to turn a feature/bugfix request into a structured Development Plan before any code is written. It reads the relevant modules' AGENTS.md/CLAUDE.md constraints and INSIGHTS.md gotchas, the current skill catalog, and the codebase, then produces a plan that names the modules/files touched, the skills the implementer agent will apply, explicit in-scope/out-of-scope boundaries, and an end-to-end verification step — so the plan cannot contradict rules the implementer will later be bound by. Does not write or edit any files; returns the plan for the orchestrating session to save (per this repo's docs/<slug>-plan.md convention) and for the implementer agent to consume. If the request's scope, target modules, or acceptance criteria are unclear, it asks clarifying questions first rather than guessing. Do not use this agent to write code.
 tools: Read, Grep, Glob, Bash, Skill, AskUserQuestion
 model: sonnet
@@ -62,7 +78,7 @@ System prompt body covers, in order:
 2. **Clarify first** — `AskUserQuestion` before planning if scope,
    modules, or acceptance criteria are genuinely unclear.
 3. **Output: Development Plan** — the markdown template below, with an
-   explicit note that `planner` does not save the file itself.
+   explicit note that `implementation-planner` does not save the file itself.
 4. **Discipline** — every constraint/gotcha cited needs a file:line
    citation; every work item independently actionable; every skill the
    implementer is expected to invoke is named with a reason.
@@ -102,9 +118,9 @@ Development Plan template:
 
 ## Verification
 
-- `cat .claude/agents/planner.md` — frontmatter parses, no `Write`/`Edit`
+- `cat .claude/agents/implementation-planner.md` — frontmatter parses, no `Write`/`Edit`
   in `tools:`.
-- Invoke via `Agent` with `subagent_type: planner` on a real multi-module
+- Invoke via `Agent` with `subagent_type: implementation-planner` on a real multi-module
   feature request from this repo; confirm the returned plan cites real
   `../../AGENTS.md`/`INSIGHTS.md` file:line locations and lists actual skills
   from `../../.claude/skills/README.md`, not invented ones.
