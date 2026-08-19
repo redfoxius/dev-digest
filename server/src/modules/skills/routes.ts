@@ -18,6 +18,23 @@ const VersionParams = z.object({
 /** `/skills/community/:name/import` — name addresses the static seed by slug. */
 const CommunityNameParams = z.object({ name: z.string().min(1) });
 
+/** `/skills/:id/context-docs/:path` — id a uuid, path a percent-encoded
+ *  repo-relative document path (a raw `/` inside it arrives percent-encoded
+ *  as `%2F`; Fastify's router already decodes it once before the handler
+ *  sees `req.params.path` — never re-decode it). */
+const SkillContextDocParams = z.object({ id: z.string().uuid(), path: z.string().min(1) });
+
+/** Every context-docs route is scoped to the client's single active repo —
+ *  agents/skills are workspace-scoped while discovered documents are
+ *  repo-scoped (spec §4), and there's no `:repoId` segment on these routes
+ *  (spec §10), so the active repo travels as a query param instead. */
+const ContextDocsQuery = z.object({ repo_id: z.string().uuid() });
+
+/** Bulk set/reorder — mirrors `SetSkillsBody.skill_ids`'s full-ordered-list contract. */
+const SetContextDocsBody = z.object({ paths: z.array(z.string().min(1)) });
+
+const SetContextDocEnabledBody = z.object({ enabled: z.boolean() });
+
 /**
  * A1 — skills module (owner A1).
  *   GET    /skills                          → list (workspace-scoped, filterable)
@@ -29,6 +46,10 @@ const CommunityNameParams = z.object({ name: z.string().min(1) });
  *   GET    /skills/:id/versions/:version    → one version snapshot
  *   POST   /skills/:id/versions/:version/restore → restore (creates a NEW version)
  *   GET    /skills/:id/stats                → Stats tab (used_by, pull frequency, accept rate, findings)
+ *   GET    /skills/:id/context-docs         → attached context docs for ?repo_id=... (ordered)
+ *   POST   /skills/:id/context-docs         → set/reorder attached context docs (full ordered path list)
+ *   PATCH  /skills/:id/context-docs/:path   → attach+enable (if unattached) or toggle
+ *                                              enabled (if attached) — the Context-tab checkbox action
  *   POST   /skills/import/file/preview      → multipart upload → ImportCandidate preview
  *   POST   /skills/import/file/confirm      → persists (source: manual, enabled: true)
  *   POST   /skills/import/url/preview       → fetch URL server-side → ImportCandidate preview
@@ -233,6 +254,61 @@ export default async function skillsRoutes(appBase: FastifyInstance) {
       const stats = await service.getStats(workspaceId, req.params.id, req.query.days);
       if (!stats) throw new NotFoundError('Skill not found');
       return stats;
+    },
+  );
+
+  app.get(
+    '/skills/:id/context-docs',
+    { schema: { params: IdParams, querystring: ContextDocsQuery } },
+    async (req) => {
+      const { workspaceId } = await getContext(app.container, req);
+      const links = await service.contextDocLinks(workspaceId, req.params.id, req.query.repo_id);
+      if (!links) throw new NotFoundError('Skill or repo not found');
+      return links;
+    },
+  );
+
+  app.post(
+    '/skills/:id/context-docs',
+    { schema: { params: IdParams, querystring: ContextDocsQuery, body: SetContextDocsBody } },
+    async (req) => {
+      const { workspaceId } = await getContext(app.container, req);
+      const links = await service.setContextDocs(
+        workspaceId,
+        req.params.id,
+        req.query.repo_id,
+        req.body.paths,
+      );
+      if (!links) throw new NotFoundError('Skill or repo not found');
+      return links;
+    },
+  );
+
+  app.patch(
+    '/skills/:id/context-docs/:path',
+    {
+      schema: {
+        params: SkillContextDocParams,
+        querystring: ContextDocsQuery,
+        body: SetContextDocEnabledBody,
+      },
+    },
+    async (req) => {
+      const { workspaceId } = await getContext(app.container, req);
+      // Fastify's router (find-my-way) already decodes every route param
+      // exactly once before it reaches `req.params` — re-decoding here
+      // double-decodes it, throwing an uncaught `URIError` for any real
+      // filename containing a literal `%` (e.g. "50%-notes.md").
+      const path = req.params.path;
+      const links = await service.setContextDocEnabled(
+        workspaceId,
+        req.params.id,
+        req.query.repo_id,
+        path,
+        req.body.enabled,
+      );
+      if (!links) throw new NotFoundError('Skill or repo not found');
+      return links;
     },
   );
 }

@@ -572,6 +572,32 @@ workflow and quality bar.
   (`server/test/diff-loader.test.ts`,
   `server/src/modules/pulls/service.ts`)
 
+- 2026-08-19 — Project Context Folder's indexing chunker
+  (`server/src/modules/context-docs/chunker.ts`) implements spec §9's
+  heading-based/~500-token-fallback strategy as a genuinely pure function
+  (text in, `string[]` chunks out — no DB/FS), reusing `reviewer-core`'s
+  existing `estimateTokens` chars/4 heuristic (imported via
+  `@devdigest/reviewer-core`, the same path-alias-as-source pattern
+  `container.ts` already uses for `OpenRouterProvider`) rather than
+  duplicating that heuristic a third time. Split algorithm: break on any
+  `#`..`######` heading line into one chunk per section (a heading-less
+  document is its own single section); any section still over ~500
+  estimated tokens (~2000 chars) is further cut into fixed-size windows.
+  Two things worth flagging for whoever extends this: (1) `root`
+  classification for a document that reaches the reader via a fully custom
+  configured glob not routed through a literal `specs/`/`docs/`/`insights/`
+  path segment has no principled answer in the spec — `reader.ts`
+  `classifyRoot()` defaults such a path to `'docs'` as a judgment call, not
+  a spec-mandated rule; (2) `context_documents.root` uses the plural
+  `'specs'` value while `code_chunks.source` uses the singular `'spec'` (its
+  existing enum, unchanged by this feature) — `service.ts`'s
+  `rootToChunkSource()` is the one place that maps between them, and any
+  future direct write to `code_chunks.source` from this root value needs
+  the same mapping, not a bare pass-through.
+  (`server/src/modules/context-docs/chunker.ts`,
+  `server/src/modules/context-docs/reader.ts:classifyRoot`,
+  `server/src/modules/context-docs/service.ts:rootToChunkSource`)
+
 ## Tool & Library Notes
 
 - 2026-08-13 — `server/src/adapters/llm/openai.ts:15` and `anthropic.ts:16`'s

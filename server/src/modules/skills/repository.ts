@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, inArray, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, sql } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
 import * as t from '../../db/schema.js';
 import type { SkillSource, SkillStats, SkillType } from '@devdigest/shared';
@@ -39,6 +39,15 @@ export interface ListSkillsFilters {
   type?: SkillType;
   source?: SkillSource;
   enabled?: boolean;
+}
+
+/** One `skill_context_docs` link row (path-identified, no document join here —
+ *  the service layer resolves `document` against the `context_documents`
+ *  catalog via `container.contextDocsRepo`, not this repository). */
+export interface SkillContextDocRow {
+  path: string;
+  order: number;
+  enabled: boolean;
 }
 
 export class SkillsRepository {
@@ -280,4 +289,88 @@ export class SkillsRepository {
       findings_by_category: [...categoryCounts.entries()].map(([category, count]) => ({ category, count })),
     };
   }
+
+  // ---- skill_context_docs link table (Project Context Folder — mirrors
+  // AgentsRepository's agent_context_docs / agent_skills structural precedent
+  // exactly: composite PK, `enabled` default true, `order` for full-list
+  // reorder. See docs/project-context-folder-plan.md Work Item 9.) ---------
+
+  /** Context docs attached to a skill for a given repo, in `order` ascending.
+   *  Accepts a transaction handle so callers can read consistent state
+   *  mid-transaction (e.g. `setSkillContextDocs`' preserve-enabled read). */
+  async skillContextDocs(
+    skillId: string,
+    repoId: string,
+    dbOrTx: Db = this.db,
+  ): Promise<SkillContextDocRow[]> {
+    return dbOrTx
+      .select({
+        path: t.skillContextDocs.path,
+        order: t.skillContextDocs.order,
+        enabled: t.skillContextDocs.enabled,
+      })
+      .from(t.skillContextDocs)
+      .where(and(eq(t.skillContextDocs.skillId, skillId), eq(t.skillContextDocs.repoId, repoId)))
+      .orderBy(asc(t.skillContextDocs.order));
+  }
+
+  /**
+   * Replace the full set of attached document paths for a skill+repo with
+   * `paths`, assigning order = index. Mirrors `AgentsRepository.setSkills`
+   * exactly: each path's current `enabled` state (from any existing
+   * `skill_context_docs` row) is preserved across the replace — a pure
+   * reorder must never silently flip an unrelated, currently-unchecked path
+   * to `enabled: true` just because it appears in the reordered array. Paths
+   * with no prior row default to `enabled: false` (bulk POST attaches at
+   * most in a disabled state — only `setSkillContextDocEnabled`/PATCH both
+   * attaches AND enables).
+   */
+  async setSkillContextDocs(skillId: string, repoId: string, paths: string[]): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      const existing = await this.skillContextDocs(skillId, repoId, tx);
+      const enabledByPath = new Map(existing.map((l) => [l.path, l.enabled]));
+
+      await tx
+        .delete(t.skillContextDocs)
+        .where(and(eq(t.skillContextDocs.skillId, skillId), eq(t.skillContextDocs.repoId, repoId)));
+      if (paths.length > 0) {
+        await tx.insert(t.skillContextDocs).values(
+          paths.map((path, i) => ({
+            skillId,
+            repoId,
+            path,
+            order: i,
+            enabled: enabledByPath.get(path) ?? false,
+          })),
+        );
+      }
+    });
+  }
+
+  /**
+   * Upsert the per-skill `enabled` state for one attached document path —
+   * checking a not-yet-attached path in the Skill Editor's Context tab both
+   * attaches it (appended at the end of the current order) AND enables it in
+   * one call; unchecking an attached path flips `enabled` off on its existing
+   * row without touching its `order` (never deletes on uncheck). Mirrors
+   * `AgentsRepository.setSkillEnabled`.
+   */
+  async setSkillContextDocEnabled(
+    skillId: string,
+    repoId: string,
+    path: string,
+    enabled: boolean,
+  ): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      const existing = await this.skillContextDocs(skillId, repoId, tx);
+      await tx
+        .insert(t.skillContextDocs)
+        .values({ skillId, repoId, path, order: existing.length, enabled })
+        .onConflictDoUpdate({
+          target: [t.skillContextDocs.skillId, t.skillContextDocs.repoId, t.skillContextDocs.path],
+          set: { enabled },
+        });
+    });
+  }
+
 }

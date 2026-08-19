@@ -1,0 +1,86 @@
+import type { CSSProperties } from "react";
+
+/** Co-located styles for ContextTab. Row/list/filter/handle/srOnly shapes
+   mirror `SkillsTab`'s `styles.ts` byte-for-byte (same established
+   checkbox/drag-reorder list anatomy); `preview*` are new, for the
+   "SERIALIZES AS" panel (AC-25). */
+export const s = {
+  wrap: { maxWidth: 760 } satisfies CSSProperties,
+  header: { display: "flex", alignItems: "center", gap: 10, marginBottom: 6 } satisfies CSSProperties,
+  h2: { fontSize: 18, fontWeight: 700 } satisfies CSSProperties,
+  filter: {
+    marginLeft: "auto",
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    padding: "6px 10px",
+    borderRadius: 7,
+    border: "1px solid var(--border-strong)",
+    background: "var(--bg-elevated)",
+    width: 200,
+  } satisfies CSSProperties,
+  filterIcon: { color: "var(--text-muted)" } satisfies CSSProperties,
+  filterInput: {
+    flex: 1,
+    fontSize: 13,
+    background: "transparent",
+    border: "none",
+    outline: "none",
+    color: "var(--text-primary)",
+  } satisfies CSSProperties,
+  hint: { fontSize: 12, color: "var(--text-muted)", marginBottom: 16, lineHeight: 1.45 } satisfies CSSProperties,
+  list: {
+    border: "1px solid var(--border)",
+    borderRadius: 8,
+    overflow: "hidden",
+    background: "var(--bg-surface)",
+  } satisfies CSSProperties,
+  row: (dragOver: boolean): CSSProperties => ({
+    display: "flex",
+    alignItems: "center",
+    gap: 12,
+    padding: "10px 14px",
+    borderBottom: "1px solid var(--border)",
+    background: dragOver ? "var(--bg-hover)" : "transparent",
+  }),
+  handle: { display: "flex", cursor: "grab", color: "var(--text-muted)", flexShrink: 0 } satisfies CSSProperties,
+  name: { fontSize: 13, flex: 1, minWidth: 0 } satisfies CSSProperties,
+  missing: { fontSize: 11, color: "var(--warn)", display: "flex", alignItems: "center", gap: 4 } satisfies CSSProperties,
+  empty: { padding: "24px 14px", fontSize: 13, color: "var(--text-muted)", textAlign: "center" } satisfies CSSProperties,
+  srOnly: {
+    position: "absolute",
+    width: 1,
+    height: 1,
+    padding: 0,
+    margin: -1,
+    overflow: "hidden",
+    clip: "rect(0, 0, 0, 0)",
+    whiteSpace: "nowrap",
+    border: 0,
+  } satisfies CSSProperties,
+  previewPanel: {
+    marginTop: 20,
+    border: "1px solid var(--border)",
+    borderRadius: 8,
+    background: "var(--bg-elevated)",
+    overflow: "hidden",
+  } satisfies CSSProperties,
+  previewLabel: {
+    fontSize: 11,
+    fontWeight: 700,
+    letterSpacing: "0.04em",
+    textTransform: "uppercase",
+    color: "var(--text-muted)",
+    padding: "8px 14px",
+    borderBottom: "1px solid var(--border)",
+  } satisfies CSSProperties,
+  previewText: {
+    margin: 0,
+    padding: "12px 14px",
+    fontSize: 12,
+    fontFamily: "var(--font-mono, monospace)",
+    color: "var(--text-secondary)",
+    whiteSpace: "pre-wrap",
+    wordBreak: "break-word",
+  } satisfies CSSProperties,
+} as const;

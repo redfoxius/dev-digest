@@ -77,6 +77,29 @@ export class RepoRepository {
       .where(eq(t.repos.id, repoId));
   }
 
+  /**
+   * Project Context Folder (`docs/project-context-folder-plan.md` Work Item
+   * 4, AC-6) — persist a repo's own search-root glob config. Lives here
+   * (not in `context-docs/repository.ts`) per onion-architecture's
+   * cross-module rule: another module reaches a table it doesn't own only
+   * through that table's own repository, never a direct `schema.repos`
+   * query. `globs.length === 0` is treated as "clear the override" (falls
+   * back to the default glob), mirroring `null` semantics elsewhere on this
+   * column. Returns `undefined` if no such repo exists in the workspace.
+   */
+  async updateContextSearchGlobs(
+    workspaceId: string,
+    id: string,
+    globs: string[],
+  ): Promise<RepoRow | undefined> {
+    const [row] = await this.db
+      .update(t.repos)
+      .set({ contextSearchGlobs: globs.length > 0 ? globs : null })
+      .where(and(eq(t.repos.workspaceId, workspaceId), eq(t.repos.id, id)))
+      .returning();
+    return row;
+  }
+
   async remove(workspaceId: string, id: string): Promise<boolean> {
     const deleted = await this.db
       .delete(t.repos)

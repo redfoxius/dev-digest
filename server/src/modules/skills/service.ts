@@ -8,12 +8,14 @@ import type {
   CommunitySkill,
   ImportCandidate,
   Skill,
+  SkillContextDocLink,
   SkillSource,
   SkillStats,
   SkillType,
   SkillVersion,
 } from '@devdigest/shared';
 import { AppError, ExternalServiceError, NotFoundError, ValidationError } from '../../platform/errors.js';
+import { isGlobEscaping } from '../context-docs/glob-safety.js';
 import { SkillsRepository } from './repository.js';
 import {
   detectArchiveKind,
@@ -194,6 +196,135 @@ export class SkillsService {
     const skill = await this.repo.getById(workspaceId, skillId);
     if (!skill) return undefined;
     return this.repo.getStats(workspaceId, skillId, days);
+  }
+
+  // ---- skill_context_docs (Skill Editor's Context tab — Project Context
+  // Folder, docs/project-context-folder-plan.md Work Item 9) ----------------
+
+  /**
+   * Context docs attached to a skill for `repoId`, ordered, each with its
+   * `document` resolved against the latest `context_documents` scan (`null`
+   * when the path no longer resolves — AC-22). Workspace-scoped: undefined
+   * when either the skill or the repo isn't in this workspace (route → 404),
+   * mirroring `listVersions`/`getStats`'s existing 404 pattern.
+   */
+  async contextDocLinks(
+    workspaceId: string,
+    skillId: string,
+    repoId: string,
+  ): Promise<SkillContextDocLink[] | undefined> {
+    const skill = await this.repo.getById(workspaceId, skillId);
+    if (!skill) return undefined;
+    const repo = await this.container.reposRepo.getById(workspaceId, repoId);
+    if (!repo) return undefined;
+    return this.buildContextDocLinks(skillId, repoId);
+  }
+
+  /**
+   * Rejects an attach path that could resolve outside the repo's clone path
+   * (a `..` segment, a leading `/`/`\`, a drive-letter) — the same write-time
+   * check `context-docs/routes.ts`'s `ContextConfigBody` already applies to
+   * search-root globs (AC-7), reused here for a single relative file path.
+   * Deliberately does NOT require the path to already exist in
+   * `context_documents` — AC-22 explicitly allows attaching a path before
+   * it's ever been discovered (or after a later rescan removes it), resolving
+   * `document: null` in the link response until a future scan finds it. The
+   * actual symlink-escape defense lives at read time
+   * (`resolveWithinClone` + `verifyRealpathWithinClone` in resolve.ts /
+   * context-docs `repository.ts`) — this is only the cheap, obviously-
+   * malformed-path reject. Mirrors `AgentsService.assertPathsAttachable`
+   * exactly.
+   */
+  private assertPathsAttachable(paths: string[]): void {
+    const escaping = paths.filter((p) => isGlobEscaping(p));
+    if (escaping.length > 0) {
+      throw new ValidationError("Path resolves outside the repo's clone path", { paths: escaping });
+    }
+  }
+
+  /**
+   * Set / reorder the skill's attached context docs (bulk, full ordered
+   * list — mirrors `AgentsService.setSkills`). Each path's current `enabled`
+   * state is preserved across the replace (see
+   * `SkillsRepository.setSkillContextDocs`'s doc comment) — a pure reorder
+   * never silently re-enables an unrelated, currently-unchecked path.
+   */
+  async setContextDocs(
+    workspaceId: string,
+    skillId: string,
+    repoId: string,
+    paths: string[],
+  ): Promise<SkillContextDocLink[] | undefined> {
+    const skill = await this.repo.getById(workspaceId, skillId);
+    if (!skill) return undefined;
+    const repo = await this.container.reposRepo.getById(workspaceId, repoId);
+    if (!repo) return undefined;
+    this.assertPathsAttachable(paths);
+    await this.repo.setSkillContextDocs(skillId, repoId, paths);
+    return this.buildContextDocLinks(skillId, repoId);
+  }
+
+  /**
+   * The Skill Editor's Context tab checkbox: checking a not-yet-attached
+   * document both attaches it (appended at the end of the current order) AND
+   * enables it in one call; unchecking an attached document flips `enabled`
+   * off without detaching it (mirrors `AgentsService.setSkillEnabled`).
+   */
+  async setContextDocEnabled(
+    workspaceId: string,
+    skillId: string,
+    repoId: string,
+    path: string,
+    enabled: boolean,
+  ): Promise<SkillContextDocLink[] | undefined> {
+    const skill = await this.repo.getById(workspaceId, skillId);
+    if (!skill) return undefined;
+    const repo = await this.container.reposRepo.getById(workspaceId, repoId);
+    if (!repo) return undefined;
+    this.assertPathsAttachable([path]);
+    await this.repo.setSkillContextDocEnabled(skillId, repoId, path, enabled);
+    return this.buildContextDocLinks(skillId, repoId);
+  }
+
+  /** Shared assembly: link rows + their resolved `document` (joined against
+   *  `context_documents` + used-by counts), in `order` ascending. */
+  private async buildContextDocLinks(skillId: string, repoId: string): Promise<SkillContextDocLink[]> {
+    const links = await this.repo.skillContextDocs(skillId, repoId);
+    if (links.length === 0) return [];
+    const paths = new Set(links.map((l) => l.path));
+    // Cross-module read of the `context_documents` catalog via
+    // `container.contextDocsRepo` (not this module's own repository.ts —
+    // onion-architecture: repositories stay drizzle-only, cross-module
+    // orchestration lives here in the service). No batch-by-paths method
+    // exists on `ContextDocsRepository`, so `listByRepo` is filtered
+    // client-side to the paths this skill has attached.
+    const [allDocs, usedByPath] = await Promise.all([
+      this.container.contextDocsRepo.listByRepo(repoId),
+      this.container.contextDocsRepo.usedByCounts(repoId),
+    ]);
+    const docsByPath = new Map(allDocs.filter((d) => paths.has(d.path)).map((d) => [d.path, d]));
+    return links.map((l) => {
+      const doc = docsByPath.get(l.path);
+      const usedBy = usedByPath.get(l.path) ?? { agents: 0, skills: 0 };
+      return {
+        path: l.path,
+        order: l.order,
+        enabled: l.enabled,
+        document: doc
+          ? {
+              id: doc.id,
+              path: doc.path,
+              root: doc.root,
+              size_bytes: doc.sizeBytes,
+              chunk_count: doc.chunkCount,
+              index_status: doc.indexStatus,
+              used_by_agents: usedBy.agents,
+              used_by_skills: usedBy.skills,
+              last_indexed_at: doc.lastIndexedAt.toISOString(),
+            }
+          : null,
+      };
+    });
   }
 
   // ---- import: file upload / archive (in-memory only) --------------------
