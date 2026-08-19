@@ -19,8 +19,9 @@ const VersionParams = z.object({
 const CommunityNameParams = z.object({ name: z.string().min(1) });
 
 /** `/skills/:id/context-docs/:path` — id a uuid, path a percent-encoded
- *  repo-relative document path (decoded explicitly in the handler — a raw
- *  `/` inside it arrives percent-encoded as `%2F`). */
+ *  repo-relative document path (a raw `/` inside it arrives percent-encoded
+ *  as `%2F`; Fastify's router already decodes it once before the handler
+ *  sees `req.params.path` — never re-decode it). */
 const SkillContextDocParams = z.object({ id: z.string().uuid(), path: z.string().min(1) });
 
 /** Every context-docs route is scoped to the client's single active repo —
@@ -294,7 +295,11 @@ export default async function skillsRoutes(appBase: FastifyInstance) {
     },
     async (req) => {
       const { workspaceId } = await getContext(app.container, req);
-      const path = decodeURIComponent(req.params.path);
+      // Fastify's router (find-my-way) already decodes every route param
+      // exactly once before it reaches `req.params` — re-decoding here
+      // double-decodes it, throwing an uncaught `URIError` for any real
+      // filename containing a literal `%` (e.g. "50%-notes.md").
+      const path = req.params.path;
       const links = await service.setContextDocEnabled(
         workspaceId,
         req.params.id,

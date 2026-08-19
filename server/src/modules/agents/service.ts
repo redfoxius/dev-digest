@@ -9,6 +9,8 @@ import type {
   Provider,
   ReviewStrategy,
 } from '@devdigest/shared';
+import { ValidationError } from '../../platform/errors.js';
+import { isGlobEscaping } from '../context-docs/glob-safety.js';
 import { AgentsRepository } from './repository.js';
 import { toAgentDto, toAgentVersionDto } from './helpers.js';
 
@@ -270,6 +272,27 @@ export class AgentsService {
   }
 
   /**
+   * Rejects an attach path that could resolve outside the repo's clone path
+   * (a `..` segment, a leading `/`/`\`, a drive-letter) — the same write-time
+   * check `context-docs/routes.ts`'s `ContextConfigBody` already applies to
+   * search-root globs (AC-7), reused here for a single relative file path.
+   * Deliberately does NOT require the path to already exist in
+   * `context_documents` — AC-22 explicitly allows attaching a path before
+   * it's ever been discovered (or after a later rescan removes it), resolving
+   * `document: null` in the link response until a future scan finds it. The
+   * actual symlink-escape defense lives at read time
+   * (`resolveWithinClone` + `verifyRealpathWithinClone` in resolve.ts /
+   * context-docs `repository.ts`) — this is only the cheap, obviously-
+   * malformed-path reject.
+   */
+  private assertPathsAttachable(paths: string[]): void {
+    const escaping = paths.filter((p) => isGlobEscaping(p));
+    if (escaping.length > 0) {
+      throw new ValidationError("Path resolves outside the repo's clone path", { paths: escaping });
+    }
+  }
+
+  /**
    * POST /agents/:id/context-docs — bulk set/reorder (AC-20). Replaces the
    * full ordered list; a not-previously-attached path defaults to
    * `enabled: false` (never silently enables an unrelated unchecked row —
@@ -282,6 +305,7 @@ export class AgentsService {
     paths: string[],
   ): Promise<AgentContextDocLink[] | undefined> {
     if (!(await this.assertAgentAndRepoInWorkspace(workspaceId, agentId, repoId))) return undefined;
+    this.assertPathsAttachable(paths);
     await this.repo.setAgentContextDocs(agentId, repoId, paths);
     return this.contextDocLinks(agentId, repoId);
   }
@@ -299,6 +323,7 @@ export class AgentsService {
     enabled: boolean,
   ): Promise<AgentContextDocLink[] | undefined> {
     if (!(await this.assertAgentAndRepoInWorkspace(workspaceId, agentId, repoId))) return undefined;
+    this.assertPathsAttachable([path]);
     await this.repo.setAgentContextDocEnabled(agentId, repoId, path, enabled);
     return this.contextDocLinks(agentId, repoId);
   }

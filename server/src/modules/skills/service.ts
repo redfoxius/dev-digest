@@ -15,6 +15,7 @@ import type {
   SkillVersion,
 } from '@devdigest/shared';
 import { AppError, ExternalServiceError, NotFoundError, ValidationError } from '../../platform/errors.js';
+import { isGlobEscaping } from '../context-docs/glob-safety.js';
 import { SkillsRepository } from './repository.js';
 import {
   detectArchiveKind,
@@ -220,6 +221,28 @@ export class SkillsService {
   }
 
   /**
+   * Rejects an attach path that could resolve outside the repo's clone path
+   * (a `..` segment, a leading `/`/`\`, a drive-letter) — the same write-time
+   * check `context-docs/routes.ts`'s `ContextConfigBody` already applies to
+   * search-root globs (AC-7), reused here for a single relative file path.
+   * Deliberately does NOT require the path to already exist in
+   * `context_documents` — AC-22 explicitly allows attaching a path before
+   * it's ever been discovered (or after a later rescan removes it), resolving
+   * `document: null` in the link response until a future scan finds it. The
+   * actual symlink-escape defense lives at read time
+   * (`resolveWithinClone` + `verifyRealpathWithinClone` in resolve.ts /
+   * context-docs `repository.ts`) — this is only the cheap, obviously-
+   * malformed-path reject. Mirrors `AgentsService.assertPathsAttachable`
+   * exactly.
+   */
+  private assertPathsAttachable(paths: string[]): void {
+    const escaping = paths.filter((p) => isGlobEscaping(p));
+    if (escaping.length > 0) {
+      throw new ValidationError("Path resolves outside the repo's clone path", { paths: escaping });
+    }
+  }
+
+  /**
    * Set / reorder the skill's attached context docs (bulk, full ordered
    * list — mirrors `AgentsService.setSkills`). Each path's current `enabled`
    * state is preserved across the replace (see
@@ -236,6 +259,7 @@ export class SkillsService {
     if (!skill) return undefined;
     const repo = await this.container.reposRepo.getById(workspaceId, repoId);
     if (!repo) return undefined;
+    this.assertPathsAttachable(paths);
     await this.repo.setSkillContextDocs(skillId, repoId, paths);
     return this.buildContextDocLinks(skillId, repoId);
   }
@@ -257,6 +281,7 @@ export class SkillsService {
     if (!skill) return undefined;
     const repo = await this.container.reposRepo.getById(workspaceId, repoId);
     if (!repo) return undefined;
+    this.assertPathsAttachable([path]);
     await this.repo.setSkillContextDocEnabled(skillId, repoId, path, enabled);
     return this.buildContextDocLinks(skillId, repoId);
   }
