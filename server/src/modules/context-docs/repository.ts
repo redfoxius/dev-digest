@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import type { Db } from '../../db/client.js';
 import * as t from '../../db/schema.js';
 import type { ContextDocIndexStatus, ContextDocRoot } from '@devdigest/shared';
-import { resolveWithinClone } from './glob-safety.js';
+import { resolveWithinClone, verifyRealpathWithinClone } from './glob-safety.js';
 
 /**
  * Project Context Folder — `context_documents`/`code_chunks` data access
@@ -154,18 +154,22 @@ export class ContextDocsRepository {
   /**
    * Read-time defense-in-depth (AC-41, security skill): resolves `path`
    * against `clonePath` via `resolveWithinClone` — the SAME guard
-   * `glob-safety.ts` exposes for write-time glob validation (AC-7) — before
-   * ever touching the filesystem. A `context_documents` row is trusted to
-   * already be repo-relative (it only ever came from `reader.ts`'s own
-   * walk), but this is the second, independent check the security posture
-   * calls for. Returns `null` on any escape/read failure; the caller maps
-   * that to a 404, never a 500.
+   * `glob-safety.ts` exposes for write-time glob validation (AC-7) — then
+   * `verifyRealpathWithinClone` to catch a symlink that lexically sits
+   * inside `clonePath` but resolves outside it on disk, before ever
+   * touching the filesystem for real content. A `context_documents` row is
+   * trusted to already be repo-relative (it only ever came from `reader.ts`'s
+   * own walk, which itself skips symlinks), but this is the second,
+   * independent check the security posture calls for. Returns `null` on any
+   * escape/read failure; the caller maps that to a 404, never a 500.
    */
   async readPreviewContent(clonePath: string, path: string): Promise<string | null> {
     const resolved = resolveWithinClone(clonePath, path);
     if (!resolved) return null;
+    const verified = await verifyRealpathWithinClone(clonePath, resolved);
+    if (!verified) return null;
     try {
-      return await readFile(resolved, 'utf8');
+      return await readFile(verified, 'utf8');
     } catch {
       return null;
     }

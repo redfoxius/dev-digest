@@ -257,9 +257,13 @@ export default async function agentsRoutes(appBase: FastifyInstance) {
     async (req) => {
       const { workspaceId } = await getContext(app.container, req);
       // The path segment may itself contain `/` (e.g. "specs/public-api.md")
-      // percent-encoded by the client — decode explicitly rather than rely
-      // on the router's own segment decoding.
-      const path = decodeURIComponent(req.params.path);
+      // percent-encoded by the client — Fastify's router (find-my-way)
+      // already decodes every route param exactly once before it reaches
+      // `req.params`, so `req.params.path` is already the decoded value.
+      // Decoding it again here double-decodes it, throwing an uncaught
+      // `URIError` for any real filename containing a literal `%` (e.g.
+      // "50%-notes.md").
+      const path = req.params.path;
       const links = await service.setContextDocEnabled(
         workspaceId,
         req.params.id,

@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import type { Container } from '../../platform/container.js';
-import { resolveWithinClone } from './glob-safety.js';
+import { resolveWithinClone, verifyRealpathWithinClone } from './glob-safety.js';
 
 /**
  * Run-time resolution of an agent's attached Project Context documents
@@ -9,9 +9,10 @@ import { resolveWithinClone } from './glob-safety.js';
  * independent of the reader/chunk/embed mechanism (a) this module also
  * hosts: it never queries `code_chunks` and never calls the `Embedder` port
  * (AC-12). It reads a document's CURRENT text directly off the repo's
- * working tree via `resolveWithinClone`'s read-time path-escape guard
- * (AC-41), the same guard `repository.ts#readPreviewContent` uses for the
- * browser's Preview pane.
+ * working tree via `resolveWithinClone`'s lexical path-escape guard PLUS
+ * `verifyRealpathWithinClone`'s symlink-escape guard (AC-41) — the same
+ * pair `repository.ts#readPreviewContent` uses for the browser's Preview
+ * pane.
  *
  * Kept in this module (not `reviews/`) because it's the context-docs
  * domain's own I/O-boundary concern, mirroring how `repo-intel/pipeline/
@@ -98,9 +99,18 @@ export async function resolveContextDocs(
       continue;
     }
 
+    // Read-time symlink defense: `resolved` is only lexically inside
+    // clonePath — verify it doesn't resolve outside it through an on-disk
+    // symlink before ever reading its content (see glob-safety.ts).
+    const verified = await verifyRealpathWithinClone(clonePath, resolved);
+    if (!verified) {
+      warnings.push(`Attached document resolves outside the repo clone, skipped: ${path}`);
+      continue;
+    }
+
     let content: string;
     try {
-      content = await readFile(resolved, 'utf8');
+      content = await readFile(verified, 'utf8');
     } catch {
       // AC-30 — deleted/renamed/unreadable at run time: skip, warn, continue.
       warnings.push(`Attached document not found or unreadable, skipped: ${path}`);

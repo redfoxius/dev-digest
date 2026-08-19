@@ -417,14 +417,16 @@ export class AgentsRepository {
     path: string,
     enabled: boolean,
   ): Promise<void> {
-    const existing = await this.linkedContextDocs(agentId, repoId);
-    await this.db
-      .insert(t.agentContextDocs)
-      .values({ agentId, repoId, path, order: existing.length, enabled })
-      .onConflictDoUpdate({
-        target: [t.agentContextDocs.agentId, t.agentContextDocs.repoId, t.agentContextDocs.path],
-        set: { enabled },
-      });
+    await this.db.transaction(async (tx) => {
+      const existing = await this.linkedContextDocs(agentId, repoId, tx);
+      await tx
+        .insert(t.agentContextDocs)
+        .values({ agentId, repoId, path, order: existing.length, enabled })
+        .onConflictDoUpdate({
+          target: [t.agentContextDocs.agentId, t.agentContextDocs.repoId, t.agentContextDocs.path],
+          set: { enabled },
+        });
+    });
   }
 
   /**

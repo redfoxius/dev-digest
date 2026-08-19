@@ -1,10 +1,13 @@
 import { resolve, sep } from 'node:path';
+import { realpath } from 'node:fs/promises';
 
 /**
- * Pure path-safety helpers for the Project Context Folder feature
- * (AC-7, AC-41). No DB/FS side effects: `isGlobEscaping` only inspects the
- * glob string itself; `resolveWithinClone` calls `node:path` only (no
- * filesystem access — callers do the actual `fs.readFile`/`stat`).
+ * Path-safety helpers for the Project Context Folder feature (AC-7, AC-41).
+ * `isGlobEscaping`/`resolveWithinClone` are pure — no FS access, string
+ * inspection only. `verifyRealpathWithinClone` is the one exception: it
+ * does touch the filesystem (`fs.realpath`), because a lexical check alone
+ * cannot catch a symlink that physically sits inside `clonePath` but
+ * resolves outside it on disk.
  */
 
 const DRIVE_LETTER_RE = /^[a-zA-Z]:[\\/]/;
@@ -35,5 +38,38 @@ export function resolveWithinClone(clonePath: string, relPath: string): string |
 
   if (resolvedTarget === resolvedClone) return resolvedTarget;
   if (resolvedTarget.startsWith(resolvedClone + sep)) return resolvedTarget;
+  return null;
+}
+
+/**
+ * Read-time defense-in-depth against a symlink escape: `resolveWithinClone`
+ * only inspects the path STRING, so a file that lexically sits inside
+ * `clonePath` but is actually a symlink pointing outside it (e.g. a tracked
+ * `docs/evil.md -> /etc/passwd`, committed by anyone whose repo gets
+ * cloned/scanned) still passes it. `reader.ts`'s discovery walk skips
+ * symlinks entirely, so such a path never appears in `context_documents` —
+ * but nothing stops it being submitted directly to the manual-attach
+ * endpoints (`agent_context_docs`/`skill_context_docs`), which is exactly
+ * the path this guard closes.
+ *
+ * `fs.realpath` follows the full symlink chain to where the file ACTUALLY
+ * lives on disk; only after that do we re-check containment. Returns `null`
+ * if the path doesn't exist, isn't readable, or its real target escapes
+ * `clonePath` — the caller maps that to a skip/404, never a 500.
+ */
+export async function verifyRealpathWithinClone(
+  clonePath: string,
+  resolvedPath: string,
+): Promise<string | null> {
+  let realClone: string;
+  let realTarget: string;
+  try {
+    [realClone, realTarget] = await Promise.all([realpath(resolve(clonePath)), realpath(resolvedPath)]);
+  } catch {
+    return null;
+  }
+
+  if (realTarget === realClone) return realTarget;
+  if (realTarget.startsWith(realClone + sep)) return realTarget;
   return null;
 }
