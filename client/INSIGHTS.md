@@ -465,6 +465,47 @@ workflow and quality bar.
   (`client/src/vendor/ui/charts/Donut.tsx:49-51`,
   `client/src/app/skills/_components/SkillDetail/_components/SkillStatsTab/SkillStatsTab.tsx`)
 
+- 2026-08-20 — `MermaidDiagram`'s malformed-input guard
+  (`looksLikeMermaid`/`MERMAID_RE`) runs entirely SYNCHRONOUSLY inside its
+  `useEffect`, BEFORE the component's own dynamic `import("mermaid")` — so
+  a test asserting "a bogus diagram string renders nothing and doesn't
+  throw" needs zero special handling for the real `mermaid` dependency (no
+  `vi.mock("mermaid")`, no `waitFor`/dynamic-import awaiting): the regex
+  check short-circuits to `state: "invalid"` in the same tick React commits
+  the effect. Only a diagram that PASSES the regex needs the async
+  `mermaid.parse`/`mermaid.render` path exercised. First real consumer of
+  this component (Onboarding Generator,
+  `docs/onboarding-generator-plan.md`) confirmed this empirically — no
+  prior test anywhere in the codebase exercised `MermaidDiagram` at all.
+  (`client/src/components/mermaid-diagram/MermaidDiagram.tsx:9-14,26-33`,
+  `client/src/app/repos/[repoId]/tour/page.test.tsx` — "a malformed diagram
+  string on the architecture section... (AC-17)")
+
+- 2026-08-20 — `EmptyState`'s `title` and `cta` props can legitimately be
+  set to the EXACT SAME string (`messages/en/onboarding.json`'s pre-written
+  `generate.title`/`generate.cta` both read "Generate onboarding tour") —
+  `EmptyState` renders both, so `screen.getByText(...)` against that string
+  throws "multiple elements found." `getAllByText(...).length` (or scoping
+  via `getByRole("button", { name: ... })` for the interactive one) is
+  required whenever a component's title and its own CTA button text happen
+  to coincide, not just when the same literal string appears twice by
+  coincidence across unrelated components.
+  (`client/src/vendor/ui/primitives/EmptyState.tsx`,
+  `client/messages/en/onboarding.json` — `generate.title`/`generate.cta`,
+  `client/src/app/repos/[repoId]/tour/page.test.tsx`)
+
+- 2026-08-20 — `ErrorState`'s `body` prop, when the caller falls back to a
+  generic translated string for a non-`ApiError` error object (`error
+  instanceof ApiError ? error.message : t("loadError.title")`), renders the
+  SAME string as its own `title` prop — another "getByText finds 2"
+  collision, this time self-inflicted by the ternary's fallback branch
+  rather than by two unrelated components. A test asserting a load-error
+  state needs to mock the error as a REAL `ApiError` instance (not a plain
+  `Error`) to see body/title actually diverge, matching what a real fetch
+  failure produces via `api.ts`'s own `ApiError` normalization.
+  (`client/src/app/repos/[repoId]/tour/page.tsx` — the `ErrorState body`
+  ternary, `client/src/app/repos/[repoId]/tour/page.test.tsx`)
+
 ## Recurring Errors & Fixes
 
 - 2026-08-06 — `SkillsTab.tsx` destructured only `data`/`isLoading` from its
@@ -626,3 +667,20 @@ workflow and quality bar.
   explicitly asked whether it had fired. Confirms the skill's own
   "Course arc" note in `references.md`: a description/manual trigger alone
   is not reliable enough without a `Stop` hook forcing it.
+
+- 2026-08-20 — Implemented the client half of
+  `docs/onboarding-generator-plan.md` (Work Items 11-14): the
+  `activeKeyFor`/nav fix, `lib/hooks/onboarding.ts`, and the new
+  `/repos/:repoId/tour` page + `OnboardingSectionCard` — first real
+  consumer of both the previously-unused `MermaidDiagram` and `Markdown`
+  primitives. 18 new tests across `helpers.test.ts` (3),
+  `onboarding.test.tsx` hooks (5), and `page.test.tsx` (10, covering the
+  four control-point states explicitly: loading-skeleton,
+  never-generated-yet empty state, a 502-Regenerate-failure banner with
+  preserved previous content, and a 422-not_indexed-Regenerate banner with
+  distinct copy from the 502 case) — all green, `pnpm typecheck` clean, and
+  the full pre-existing client suite (244 tests) still green afterward. Two
+  RTL query-collision gotchas hit and fixed are captured separately above
+  (`EmptyState` title/cta text collision, `ErrorState` title/body
+  collision) — both were caught by the test suite itself failing, not by
+  manual review.

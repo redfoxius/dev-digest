@@ -598,6 +598,50 @@ workflow and quality bar.
   `server/src/modules/context-docs/reader.ts:classifyRoot`,
   `server/src/modules/context-docs/service.ts:rootToChunkSource`)
 
+- 2026-08-20 — Onboarding Generator (`docs/onboarding-generator-plan.md`)
+  needed `assembleOnboardingFacts` (the `repo-intel`-composing algorithm) to
+  be directly unit-testable against a fake `RepoIntel`, without going
+  through a full `OnboardingService.regenerate()` round trip (DB + LLM
+  mocking). Followed `intent/service.ts`'s own `filterRiskFileRefs`
+  precedent: pulled the whole algorithm out of the service class into an
+  EXPORTED top-level function (`assembleOnboardingFacts(container, repoId)`)
+  that the class method calls, rather than leaving it as a private method.
+  This is the concrete reusable pattern behind that precedent, worth
+  reaching for any time a service's core algorithm needs isolated
+  test coverage — not just for pure functions with no `Container` access.
+  (`server/src/modules/onboarding/service.ts:assembleOnboardingFacts`,
+  `server/test/onboarding-facts.test.ts`)
+
+- 2026-08-20 — `RepoIntelService.getRepoMap` (`repo-intel/service.ts:449-465`)
+  serves its repo-map text from a cache keyed EXACTLY to
+  `DEFAULT_REPO_MAP_TOKEN_BUDGET` — passing any OTHER `tokenBudget` value
+  misses the cache entirely and degrades to empty text (`getRepoMapCache`'s
+  own doc comment says this explicitly). A design that tried to "split the
+  1500-token budget across facts sections" by calling `getRepoMap(repoId,
+  someSmallerBudget)` would silently get an EMPTY repo-map section, not a
+  smaller one. Onboarding's `assembleOnboardingFacts` calls `getRepoMap`
+  with no override for exactly this reason, and bounds its OWN additional
+  facts (top-files/critical-paths/edges/callers/excerpts) to a separate,
+  reused-not-reinvented budget instead of trying to share one pool with the
+  cache-locked repo-map text.
+  (`server/src/modules/repo-intel/service.ts:449-465`,
+  `server/src/modules/onboarding/service.ts:assembleOnboardingFacts`)
+
+- 2026-08-20 — `RepoIntel` (the typed facade interface,
+  `repo-intel/types.ts`) does NOT expose `resyncRepo` — only the concrete
+  `RepoIntelService` class has it. A plan/spec asking to "spy on
+  `repoIntel.indexRepo`/`refreshIndex`/`resyncRepo` to confirm zero calls"
+  is only checking two methods in practice: any consumer coded against the
+  typed `RepoIntel` port (which `onion-architecture` requires every feature
+  module to be) literally cannot reach `resyncRepo` at all, so it needs no
+  separate spy — the type system already forecloses it. Before writing a
+  "assert this facade method was never called" test, check the method is
+  actually ON the interface a real consumer would use, not just on the
+  concrete class.
+  (`server/src/modules/repo-intel/types.ts` — the `RepoIntel` interface,
+  no `resyncRepo`; `server/src/modules/repo-intel/service.ts:174` — where
+  it lives instead)
+
 ## Tool & Library Notes
 
 - 2026-08-13 — `server/src/adapters/llm/openai.ts:15` and `anthropic.ts:16`'s
@@ -785,6 +829,40 @@ workflow and quality bar.
   (`server/src/adapters/url-fetcher/http.ts:27-43,52-59`; test:
   `url-fetcher.test.ts` — "an ordinary compressed IPv6 address... is NOT a
   false-positive")
+
+- 2026-08-20 — The global `@fastify/rate-limit` plugin is SKIPPED entirely
+  when `config.nodeEnv === 'test'` (`app.ts:95-97`, "Disabled under test so
+  integration suites can hammer endpoints via inject()") — meaning every
+  per-route `config: { rateLimit: {...} }` override in this codebase
+  (`reviews/routes.ts`'s `/pulls/:id/intent/derive`, and now
+  `onboarding/routes.ts`'s `/regenerate`) is INERT under the standard
+  `loadConfig({ NODE_ENV: 'test', ... })` `.it.test.ts` harness — confirmed
+  by a repo-wide grep for a real `429` assertion in `server/test/*.ts`
+  before this session: zero hits, including for the pre-existing intent/
+  derive route. To actually exercise a real 429 in an integration test,
+  build the app with `NODE_ENV: 'development'` (not `'test'`) for that one
+  test's `app` instance while still pointing `db` at the real testcontainer
+  — `loadConfig`'s only OTHER `nodeEnv`-gated behavior is the default log
+  level (override with an explicit `LOG_LEVEL: 'silent'`) and
+  `promptAssemblyDebug` (irrelevant, its own separate env var gate), so this
+  is safe to do per-test rather than repo-wide.
+  (`server/src/app.ts:95-97`, `server/test/onboarding.it.test.ts` — the
+  `nodeEnv: 'development'` branch in `makeApp`, "AC-31 — an 11th Regenerate
+  within 60s... returns 429")
+
+- 2026-08-20 — Extending `test/skills.test.ts`'s queued-select `makeFakeDb`
+  pattern to a repository whose `insert(...).returning()` result the CALLER
+  then reads back (`OnboardingRepository.upsert` → `OnboardingService
+  .toResponse(row, ...)`) is cleaner as an ECHO than a queue: have the fake
+  `insert()` chain's `then()` resolve with `[valuesPayload]` (whatever was
+  actually passed to `.values(...)`) instead of requiring the test to
+  hand-author a matching fixture row for every `insert` call. This is both
+  less test code AND a truer stand-in for real `.returning()` semantics
+  (a real Postgres `RETURNING` genuinely reflects what was written) — worth
+  reusing this echo-insert variant for the next repository unit test that
+  needs to assert on a freshly-written row's shape, rather than copying the
+  original queue-everything version verbatim.
+  (`server/test/onboarding.test.ts` — `makeFakeDb`'s `insertChain`)
 
 ## Recurring Errors & Fixes
 
@@ -1060,3 +1138,24 @@ workflow and quality bar.
   unilaterally, per the plan's own "Open Questions" flagging them as
   undecided. Full suite (server 281 unit + 62 integration, client 121)
   green at every phase boundary, each phase committed separately.
+
+- 2026-08-20 — Implemented `docs/onboarding-generator-plan.md` end to end
+  (all 14 Work Items — server module + migration + shared contract, client
+  page/hooks/nav). New `server/src/modules/onboarding/` (routes/service/
+  repository/run-facts/constants), migration `0027_watery_screwball.sql`
+  (7 nullable columns), `OnboardingTourResponse` in both vendor
+  `contracts/knowledge.ts` copies. Server: 405 unit tests green (including
+  16 new in `onboarding.test.ts`, 5 in `onboarding-run-facts.test.ts`, 4 in
+  `onboarding-facts.test.ts`) + 4 new real-Postgres integration tests
+  (`onboarding.it.test.ts`, including a real 429 — see the Tool & Library
+  Notes entry above on why that needed a `nodeEnv: 'development'` override),
+  `pnpm typecheck` clean throughout. Verified directly (not just via the
+  plan's own claims): `assembleOnboardingFacts` makes zero LLM calls and
+  zero `indexRepo`/`refreshIndex` calls (`onboarding-facts.test.ts`); the
+  Guided Reading Path facts are seeded verbatim from `getTopFilesByRank`'s
+  own order, never re-sorted; exactly one `completeStructured` call happens
+  per `regenerate()`, asserted via `MockLLMProvider.calls` in both the unit
+  and integration suites; a never-indexed repo's 422 and a failed
+  Regenerate's 502 each render distinct, honest client-side copy without
+  ever blanking previously-rendered content (`page.test.tsx`'s two
+  dedicated tests for exactly this).
