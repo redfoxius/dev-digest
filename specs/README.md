@@ -12,4 +12,5 @@ past spec — `plan.md`, `implementation-report.md`, `test-report.md`,
 |---|---|---|---|
 | server | blast-radius-llm-summary | SPEC-2026-08-19-blast-radius-llm-summary | clarifying |
 | cross-cutting | project-context-folder | SPEC-2026-08-19-project-context-folder | draft |
+| server | go-multi-module-depgraph | SPEC-2026-08-20-go-multi-module-depgraph | clarifying |
 | cross-cutting | onboarding-generator | SPEC-2026-08-20-onboarding-generator | draft |
