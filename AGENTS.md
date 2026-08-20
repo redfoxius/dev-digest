@@ -64,11 +64,26 @@ package's own AGENTS.md for which.
 
 ## Feature planning
 
-- Any plan for a new feature (a plan-mode session) gets saved to
-  `docs/<feature-slug>-plan.md` — never left only in the ephemeral
-  plan-mode file, whether implementation follows immediately or is
-  deferred. Include a `**Status:**` line (not started / in progress /
-  done) so it's scannable without opening the diff.
+- **Feature has a spec** (`specs/<module>/<feature-slug>/spec.md` from
+  `spec-creator`): every artifact for that feature lives beside its spec,
+  in the same `specs/<module>/<feature-slug>/` directory, lowercase
+  kebab-case:
+  - `spec.md` — requirements (`spec-creator`)
+  - `plan.md` — Development Plan (`implementation-planner`)
+  - `implementation-report.md` — Implementation Report (`implementer`)
+  - `test-report.md` — Test Report (`test-writer`)
+  - `architecture-review.md` — findings (`architecture-reviewer`)
+  - `verification.md` — Plan Verification Report (`plan-verifier`)
+
+  Each of these agents is read-only (no `Write`/`Edit`) by design — the
+  orchestrating session saves the agent's returned output to the file
+  above after each run, overwriting on re-runs (e.g. the `run-plan`
+  fix loop). Include a `**Status:**` line in `plan.md` (not started / in
+  progress / done) so it's scannable without opening the diff.
+- **Feature has no spec** (a plan-mode session for a request with no real
+  requirements ambiguity): the plan gets saved to
+  `docs/<feature-slug>-plan.md` instead — never left only in the ephemeral
+  plan-mode file. Same `**Status:**` line convention.
 - Cross-reference both ways: if the plan was also rendered as an Artifact,
   link it from the doc's bottom; once implemented, the shipping PR
   description links back to the doc path. Precedent:
