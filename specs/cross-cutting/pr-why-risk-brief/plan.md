@@ -11,8 +11,9 @@ Adds a fourth, additive Overview-tab capability: a composed LLM "Why + Risk
 Brief" (`what`/`why`/`risk_level`/`risks[]`/`review_focus[]`) over a PR's
 already-derived Intent, deterministic Blast Radius summary, diff stats,
 linked issue, and a **brand-new** top-K cosine-similarity search over
-Project Context spec chunks. New DB table `pr_risk_brief` (one row per PR,
-overwritten in place). New `GET`/`POST /pulls/:id/brief` routes. One new
+Project Context spec chunks (excluding source-code chunks). Fills the
+existing, empty `pr_brief` table (one row per PR, overwritten in place —
+no new table or migration). New `GET`/`POST /pulls/:id/brief` routes. One new
 field on `GET /pulls/:id` (`risk_level`). Four additive client changes to
 the existing Overview tab. `PrBriefBanner`/`IntentCard`/`BlastRadiusCard`
 are never merged/replaced/removed (settled, non-negotiable).
@@ -36,13 +37,70 @@ source before planning, per this agent's brief):
   configured") is satisfied by simply omitting `timeoutMs` from the
   `completeStructured` call regardless of the numeric value — not a spec
   gap, just stale documentation inside the spec; implementer should not
-  hardcode `300000`.
+  hardcode `300000`. **Fixed in spec.md** (2026-08-20 revision) to reference
+  the constant, not a restated number.
+
+**Corrections after a 2026-08-20 independent cross-model review** of this
+spec+plan pair (a fresh agent, different model, verified every citation
+against the real codebase before this plan's Work Items below were
+revised — this is not a second round of guessing, every item below was
+confirmed by reading the actual file cited):
+
+1. **The DB design was wrong.** `server/src/db/schema/reviews.ts:140-145`
+   already has an empty `pr_brief` table (`{pr_id PK/FK cascade, json jsonb
+   NOT NULL}`), shipped in `0000_init.sql` — one of this codebase's
+   pre-provisioned "future lesson fills this in" tables (root `CLAUDE.md`).
+   The original WI-2 below created a parallel `pr_risk_brief` table instead
+   of reusing it. **Fixed**: this feature now fills `pr_brief` — no new
+   migration at all. `RiskBrief`'s full shape (incl. audit fields) is
+   stored verbatim in the `json` column; `risk_level` enum validity is
+   enforced only at the zod/application layer, not a DB `CHECK` (accepted
+   trade-off — the column offers no per-field DB constraints today anyway).
+2. **The similarity search (WI-3) would leak source code into the prompt.**
+   `code_chunks.source` (`server/src/db/schema/context.ts:45-47`) is an
+   enum `['code','docs','spec','insights']` defaulting to `'code'`; the
+   original WI-3 ranked ALL embedded chunks regardless of `source`. **Fixed**:
+   WI-3 now filters to `source IN ('docs','spec','insights')` before
+   ranking — never `'code'` (violates AC-27/AC-29 otherwise).
+3. **AC-24's flagged-dot indicator was unreachable.** The original grounding
+   scope (WI-6's `validPaths`) omitted `downstream[].callers[].file` — but
+   `BlastRadiusCard`'s flagged rows ARE caller rows, and a caller is
+   "frequently a file this PR never touched"
+   (`BlastRadiusCard.tsx:16-19`), so a `risks[].file_refs` entry citing one
+   would always get grounded away by AC-10 before ever reaching the client.
+   **Fixed**: AC-10/WI-6 widened to accept caller files for `risks[]`
+   grounding (not `review_focus[]`, which stays diff-only by design).
+4. **AC-23's risk badge was unreachable for the common case.**
+   `PrBriefBanner.tsx:21-23` early-returns an empty-state div whenever
+   `verdict == null` (i.e. before any review has run) and never reaches
+   where the badge would render — exactly the moment a Risk Brief (which
+   doesn't depend on a review having run) would be most useful. Also, the
+   component's actual props are `verdict`/`score`/`findings`/`costUsd`, not
+   a single `pr` object — the original AC-23/WI-12 wrongly assumed one.
+   **Fixed**: AC-23/WI-12 now require the badge in BOTH branches; prop
+   naming corrected to the real `riskLevel` prop.
+5. **The client-i18n INSIGHTS citation was itself wrong.**
+   `client/INSIGHTS.md`'s 2026-08-09 entry claims `IntentCard` is hardcoded
+   English — but `IntentCard.tsx:4,28` actually calls
+   `useTranslations("brief")`. Only bare `OverviewTab.tsx` has no
+   `next-intl` usage. **Fixed**: WI-10's new card and any new copy in
+   `IntentCard`/`PrBriefBanner` now use real `next-intl` keys, not
+   hardcoded English; the stale INSIGHTS entry itself should be corrected
+   during implementation (flagged for `engineering-insights`).
+
+Everything else the review checked came back confirmed accurate: AC
+traceability (all 31 ACs claimed by ≥1 WI), the React-Query dedup
+assumption (sound — one `QueryClient`, `staleTime: 30_000`), `intent/routes.ts`
+not existing, the real `DEFAULT_TIMEOUT`, `context-docs` having no prior
+similarity method, `risk_brief`'s registry entry, the TDZ ordering, and
+`handleViewInDiff` vs `handleCallerClick` being genuinely distinct.
 
 ## Scope
 
 - In scope: everything in spec §6 (AC-1–AC-31) — new `context-docs`
-  similarity search, new `pr_risk_brief` table, new routes+service, `GET
-  /pulls/:id` enrichment, and the four client changes (new card,
+  similarity search, filling the existing empty `pr_brief` table (no new
+  table/migration), new routes+service, `GET /pulls/:id` enrichment, and
+  the four client changes (new card,
   `PrBriefBanner` badge, `BlastRadiusCard` flagged-dot, `IntentCard` merge).
 - Out of scope (per spec §12): populating the existing unused `PrBrief`
   composed type; any change to `GET /pulls/:id/blast`'s deterministic
@@ -58,7 +116,7 @@ source before planning, per this agent's brief):
 - `server/src/modules/context-docs/` (new similarity-search capability)
 - `server/src/modules/pulls/routes.ts:267-341` (`risk_level` enrichment, both return branches)
 - `server/src/modules/index.ts` (module registration)
-- `server/src/db/schema/reviews.ts:96-138` (new `pr_risk_brief` table, mirrors `pr_intent`)
+- `server/src/db/schema/reviews.ts:140-145` (existing, empty `pr_brief` table — this feature fills it; no schema change, no migration)
 - `server/src/vendor/shared/contracts/brief.ts` + `platform.ts` (new contracts)
 - `client/src/vendor/shared/contracts/brief.ts` + `platform.ts` (hand-copied twin, same change — non-default convention, root `CLAUDE.md`)
 - `client/src/lib/hooks/risk-brief.ts` (new)
@@ -109,15 +167,19 @@ source before planning, per this agent's brief):
   violate the skill's unidirectional-flow rule even though they share a
   grandparent (`OverviewTab`). Promote to `client/src/lib/risk-severity.ts`
   (Work Item below) rather than cross-importing.
-- `postgresql-table-design`: `pr_risk_brief.pr_id` as PK+FK with
-  `ON DELETE CASCADE` (mirrors `pr_intent`), `risk_level` as `text` +
-  `CHECK (... IN ('high','medium','low'))` (mirrors `pr_intent`'s
-  `evidenceTierValues` check, `server/src/db/schema/reviews.ts:130-134`),
-  `cost_usd` as `numeric` nullable (mirrors `reviews.cost_usd`), `jsonb` for
-  `risks`/`review_focus` with a `'[]'::jsonb` default for NOT-NULL-safety
-  (mirrors `pr_intent.risks`/`sources`). No new index needed beyond the PK
-  (repo-scoped lookups aren't this table's access pattern; it's always a
-  single-PR lookup by PK).
+- `postgresql-table-design` / `drizzle-orm-patterns`: **no new table, no
+  migration** (corrected post-cross-model-review — see Context). This
+  feature reuses the existing `pr_brief` table
+  (`server/src/db/schema/reviews.ts:140-145`,
+  `{pr_id uuid PK/FK cascade, json jsonb NOT NULL}`, already in
+  `0000_init.sql`). Type the column via Drizzle's `.$type<RiskBrief>()`
+  cast on read (the column itself stays untyped `jsonb` at the schema
+  level — it's a pre-existing shared table, not owned by this feature
+  alone); validate with `RiskBrief.parse(row.json)` after read, since
+  jsonb round-trips as `unknown`. Accepted trade-off: `risk_level` enum
+  validity has no DB-level `CHECK` (the column offers no per-field
+  constraints today regardless). No new index needed — always a
+  single-PR lookup by PK.
 
 ## Relevant INSIGHTS.md Gotchas
 
@@ -152,15 +214,17 @@ source before planning, per this agent's brief):
   the Risk Brief input-assembly must treat that exactly like the spec's §5
   failure contract says (empty blast section, grounding falls back to diff
   paths only) — don't let a degraded Blast response throw.
-- `client/INSIGHTS.md` (2026-08-09): `OverviewTab.tsx` and `IntentCard`
-  deliberately use hardcoded English strings, not `next-intl` — the new
-  card follows that same *direct-parent* convention. **But** `PrBriefBanner`
-  itself already uses `useTranslations("prReview")` — per the 2026-08-09
-  "check the direct parent first" lesson, the new risk-badge *inside*
-  `PrBriefBanner` should add real i18n keys to `messages/en/prReview.json`
-  (e.g. `riskBadge.high`/`medium`/`low`), not hardcode English there —
-  don't blanket-apply IntentCard's convention to a file that's already
-  i18n'd.
+- `client/INSIGHTS.md` (2026-08-09) — **stale/wrong, corrected by the
+  2026-08-20 cross-model review**: it claims `IntentCard` uses hardcoded
+  English, but `IntentCard.tsx:4,28` actually calls
+  `useTranslations("brief")`. Only bare `OverviewTab.tsx` itself has no
+  `next-intl` usage. So: the new card (WI-10) should use real i18n too
+  (extend the `brief` namespace, matching `IntentCard`'s own pattern, not
+  hardcode English), and `PrBriefBanner`'s risk-badge copy (WI-12) adds
+  real keys to `messages/en/prReview.json` (e.g.
+  `riskBadge.high`/`medium`/`low`) since that file already uses
+  `useTranslations("prReview")`. Correct the stale INSIGHTS entry itself
+  as part of this implementation's `engineering-insights` pass.
 - `client/INSIGHTS.md` (2026-08-06, `EmptyState`/`ErrorState` title/cta
   text collisions): if the new card's empty/error copy reuses `EmptyState`/
   `ErrorState` primitives, watch for the same `title`===`cta` (or
@@ -179,7 +243,7 @@ source before planning, per this agent's brief):
 
 - `onion-architecture` — every new server file (`risk-brief/{routes,service,repository,constants,prompt,grounding}.ts`, `context-docs/{similarity,repository,service}.ts` changes) must respect the routes→service→repository chain; only `repository.ts` imports `drizzle-orm`.
 - `zod` — the new `RiskBrief`/`ReviewFocusItem`/`RiskBriefGenerateResult` contracts (both vendor copies) and the classifier-facing structured-output schema (`.nullish()` not `.optional()` per the INSIGHTS gotcha above); `POST` body validation.
-- `drizzle-orm-patterns` / `postgresql-table-design` — the new `pr_risk_brief` table + migration (`pnpm db:generate`), and the `context-docs` similarity-search repository read.
+- `drizzle-orm-patterns` / `postgresql-table-design` — typed jsonb read/write (`.$type<RiskBrief>()` + zod re-validation) against the existing `pr_brief` table (no migration), and the `context-docs` similarity-search repository read (with its `source` filter).
 - `fastify-best-practices` — the two new routes (`GET`/`POST /pulls/:id/brief`), rate-limit config mirroring `/pulls/:id/intent/derive`, module registration in `modules/index.ts`.
 - `security` — AC-27 (no secrets/env/raw-file content in the prompt — verify the `prompt_assembly` log event lists only section types/lengths, never content, mirroring `intent/service.ts:158-190`); the untrusted-input wrapping in §11; workspace-ownership scoping (AC-3/AC-26).
 - `frontend-ui-architecture` — the new `RiskBriefCard` folder anatomy, the `client/src/lib/hooks/risk-brief.ts` domain hook file, the `RISK_SEVERITY_COLOR` promotion to `client/src/lib/risk-severity.ts`, and where the `flaggedRefs`-derivation helper and `IntentCard`'s title-dedup merge helper each belong (colocated vs. `lib/`).
@@ -194,22 +258,25 @@ source before planning, per this agent's brief):
    Acceptance: `pnpm typecheck` clean in both packages; a hand-built literal typed as each new contract compiles.
    Satisfies: AC-12, AC-22 (contract shape only — enforcement lands in later Work Items).
 
-2. **DB schema + migration — `pr_risk_brief`.**
-   Files: `server/src/db/schema/reviews.ts` (new `pgTable('pr_risk_brief', ...)` mirroring `pr_intent`'s shape per spec §9 — `pr_id` PK/FK `ON DELETE CASCADE`, `what`/`why` text, `risk_level` text + CHECK, `risks`/`review_focus` jsonb with `'[]'::jsonb` default, `pr_head_sha` text, `provider`/`model` text, `tokens_in`/`tokens_out` integer, `cost_usd` numeric nullable, `generated_at` timestamp). Run `pnpm db:generate` (pure addition — no interactive prompt expected per the 2026-08-09 INSIGHTS precedent) to produce migration `0028_*.sql` + snapshot.
-   Depends on: none (independent of WI-1, but both needed before WI-5).
-   Acceptance: `pnpm db:migrate` applies cleanly against a fresh dev DB; the CHECK constraint rejects an out-of-enum `risk_level` at the DB level.
-   Satisfies: AC-1, AC-2, AC-4, AC-5, AC-6, AC-9 (leaves prior row untouched — needs the table to exist), AC-12 (persisted cap).
+2. **~~DB schema + migration~~ — N/A (corrected post-cross-model-review): reuse the existing `pr_brief` table.**
+   No file changes, no `pnpm db:generate`, no new migration. `server/src/db/schema/reviews.ts:140-145` already declares
+   `pgTable('pr_brief', {pr_id uuid PK/FK cascade, json jsonb NOT NULL})`, shipped empty in `0000_init.sql`. This
+   Work Item is now just a verification step confirming that table's current shape matches what WI-4's repository
+   assumes before WI-4 starts.
+   Depends on: none.
+   Acceptance: `select * from pr_brief limit 1` against a fresh dev DB (post `pnpm db:migrate`, no feature-specific migration) confirms the table exists with exactly `{pr_id, json}`.
+   Satisfies: AC-1, AC-2, AC-4, AC-5, AC-6, AC-9 (leaves prior row untouched), AC-12 (persisted cap) — via WI-4's repository, not a schema change.
 
 3. **`context-docs` top-K cosine-similarity search (new capability).**
-   Files: new `server/src/modules/context-docs/similarity.ts` (pure, exported `rankBySimilarity(queryEmbedding: number[], chunks: {id, path, content, embedding}[], k: number)` — cosine similarity, descending sort, slice `k`; zero DB/network), `server/src/modules/context-docs/repository.ts` (new `getEmbeddedChunks(repoId): Promise<{id,path,content,embedding}[]>` — plain `select().from(codeChunks).where(and(eq(repoId,...), isNotNull(embedding)))`, the only new drizzle import), `server/src/modules/context-docs/service.ts` (new `ContextDocsService.search(repoId, query, k)`: reuses the existing private `resolveEmbedStatus()` — return `[]` immediately when `status !== 'ready'` (AC-29's explicit degrade), else `embedResolution.embedder.embed([query])`, fetch chunks via the new repository method, delegate to `rankBySimilarity`). No SQL-side `<=>` operator — `code_chunks.embedding` has no vector index today and per-repo chunk counts are small; JS-side ranking also matches this codebase's established "no DB-side aggregate, plain select + JS `Map`/computation" idiom (`server/INSIGHTS.md`, 2026-08-04) and keeps the ranking algorithm hermetically unit-testable without Postgres, per the pure-function precedent above.
+   Files: new `server/src/modules/context-docs/similarity.ts` (pure, exported `rankBySimilarity(queryEmbedding: number[], chunks: {id, path, content, embedding}[], k: number)` — cosine similarity, descending sort, slice `k`; zero DB/network), `server/src/modules/context-docs/repository.ts` (new `getEmbeddedChunks(repoId): Promise<{id,path,content,embedding}[]>` — `select().from(codeChunks).where(and(eq(repoId,...), isNotNull(embedding), inArray(source, ['docs','spec','insights'])))` — **the `inArray(source, ...)` filter is required** (2026-08-20 cross-model review): `code_chunks.source` (`server/src/db/schema/context.ts:45-47`) defaults to `'code'`, and without this filter the search would rank raw repository source-code chunks into the Risk Brief prompt, violating AC-27/AC-29; the only new drizzle import), `server/src/modules/context-docs/service.ts` (new `ContextDocsService.search(repoId, query, k)`: reuses the existing private `resolveEmbedStatus()` — return `[]` immediately when `status !== 'ready'` (AC-29's explicit degrade), else `embedResolution.embedder.embed([query])`, fetch chunks via the new repository method, delegate to `rankBySimilarity`). No SQL-side `<=>` operator — `code_chunks.embedding` has no vector index today and per-repo chunk counts are small; JS-side ranking also matches this codebase's established "no DB-side aggregate, plain select + JS `Map`/computation" idiom (`server/INSIGHTS.md`, 2026-08-04) and keeps the ranking algorithm hermetically unit-testable without Postgres, per the pure-function precedent above.
    Depends on: none.
-   Acceptance: unit test for `rankBySimilarity` (fixed embeddings, known cosine ordering) with no DB; a service-level unit test with a fake/mocked embedder + repository confirms `status !== 'ready'` short-circuits to `[]` with zero embed-provider calls.
+   Acceptance: unit test for `rankBySimilarity` (fixed embeddings, known cosine ordering) with no DB; a repository-level or service-level unit test seeding mixed-`source` chunks confirms a `source: 'code'` chunk never appears in results even if its embedding would rank highest; a third test confirms `status !== 'ready'` short-circuits to `[]` with zero embed-provider calls.
    Satisfies: AC-29.
 
-4. **`risk-brief` module scaffolding — constants + repository.**
-   Files: new `server/src/modules/risk-brief/constants.ts` (`RISK_BRIEF_INPUT_TOKEN_BUDGET = 8000`, `MAX_RISKS = 8`, `MAX_REVIEW_FOCUS = 8`, `MAX_WHAT_WHY_CHARS = 600`, `RELEVANT_SPEC_K = 3` — one named-constant module, mirroring `intent/service.ts`'s own `MAX_*` convention per §4's explicit instruction), new `server/src/modules/risk-brief/repository.ts` (`RiskBriefRepository`: `getByPrId(prId)`, `upsert(prId, row)` — `onConflictDoUpdate` on `pr_id`, the only file in this module importing `drizzle-orm`).
-   Depends on: WI-2 (schema must exist).
-   Acceptance: unit test for the repository against a fake `Db` chain, or deferred to WI-9's integration test.
+4. **`risk-brief` module scaffolding — constants + repository (over the existing `pr_brief` table).**
+   Files: new `server/src/modules/risk-brief/constants.ts` (`RISK_BRIEF_INPUT_TOKEN_BUDGET = 8000`, `MAX_RISKS = 8`, `MAX_REVIEW_FOCUS = 8`, `MAX_WHAT_WHY_CHARS = 600`, `RELEVANT_SPEC_K = 3` — one named-constant module, mirroring `intent/service.ts`'s own `MAX_*` convention per §4's explicit instruction), new `server/src/modules/risk-brief/repository.ts` (`RiskBriefRepository`, the only file in this module importing `drizzle-orm`, both methods against `prBrief` (the existing Drizzle table object for `pr_brief`): `getByPrId(prId)` — `select().from(prBrief).where(eq(prBrief.prId, prId))`, then `RiskBrief.parse(row.json)` since jsonb round-trips as `unknown`; `upsert(prId, brief: RiskBrief)` — `insert(prBrief).values({prId, json: brief}).onConflictDoUpdate({target: prBrief.prId, set: {json: brief}})`).
+   Depends on: WI-2 (table-shape verification).
+   Acceptance: unit test for the repository against a fake `Db` chain confirms `getByPrId` round-trips a stored `RiskBrief` (including a malformed-`json` case throwing a clear parse error, not a silent `undefined`), or deferred to WI-9's integration test.
    Satisfies: AC-8, AC-9 (constant), AC-1, AC-2, AC-5, AC-6 (persistence primitives).
 
 5. **Input assembly + token-budget trimming (pure function).**
@@ -219,14 +286,14 @@ source before planning, per this agent's brief):
    Satisfies: AC-7, AC-8, AC-9, AC-27 (shape-level — no secrets/patch content ever enters `facts`).
 
 6. **Grounding + output bounding (pure functions).**
-   Files: new `server/src/modules/risk-brief/grounding.ts`. Exported `filterRiskRefs(risks, validPaths)` (mirrors `intent/service.ts`'s `filterRiskFileRefs` — drop a risk's `file_refs` entries not present in `validPaths`, drop the whole risk only if it had refs and none matched), `filterReviewFocus(items, diffFilesToHunks: Map<string, DiffHunk[]>)` (drop an entry whose `file` isn't a diff file, or whose `line` isn't in any of that file's hunks' `newLineNumbers` — AC-10/AC-11), `boundRiskBriefOutput(risks, reviewFocus, what, why)` (slice to `MAX_RISKS`/`MAX_REVIEW_FOCUS`, truncate `what`/`why` to `MAX_WHAT_WHY_CHARS` — AC-12). `validPaths` for `filterRiskRefs` is the union of diff file paths ∪ blast `changed_symbols[].file` ∪ `downstream[].endpoints_affected`/`crons_affected` (AC-10's file/endpoint set).
+   Files: new `server/src/modules/risk-brief/grounding.ts`. Exported `filterRiskRefs(risks, validPaths)` (mirrors `intent/service.ts`'s `filterRiskFileRefs` — drop a risk's `file_refs` entries not present in `validPaths`, drop the whole risk only if it had refs and none matched), `filterReviewFocus(items, diffFilesToHunks: Map<string, DiffHunk[]>)` (drop an entry whose `file` isn't a diff file, or whose `line` isn't in any of that file's hunks' `newLineNumbers` — AC-10/AC-11), `boundRiskBriefOutput(risks, reviewFocus, what, why)` (slice to `MAX_RISKS`/`MAX_REVIEW_FOCUS`, truncate `what`/`why` to `MAX_WHAT_WHY_CHARS` — AC-12). `validPaths` for `filterRiskRefs` is the union of diff file paths ∪ blast `changed_symbols[].file` ∪ `downstream[].endpoints_affected`/`crons_affected` **∪ every `downstream[].callers[].file`** (2026-08-20 cross-model review: without caller files here, AC-24's flagged-dot indicator on `BlastRadiusCard` would be practically unreachable, since its flagged rows ARE caller rows and callers are "frequently a file this PR never touched" — `BlastRadiusCard.tsx:16-19`). `review_focus[]`'s valid set stays diff-files-only, unchanged — Review Focus is diff-only by design (§2 Glossary).
    Depends on: WI-4 (constants).
-   Acceptance: unit test with one fabricated file path in a mocked risk/review_focus set asserts it's dropped while real-path entries survive; unit test with an out-of-hunk-range line asserts that `review_focus` entry alone is dropped; unit test with an oversized mocked LLM response (>8 risks, >8 review_focus, >600-char what/why) asserts truncation to the caps.
+   Acceptance: unit test with one fabricated file path in a mocked risk/review_focus set asserts it's dropped while a `risks[].file_refs` entry citing a real caller-only (non-diff) file survives; a second test confirms a `review_focus[].file` citing that same caller-only file is still dropped; unit test with an out-of-hunk-range line asserts that `review_focus` entry alone is dropped; unit test with an oversized mocked LLM response (>8 risks, >8 review_focus, >600-char what/why) asserts truncation to the caps.
    Satisfies: AC-10, AC-11, AC-12.
 
 7. **`RiskBriefService` orchestration.**
    Files: new `server/src/modules/risk-brief/service.ts`. `get(workspaceId, prId)` — ownership check via `container.reviewRepo.getPull` (404 via `NotFoundError` on miss, mirrors `BlastService.getBlastRadius:20-21`), returns persisted brief or `null` (AC-1/AC-2/AC-3/AC-26). `generate(workspaceId, prId, force, logger)` — ownership check; load persisted row; if `!force && row && row.pr_head_sha === pull.headSha` return `{brief: row, cached: true}` (AC-4) with zero further work; else assemble facts: `container.reviewRepo.getIntent(prId)` best-effort (never triggers derive — §4 assumption), `BlastService.getBlastRadius` best-effort (catch/empty on throw per §5), `loadDiff(container, reviewRepo, workspaceId, pull, repo)` for file list/hunk headers, linked-issue via the same `extractLinkedIssueNumber` regex + `container.github().getIssue()` best-effort pattern as `intent/service.ts:94-108` (re-derive the regex locally or export it from `intent/service.ts` — check for an existing export before duplicating), relevant specs via `ContextDocsService.search(repoId, intent?.intent ?? pull.title, RELEVANT_SPEC_K)` (AC-30) each wrapped via `wrapUntrusted('relevant-spec', excerpt)`. Calls WI-5's `assembleRiskBriefInput`; if `droppedInputTooLarge`, persist nothing and return `{brief: null, degraded_reason: 'input_too_large'}` (AC-9) — prior row (if any) untouched. Else resolve provider/model via `resolveFeatureModel(container, workspaceId, 'risk_brief')` (AC-13), `container.llm(provider).completeStructured` with a `.nullish()`-fielded classifier schema (never `.optional()`, per the INSIGHTS gotcha), a `sessionId` correlation id (mirrors `intent/service.ts:156`), and no explicit `timeoutMs` (AC-25 — inherits the adapter's real default). On throw/schema-invalid, catch and return `{brief: null, degraded_reason: 'llm_failed'}`, persisting nothing (AC-14). On success: call WI-6's `filterRiskRefs`/`filterReviewFocus`/`boundRiskBriefOutput`, then `RiskBriefRepository.upsert` (best-effort — swallow a persistence-layer throw and still return the generated brief to the caller, per §5's "Postgres unavailable at persist time" failure contract), return `{brief, cached: false}`.
-   Depends on: WI-1, WI-3, WI-4, WI-5, WI-6.
+   Depends on: WI-1, WI-2, WI-3, WI-4, WI-5, WI-6.
    Acceptance: unit tests (fake `Container`/mocked ports, no Postgres) covering: cache-hit zero-LLM-call (AC-4); stale-`head_sha` triggers exactly one LLM call + overwrite (AC-5); `force: true` always regenerates even on a fresh cache hit (AC-6); Intent-absent proceeds with degraded input, never blocks (§4/§8); Blast-degraded proceeds with empty blast section (§5); LLM-throw path leaves a pre-seeded valid row's subsequent `get()` unchanged (AC-14); workspace override resolves a non-default provider (AC-13).
    Satisfies: AC-3, AC-4, AC-5, AC-6, AC-9, AC-13, AC-14, AC-25, AC-26, AC-27, AC-30.
 
@@ -237,13 +304,13 @@ source before planning, per this agent's brief):
    Satisfies: AC-1, AC-2, AC-3, AC-15, AC-16, AC-26.
 
 9. **`GET /pulls/:id` — `risk_level` enrichment.**
-   Files: `server/src/modules/pulls/routes.ts:267-341` — add one `RiskBriefRepository.getByPrId(pr.id)` read (or a slimmer `getRiskLevel(prId)` repository method returning just the enum) alongside the existing `prBrief` aggregate computation, add `risk_level: row?.riskLevel ?? null` to **both** return branches (the live-GitHub-refresh branch at line ~307 and the offline-fallback branch at line ~312-340) — both must be updated, not just one.
+   Files: `server/src/modules/pulls/routes.ts:267-341` — add one `RiskBriefRepository.getByPrId(pr.id)` read (or a slimmer `getRiskLevel(prId)` repository method returning just the enum) into the **single, already-shared** `prBrief` object computation (`:291-296`: "computed ONCE here, shared by both … never hand-duplicated"), i.e. `const prBrief = { ..., risk_level: row?.riskLevel ?? null }` — **one edit, not two** (2026-08-20 cross-model review: the original wording claimed both return branches at `:307`/`:339` each needed a separate edit, but both already spread this same `prBrief` object via `...prBrief`, so a single change to its construction automatically reaches both).
    Depends on: WI-4 (repository), WI-1 (contract field).
-   Acceptance: unit/integration test seeds a `pr_risk_brief` row, asserts `GET /pulls/:id`'s response includes the matching `risk_level`; a PR with no brief row asserts `risk_level: null` on both the live and offline-fallback code paths (test each by toggling whether a GitHub token/mocked client is configured, matching the existing test setup for that route).
+   Acceptance: unit/integration test seeds a `pr_brief` row, asserts `GET /pulls/:id`'s response includes the matching `risk_level` on both the live-GitHub-refresh and offline-fallback code paths (test each by toggling whether a GitHub token/mocked client is configured); a PR with no brief row asserts `risk_level: null` on both paths.
    Satisfies: AC-22.
 
 10. **`RiskBriefCard` — new client component (self-fetching).**
-    Files: new `client/src/lib/hooks/risk-brief.ts` (`usePrRiskBrief(prId)` — `useQuery({queryKey: ["pr-risk-brief", prId], queryFn: () => api.get<RiskBrief | null>(`/pulls/${prId}/brief`)})`, deliberately named `pr-risk-brief` — not `pr-brief`/`prBrief` — to avoid the naming collision the spec's own Glossary flags; `useGenerateRiskBrief(prId)` — `useMutation` posting `{force}`, invalidating `["pr-risk-brief", prId]` and the PR-detail query key on settle so `risk_level` refreshes too), new `client/src/app/repos/[repoId]/pulls/[number]/_components/OverviewTab/_components/RiskBriefCard/{RiskBriefCard.tsx,styles.ts,index.ts,RiskBriefCard.test.tsx}` — hardcoded-English copy (matches `OverviewTab`/`IntentCard`'s direct-parent convention, AC-28's N/A localization note), loading skeleton, empty state with "Generate" action (`mutate({force: false})`, AC-18), a distinct always-present "Regenerate" action (`mutate({force: true})`, AC-19), `risk_level` badge + `what`/`why` + `risks[]` + clickable `review_focus[]` rows each carrying an `aria-label` with file:line + one-line reason (AC-28) calling a new `onViewInDiff(file, line)` prop, and a `degraded_reason` branch rendering an error/retry state that never shows a fabricated `risk_level`/empty-but-real `risks`/`review_focus` (AC-21).
+    Files: new `client/src/lib/hooks/risk-brief.ts` (`usePrRiskBrief(prId)` — `useQuery({queryKey: ["pr-risk-brief", prId], queryFn: () => api.get<RiskBrief | null>(`/pulls/${prId}/brief`)})`, deliberately named `pr-risk-brief` — not `pr-brief`/`prBrief` — to avoid the naming collision the spec's own Glossary flags; `useGenerateRiskBrief(prId)` — `useMutation` posting `{force}`, invalidating `["pr-risk-brief", prId]` and the PR-detail query key on settle so `risk_level` refreshes too), new `client/src/app/repos/[repoId]/pulls/[number]/_components/OverviewTab/_components/RiskBriefCard/{RiskBriefCard.tsx,styles.ts,index.ts,RiskBriefCard.test.tsx}`, new `client/messages/en/brief.json` keys under a new `riskBriefCard.*` namespace entry (2026-08-20 cross-model review correction: `IntentCard` — this card's sibling, colocated under the same `OverviewTab` — actually already uses real `next-intl` via `useTranslations("brief")`, not hardcoded English as originally assumed; this card follows that real, existing pattern instead), loading skeleton, empty state with "Generate" action (`mutate({force: false})`, AC-18), a distinct always-present "Regenerate" action (`mutate({force: true})`, AC-19), `risk_level` badge + `what`/`why` + `risks[]` + clickable `review_focus[]` rows each carrying an `aria-label` with file:line + one-line reason (AC-28) calling a new `onViewInDiff(file, line)` prop, and a `degraded_reason` branch rendering an error/retry state that never shows a fabricated `risk_level`/empty-but-real `risks`/`review_focus` (AC-21).
     Depends on: WI-8 (route), WI-1 (contract), WI-11 (promoted color map).
     Acceptance: component test mounting `OverviewTab` with the GET mock returning `null` renders the empty state and its Generate click fires `force: false` (or omitted); a second test asserts the Regenerate control always calls `force: true`; a third simulates a review-focus click and asserts `onViewInDiff` fires with the exact `{file, line}`; a fourth with a `degraded_reason` mutation result asserts the error state, not a fabricated normal layout.
     Satisfies: AC-17, AC-18, AC-19, AC-20, AC-21, AC-28.
@@ -254,10 +321,10 @@ source before planning, per this agent's brief):
     Acceptance: `pnpm typecheck` clean; `IntentCard.test.tsx`'s existing risk-chip-color assertions still pass unchanged.
     Satisfies: prerequisite for AC-23, AC-24 (shared-mapping requirement — no AC of its own, purely a refactor enabling those).
 
-12. **`PrBriefBanner` — risk badge.**
-    Files: `client/src/app/repos/[repoId]/pulls/[number]/_components/OverviewTab/_components/PrBriefBanner/{PrBriefBanner.tsx,PrBriefBanner.test.tsx}`, `client/messages/en/prReview.json` (new `riskBadge.high`/`medium`/`low` keys — this file is already i18n'd via `useTranslations("prReview")`, unlike `IntentCard`, per the direct-parent-convention gotcha above). New `riskLevel: RiskSeverity | null | undefined` prop; renders a `Badge` using WI-11's promoted color map alongside the existing `VerdictBanner`, only when `riskLevel != null`.
+12. **`PrBriefBanner` — risk badge, rendered in BOTH branches.**
+    Files: `client/src/app/repos/[repoId]/pulls/[number]/_components/OverviewTab/_components/PrBriefBanner/{PrBriefBanner.tsx,PrBriefBanner.test.tsx}`, `client/messages/en/prReview.json` (new `riskBadge.high`/`medium`/`low` keys — this file is already i18n'd via `useTranslations("prReview")`). New `riskLevel: RiskSeverity | null | undefined` prop (not a `pr` object — this component's real props are `verdict`/`score`/`findings`/`costUsd`, no `pr` prop exists). **2026-08-20 cross-model-review correction**: `PrBriefBanner.tsx:21-23` today early-returns an empty-state `<div>` whenever `verdict == null`, before ever reaching where a badge would render — but a Risk Brief can exist before any review has run, which is exactly this feature's point. Render the risk badge (a small extracted helper, e.g. `{riskLevel != null && <RiskBadge level={riskLevel} />}`) in BOTH the `verdict == null` empty-state branch AND alongside the normal `VerdictBanner` branch — not only the latter.
     Depends on: WI-11.
-    Acceptance: component test with `riskLevel: "high"` on the `pr` prop asserts a badge renders using the high-severity color token; `riskLevel: null`/`undefined` asserts no badge.
+    Acceptance: component test with `riskLevel: "high"` and `verdict: null` asserts the badge renders inside the empty-state branch; a second test with `riskLevel: "high"` and a real `verdict` asserts it renders alongside `VerdictBanner`; `riskLevel: null`/`undefined` asserts no badge in either branch.
     Satisfies: AC-23.
 
 13. **Flagged-refs derivation helper (pure function).**
@@ -286,7 +353,7 @@ source before planning, per this agent's brief):
 
 ## Verification
 
-- `server`: `pnpm typecheck`; `pnpm exec vitest run --exclude '**/*.it.test.ts'` (new unit suites: `similarity`, `prompt`/assembly-trim, `grounding`, `risk-brief-service`); `pnpm exec vitest run .it.test` against real Postgres (new `risk-brief.it.test.ts` covering AC-1–AC-6/AC-15, plus updated `pulls.it.test.ts`/equivalent for AC-22's both-branches coverage) — requires `pnpm db:migrate` first.
+- `server`: `pnpm typecheck`; `pnpm exec vitest run --exclude '**/*.it.test.ts'` (new unit suites: `similarity`, `prompt`/assembly-trim, `grounding`, `risk-brief-service`); `pnpm exec vitest run .it.test` against real Postgres (new `risk-brief.it.test.ts` covering AC-1–AC-6/AC-15, plus updated `pulls.it.test.ts`/equivalent for AC-22's both-branches coverage) — no feature-specific migration to run first (WI-2), only the standard integration-test DB setup this repo already requires.
 - `client`: `pnpm typecheck`; `pnpm test` (new component tests for `RiskBriefCard`, updated `PrBriefBanner.test.tsx`, `BlastRadiusCard.test.tsx`, `IntentCard.test.tsx`, `OverviewTab.test.tsx`; new hook tests for `risk-brief.ts`; new pure-function tests for `risk-brief-helpers.ts`).
-- Manual/browser pass (per this codebase's established pattern for anything touching layout/scroll/accessible-name behavior, `client/INSIGHTS.md` 2026-08-05/2026-08-14 precedents): verify the Review Focus → Files-changed jump against a real PR in the local dev DB, and a real-but-cheap-model generation call (or a direct `UPDATE pr_risk_brief` seed, mirroring the 2026-08-14 zero-cost-substitute INSIGHTS entry) to screenshot the populated card, badge, and flagged dots together.
+- Manual/browser pass (per this codebase's established pattern for anything touching layout/scroll/accessible-name behavior, `client/INSIGHTS.md` 2026-08-05/2026-08-14 precedents): verify the Review Focus → Files-changed jump against a real PR in the local dev DB, and a real-but-cheap-model generation call (or a direct `UPDATE pr_brief SET json = '...'::jsonb` seed, mirroring the 2026-08-14 zero-cost-substitute INSIGHTS entry) to screenshot the populated card, badge, and flagged dots together.
 - Confirm via `engineering-insights` skill at the end of implementation — this plan surfaced several non-obvious facts (the `intent/routes.ts`-doesn't-exist correction, the `DEFAULT_TIMEOUT` mismatch, the `RISK_SEVERITY_COLOR` promotion trigger, the `onViewInDiff`/`onJumpToDiff` naming-collision risk) that are worth a dated INSIGHTS entry once verified against the real implementation, not just this plan's inference.
