@@ -1,6 +1,6 @@
 # Go Multi-Module Import-Graph Discovery
 
-**Status:** not started
+**Status:** done
 
 ## Spec
 - `specs/server/go-multi-module-depgraph/spec.md` (SPEC-2026-08-20-go-multi-module-depgraph, v0.1). Status is "clarifying" with one inline `[NEEDS CLARIFICATION]` marker (§13 row #2, max-depth cap) — per explicit instruction from the orchestrating session, this marker is non-blocking: its own text already resolves it ("AC-11 already bounds the walk by actual path depth to `root`... treat AC-11's existing bound as sufficient unless a concrete counter-example surfaces"). Row #1 (cross-module import scope) was answered directly by the user before spec finalization — deferred, see spec §12. No genuine open requirements ambiguity blocks this plan.
