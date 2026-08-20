@@ -5,8 +5,10 @@ import { useTranslations } from "next-intl";
 import type { Risk } from "@devdigest/shared";
 import { Badge, Button, Card, ErrorState, SectionLabel, Skeleton } from "@devdigest/ui";
 import { usePrIntent, useDeriveIntent } from "@/lib/hooks/reviews";
+import { usePrRiskBrief } from "@/lib/hooks/risk-brief";
 import { ApiError } from "@/lib/api";
 import { EVIDENCE_TIER_COLOR, RISK_SEVERITY_COLOR } from "./constants";
+import { mergeRisks } from "./helpers";
 import { s } from "./styles";
 
 interface IntentCardProps {
@@ -28,6 +30,16 @@ export function IntentCard({ prId }: IntentCardProps) {
   const t = useTranslations("brief");
   const { data: intent, isLoading, isError, error, refetch } = usePrIntent(prId);
   const deriveIntent = useDeriveIntent(prId);
+  // Same `["pr-risk-brief", prId]` query key the new Risk Brief card and
+  // `page.tsx` self-fetch — React Query dedupes to one network call
+  // regardless of how many mounted consumers share it (AC-31).
+  const { data: riskBrief } = usePrRiskBrief(prId);
+  // Risk Areas: one authoritative, de-duplicated list (AC-31) — recomputed
+  // only when either source's risks actually change.
+  const mergedRisks = React.useMemo(
+    () => (intent ? mergeRisks(intent.risks, riskBrief?.risks) : []),
+    [intent, riskBrief],
+  );
 
   // Re-derive button, modeled on the Conventions "Rescan" pattern
   // (`app/repos/[repoId]/conventions/page.tsx` + `useExtractConventions`).
@@ -88,8 +100,8 @@ export function IntentCard({ prId }: IntentCardProps) {
             </div>
             <div style={s.subsection}>
               <SectionLabel icon="Shield">{t("block.risks")}</SectionLabel>
-              {intent.risks.length > 0 ? (
-                <RiskChips risks={intent.risks} />
+              {mergedRisks.length > 0 ? (
+                <RiskChips risks={mergedRisks} />
               ) : (
                 <p style={s.emptyBullet}>{t("noRisks")}</p>
               )}

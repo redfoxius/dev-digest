@@ -10,6 +10,7 @@ import { ConfigError, NotFoundError } from '../../platform/errors.js';
 import { ContextDocsRepository, type ContextDocumentRow } from './repository.js';
 import { DEFAULT_CONTEXT_GLOBS, discoverContextDocs } from './reader.js';
 import { chunkMarkdown } from './chunker.js';
+import { rankBySimilarity, type RankedChunk } from './similarity.js';
 
 /**
  * Project Context Folder — reader/reindex, search-root config, and browser
@@ -175,6 +176,29 @@ export class ContextDocsService {
     if (content === null) throw new NotFoundError('Document not found');
 
     return { path, content };
+  }
+
+  /**
+   * Top-K cosine-similarity search over indexed Project Context chunks
+   * (`specs/cross-cutting/pr-why-risk-brief` spec §6.2a/AC-29) — new
+   * capability, no prior consumer. Not workspace-scoped/ownership-checked
+   * here: this is an internal read a future caller (the Risk Brief
+   * service) already resolves a `repoId` for via its own ownership check
+   * (mirrors `resolveEmbedStatus()`'s own status-only, no-ownership-check
+   * shape) — no route exposes this method directly (spec §12 — "no public
+   * search route").
+   *
+   * Degrades to `[]` (never throws, never blocks a caller) whenever
+   * embeddings aren't `'ready'` — mirrors this same class's `reindex()`/
+   * `list()` treatment of `resolveEmbedStatus()`.
+   */
+  async search(repoId: string, query: string, k: number): Promise<RankedChunk[]> {
+    const embedResolution = await this.resolveEmbedStatus();
+    if (embedResolution.status !== 'ready') return [];
+
+    const [queryEmbedding] = await embedResolution.embedder.embed([query]);
+    const chunks = await this.repo.getEmbeddedChunks(repoId);
+    return rankBySimilarity(queryEmbedding!, chunks, k);
   }
 
   /** Ownership check mirroring the existing `GET /pulls/:id/blast` pattern

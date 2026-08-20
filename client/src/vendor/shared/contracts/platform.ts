@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { Provider } from './knowledge.js';
 import { Verdict } from './findings.js';
+import { RiskSeverity } from './brief.js';
 
 /**
  * Platform / scaffolding DTOs owned by F1:
@@ -232,6 +233,11 @@ export const PrDetail = PrMeta.extend({
   files: z.array(PrFile),
   commits: z.array(PrCommit),
   linked_issue: IssueMeta.nullish(),
+  // Sourced from the PR's persisted Risk Brief; null when none exists yet.
+  // .nullish() (not .nullable()), matching sibling enrichment fields
+  // (verdict/score above) — an older/minimal PrDetail fixture that predates
+  // this field must still parse without it (server/test/contracts.test.ts).
+  risk_level: RiskSeverity.nullish(),
 });
 export type PrDetail = z.infer<typeof PrDetail>;
 

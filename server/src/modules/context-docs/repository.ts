@@ -1,9 +1,10 @@
-import { and, eq, notInArray, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull, notInArray, sql } from 'drizzle-orm';
 import { readFile } from 'node:fs/promises';
 import type { Db } from '../../db/client.js';
 import * as t from '../../db/schema.js';
 import type { ContextDocIndexStatus, ContextDocRoot } from '@devdigest/shared';
 import { resolveWithinClone, verifyRealpathWithinClone } from './glob-safety.js';
+import type { EmbeddedChunk } from './similarity.js';
 
 /**
  * Project Context Folder — `context_documents`/`code_chunks` data access
@@ -149,6 +150,45 @@ export class ContextDocsRepository {
         );
       }
     });
+  }
+
+  /**
+   * Top-K similarity-search input (`specs/cross-cutting/pr-why-risk-brief`
+   * spec §6.2a/AC-29): every already-embedded `code_chunks` row for `repoId`
+   * whose `source` is `'docs'`, `'spec'`, or `'insights'` — **never**
+   * `'code'` (the column's own default,
+   * `server/src/db/schema/context.ts:45-47`). Ranking code-content chunks
+   * into a Risk Brief prompt would leak raw repository source into an LLM
+   * call (AC-27), so the `source` exclusion is enforced TWICE: the SQL
+   * `inArray` in the `WHERE` clause below, and a defense-in-depth JS-level
+   * filter on the returned rows — the second guard means this guarantee
+   * survives a future edit that accidentally weakens/removes the `WHERE`
+   * clause, and (deliberately) makes it unit-testable without Postgres via
+   * a fake `Db` that doesn't itself apply `WHERE` filtering (this
+   * codebase's established fake-`Db` shape, `server/test/onboarding.test.ts`'s
+   * `makeFakeDb`). Also excludes rows with a `null` `embedding` (not yet
+   * chunked/embedded, or `embeddingsEnabled` was off at index time).
+   */
+  async getEmbeddedChunks(repoId: string): Promise<EmbeddedChunk[]> {
+    const rows = await this.db
+      .select({
+        id: t.codeChunks.id,
+        path: t.codeChunks.path,
+        content: t.codeChunks.content,
+        embedding: t.codeChunks.embedding,
+        source: t.codeChunks.source,
+      })
+      .from(t.codeChunks)
+      .where(
+        and(
+          eq(t.codeChunks.repoId, repoId),
+          isNotNull(t.codeChunks.embedding),
+          inArray(t.codeChunks.source, ['docs', 'spec', 'insights']),
+        ),
+      );
+    return rows
+      .filter((r) => r.source !== 'code')
+      .map((r) => ({ id: r.id, path: r.path, content: r.content, embedding: r.embedding! }));
   }
 
   /**
