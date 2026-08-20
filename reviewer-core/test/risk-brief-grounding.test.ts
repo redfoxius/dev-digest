@@ -5,7 +5,19 @@
  */
 import { describe, it, expect } from 'vitest';
 import type { DiffHunk, Risk, ReviewFocusItem } from '@devdigest/shared';
-import { filterRiskRefs, filterReviewFocus, boundRiskBriefOutput } from '../src/modules/risk-brief/grounding.js';
+import {
+  filterRiskRefs,
+  filterReviewFocus,
+  boundRiskBriefOutput,
+  type RiskBriefOutputLimits,
+} from '../src/risk-brief/grounding.js';
+
+// Same caps the server enforces
+// (`server/src/modules/risk-brief/constants.ts`'s `MAX_RISKS`/
+// `MAX_REVIEW_FOCUS`/`MAX_WHAT_WHY_CHARS`) — duplicated here as plain
+// numbers since this test lives in reviewer-core and must not import server
+// config.
+const LIMITS: RiskBriefOutputLimits = { maxRisks: 8, maxReviewFocus: 8, maxWhatWhyChars: 600 };
 
 function risk(overrides: Partial<Risk> = {}): Risk {
   return {
@@ -126,7 +138,7 @@ describe('boundRiskBriefOutput', () => {
     const longWhat = 'w'.repeat(700);
     const longWhy = 'y'.repeat(700);
 
-    const result = boundRiskBriefOutput(oversizedRisks, oversizedFocus, longWhat, longWhy);
+    const result = boundRiskBriefOutput(oversizedRisks, oversizedFocus, longWhat, longWhy, LIMITS);
 
     expect(result.risks).toHaveLength(8);
     expect(result.risks).toEqual(oversizedRisks.slice(0, 8));
@@ -141,7 +153,7 @@ describe('boundRiskBriefOutput', () => {
   it('leaves an already-within-bounds input unchanged', () => {
     const risks = [risk()];
     const focus = [focusItem()];
-    const result = boundRiskBriefOutput(risks, focus, 'short what', 'short why');
+    const result = boundRiskBriefOutput(risks, focus, 'short what', 'short why', LIMITS);
     expect(result).toEqual({ risks, review_focus: focus, what: 'short what', why: 'short why' });
   });
 });

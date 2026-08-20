@@ -122,6 +122,26 @@ describe('ContextDocsService.search (AC-29) — source filter', () => {
     expect(results.map((r) => r.id)).toEqual(['docs-1', 'spec-1']);
     expect(embedder.calls).toEqual([['query text']]);
   });
+
+  it('excludes a row with a null embedding even though the SQL WHERE would have filtered it', async () => {
+    // Simulates the SQL `isNotNull(embedding)` WHERE having been weakened/
+    // removed — a fake DB queue hands back a docs row with a null embedding
+    // (not yet chunked/embedded). Proves the repository's JS-level filter
+    // rejects it via `embedding != null`, not just `source !== 'code'`.
+    const rows = [
+      { id: 'docs-null', path: 'docs/unready.md', content: 'not embedded yet', embedding: null, source: 'docs' },
+      { id: 'docs-1', path: 'docs/a.md', content: 'doc a', embedding: [0.9, 0.1], source: 'docs' },
+    ];
+    const db = makeFakeDb([rows]);
+    const embedder = new SpyEmbedder([1, 0]);
+    const container = new Container(config({ embeddingsEnabled: true }), db, { embedder });
+    const service = new ContextDocsService(container);
+
+    const results = await service.search(REPO_ID, 'query text', 2);
+
+    expect(results.map((r) => r.id)).not.toContain('docs-null');
+    expect(results.map((r) => r.id)).toEqual(['docs-1']);
+  });
 });
 
 describe('ContextDocsService.search (AC-29) — embeddings not ready', () => {

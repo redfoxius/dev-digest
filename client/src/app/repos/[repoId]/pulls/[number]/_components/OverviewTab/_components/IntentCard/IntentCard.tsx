@@ -34,12 +34,8 @@ export function IntentCard({ prId }: IntentCardProps) {
   // `page.tsx` self-fetch — React Query dedupes to one network call
   // regardless of how many mounted consumers share it (AC-31).
   const { data: riskBrief } = usePrRiskBrief(prId);
-  // Risk Areas: one authoritative, de-duplicated list (AC-31) — recomputed
-  // only when either source's risks actually change.
-  const mergedRisks = React.useMemo(
-    () => (intent ? mergeRisks(intent.risks, riskBrief?.risks) : []),
-    [intent, riskBrief],
-  );
+  // Risk Areas: one authoritative, de-duplicated list (AC-31).
+  const mergedRisks = intent ? mergeRisks(intent.risks, riskBrief?.risks) : [];
 
   // Re-derive button, modeled on the Conventions "Rescan" pattern
   // (`app/repos/[repoId]/conventions/page.tsx` + `useExtractConventions`).

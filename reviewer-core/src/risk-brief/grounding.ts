@@ -1,16 +1,23 @@
 import type { DiffHunk, Risk, ReviewFocusItem } from '@devdigest/shared';
-import { MAX_RISKS, MAX_REVIEW_FOCUS, MAX_WHAT_WHY_CHARS } from './constants.js';
 
 /**
  * Risk Brief — grounding + output bounding (pure functions, no `Container`,
  * no DB — `specs/cross-cutting/pr-why-risk-brief/plan.md` Work Item 6,
  * spec §6.2 AC-10/AC-11/AC-12). Never trust a raw model-cited path/line
- * without validating it against real diff/blast data first.
+ * without validating it against real diff/blast data first. Lives in
+ * `reviewer-core` (not `server/src/modules/risk-brief/`) because it's zero
+ * I/O over in-memory `Risk[]`/`ReviewFocusItem[]` — the same Domain Purity
+ * rule that puts `groundFindings` here for the main review pipeline.
+ *
+ * The output-bound caps (`MAX_RISKS`/`MAX_REVIEW_FOCUS`/`MAX_WHAT_WHY_CHARS`)
+ * are server-specific config (`server/src/modules/risk-brief/constants.ts`),
+ * not part of this pure algorithm — `boundRiskBriefOutput` takes them as an
+ * injected `RiskBriefOutputLimits` parameter instead of importing them.
  */
 
 /**
  * Filters each risk's `file_refs` down to paths present in `validPaths` —
- * mirrors `intent/service.ts`'s own `filterRiskFileRefs`
+ * mirrors `server/src/modules/intent/service.ts`'s own `filterRiskFileRefs`
  * (`server/src/modules/intent/service.ts:368-385`). A risk with no
  * `file_refs` to begin with always stays valid (never dropped for that
  * reason); a risk is dropped only when it HAD refs and every one failed to
@@ -82,11 +89,20 @@ export interface BoundedRiskBriefOutput {
   why: string;
 }
 
+/** The caps `boundRiskBriefOutput` enforces — injected by the caller (server
+ *  config, `server/src/modules/risk-brief/constants.ts`'s `MAX_RISKS` /
+ *  `MAX_REVIEW_FOCUS` / `MAX_WHAT_WHY_CHARS`), never hardcoded here. */
+export interface RiskBriefOutputLimits {
+  maxRisks: number;
+  maxReviewFocus: number;
+  maxWhatWhyChars: number;
+}
+
 /**
- * Bounds the (already-grounded) output to this codebase's "well above
- * expected shape, not at it" caps (AC-12), regardless of what the model
- * returned: at most `MAX_RISKS` risks, at most `MAX_REVIEW_FOCUS` review-
- * focus entries, and `what`/`why` each truncated to `MAX_WHAT_WHY_CHARS`
+ * Bounds the (already-grounded) output to the caller's "well above expected
+ * shape, not at it" caps (AC-12), regardless of what the model returned: at
+ * most `limits.maxRisks` risks, at most `limits.maxReviewFocus` review-focus
+ * entries, and `what`/`why` each truncated to `limits.maxWhatWhyChars`
  * characters.
  */
 export function boundRiskBriefOutput(
@@ -94,11 +110,12 @@ export function boundRiskBriefOutput(
   reviewFocus: ReviewFocusItem[],
   what: string,
   why: string,
+  limits: RiskBriefOutputLimits,
 ): BoundedRiskBriefOutput {
   return {
-    risks: risks.slice(0, MAX_RISKS),
-    review_focus: reviewFocus.slice(0, MAX_REVIEW_FOCUS),
-    what: what.slice(0, MAX_WHAT_WHY_CHARS),
-    why: why.slice(0, MAX_WHAT_WHY_CHARS),
+    risks: risks.slice(0, limits.maxRisks),
+    review_focus: reviewFocus.slice(0, limits.maxReviewFocus),
+    what: what.slice(0, limits.maxWhatWhyChars),
+    why: why.slice(0, limits.maxWhatWhyChars),
   };
 }
