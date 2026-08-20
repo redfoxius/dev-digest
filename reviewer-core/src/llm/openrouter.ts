@@ -125,7 +125,19 @@ export class OpenRouterProvider implements LLMProvider {
       messages.push({ role: 'assistant', content: lastRaw });
       messages.push({ role: 'user', content: parsed.repromptMessage });
     }
-    throw new Error(`OpenRouter structured output failed schema validation for ${req.schemaName}`);
+    // Attach the model's last raw output as `cause` — mirrors OpenAIProvider/
+    // AnthropicProvider's own `ExternalServiceError(..., { raw: lastRaw })`
+    // convention, adapted to a plain `Error` since this package must stay
+    // framework/server-agnostic (no import of the server's AppError taxonomy).
+    // Without this, a schema-validation failure is undiagnosable from server
+    // logs alone — confirmed by hand while debugging a real one (the model
+    // was returning a content-safety classifier's own output format, not
+    // JSON, because of a misconfigured workspace feature-model override; the
+    // bare message alone gave no way to tell that apart from a genuine
+    // schema mismatch without re-instrumenting this file each time).
+    throw new Error(`OpenRouter structured output failed schema validation for ${req.schemaName}`, {
+      cause: { raw: lastRaw },
+    });
   }
 
   /**
