@@ -79,6 +79,10 @@ any analysis.
 
 - Never fixes what it finds — pass findings to the `implementer` agent.
 - Never commits, pushes, or opens pull requests.
+- Never saves its own output — the orchestrating session saves the
+  returned findings to `specs/<module>/<feature-slug>/architecture-review.md`
+  when reviewing a spec'd feature (root `AGENTS.md`'s "Feature planning"),
+  overwriting on re-review.
 - Not a substitute for the `pr-self-review` skill's automated gate (that
   skill already runs `onion-architecture`/`golang-architecture` as
   parallel CI-style reviewers per PR) — this agent is for ad hoc, broader,

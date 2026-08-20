@@ -105,6 +105,12 @@ self-verification discipline) before returning. If one reports **blocked / faili
 it in scope: record it, and either dispatch a targeted retry or surface it to the user — do not
 silently continue past a red task that others depend on.
 
+**Save the Implementation Report.** Once all tasks in the DAG are done, if the plan's `## Spec`
+section names a real `specs/<module>/<feature-slug>/spec.md`, write the collected Implementation
+Report(s) to `specs/<module>/<feature-slug>/implementation-report.md` (per root `AGENTS.md`'s
+"Feature planning") — this is what `plan-verifier` reads in Step 2 instead of reconstructing from
+`git diff`. No spec cited → skip this write, per that same convention.
+
 ### Step 1.5 — Test authoring (once, not per work item)
 
 After all implementers in the DAG finish, compute the changed-file set (same `git diff` used in
@@ -113,7 +119,9 @@ per touched package, concurrently — passing it the package's slice of the chan
 plan's acceptance criteria for that package's work items, so it derives test scenarios from the plan,
 not from re-reading the implementation. Do not spawn a `test-writer` per work item or per file — that
 multiplies the same unscoped-test-run cost this workflow is designed to avoid. Each `test-writer`
-self-verifies scoped to the file(s) it wrote, per its own instructions. Collect the Test Reports.
+self-verifies scoped to the file(s) it wrote, per its own instructions. Collect the Test Reports. If the plan
+cites a real spec, save the collected Test Report(s) to `specs/<module>/<feature-slug>/test-report.md` (per root
+`AGENTS.md`'s "Feature planning"), same as the Implementation Report above.
 
 ### Step 2 — Review gate (parallel, read-only)
 
@@ -124,7 +132,10 @@ reports). Then spawn, **concurrently**:
   PASS/FAIL gate.
 - **`plan-verifier`** with the plan + changed set → a traceability matrix and a PASS/FAIL/REVIEW gate.
 
-Both run on Sonnet (read-only, structured prompts). Collect both verdicts.
+Both run on Sonnet (read-only, structured prompts). Collect both verdicts. If the plan cites a real
+spec, save each agent's returned output to its file beside the spec — `architecture-review.md` and
+`verification.md` in `specs/<module>/<feature-slug>/` (per root `AGENTS.md`'s "Feature planning") —
+overwriting any prior version from an earlier run of this same plan.
 
 ### Step 3 — Fix loop (bounded — this is where review comments get resolved)
 
@@ -140,7 +151,8 @@ If the backlog is empty → go to Step 4. Otherwise loop, for iteration `i = 1 �
    finding's text, `file:line`, and the reviewer's recommendation.
 3. Each fix implementer self-verifies (tests scoped to the fixed file(s) + typecheck).
 4. **Re-review only the changed files**: re-run `architecture-reviewer` scoped to the touched files;
-   re-run `plan-verifier` only for the requirements that were `missing`/`partial`.
+   re-run `plan-verifier` only for the requirements that were `missing`/`partial`. If the plan cites a
+   spec, overwrite `architecture-review.md`/`verification.md` with the fresh output, same as Step 2.
 5. Recompute the backlog:
    - empty → **break (gate PASS)**.
    - non-empty but **no progress** since last iteration (same findings unresolved) → break and flag as
@@ -172,7 +184,7 @@ merge, or open a PR. Offer to invoke `pr-self-review` as the next step.
 ```
 ## Run Plan — <feature>
 
-- **Plan:** `docs/plans/<feature>.md` — mode: multi-agent | single-agent
+- **Plan:** `<plan path>` — mode: multi-agent | single-agent
 - **AC-N preflight:** N/N covered | gap found (<ids>) — skipped (no spec)
 - **Implemented:** <N> tasks (T1…Tn) — <one line>
 - **Self-verify:** module suites (scoped) + typecheck green | failing (<detail>)
