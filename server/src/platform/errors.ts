@@ -58,3 +58,19 @@ export class DiffUnavailableError extends AppError {
     );
   }
 }
+
+/**
+ * Thrown by `OnboardingService.regenerate` (docs/onboarding-generator-plan.md
+ * Work Item 1, AC-6) when a repo's `repo-intel` index has no resolvable
+ * `indexed_sha` (never indexed) — Regenerate must reject outright before any
+ * facts read or LLM call, never attempt a low-quality generation over empty
+ * facts. Fastify's existing `err instanceof AppError` handler
+ * (`app.ts:153-158`) already surfaces this as a real `422` with zero
+ * per-route plumbing, mirroring `DiffUnavailableError`'s own zero-plumbing
+ * addition (`server/INSIGHTS.md`, 2026-08-17 entry).
+ */
+export class NotIndexedError extends AppError {
+  constructor(message = 'This repo has not been indexed yet — index it before generating a tour.') {
+    super('not_indexed', message, 422);
+  }
+}

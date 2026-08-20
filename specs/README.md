@@ -6,3 +6,4 @@ One line per feature spec: module, feature-slug, Spec ID, current Status.
 |---|---|---|---|
 | server | blast-radius-llm-summary | SPEC-2026-08-19-blast-radius-llm-summary | clarifying |
 | cross-cutting | project-context-folder | SPEC-2026-08-19-project-context-folder | draft |
+| cross-cutting | onboarding-generator | SPEC-2026-08-20-onboarding-generator | draft |
