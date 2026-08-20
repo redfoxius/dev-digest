@@ -7,11 +7,35 @@
   "unknownError": "Unknown error",
   "generate": {
     "title": "Generate onboarding tour",
-    "body": "DevDigest indexes the repo and specs, then writes a 5-section guided tour: overview, architecture, key modules, getting started, and conventions & gotchas.",
+    "body": "DevDigest indexes the repo, then writes a 5-section guided tour: Architecture overview, Critical paths, How to run locally, Guided reading path, and First tasks.",
     "cta": "Generate onboarding tour",
     "generating": "Generating…"
   },
   "loadError": {
     "title": "Couldn’t load the onboarding tour"
-  }
+  },
+  "sectionTitles": {
+    "architecture": "Architecture overview",
+    "critical_paths": "Critical paths",
+    "how_to_run": "How to run locally",
+    "reading_path": "Guided reading path",
+    "first_tasks": "First tasks"
+  },
+  "subtitle": "Generated from index of {fileCount} files · last refreshed {relativeTime}",
+  "headingPrefix": "Onboarding for ",
+  "stale": {
+    "title": "This tour may be out of date — the repo has been reindexed since it was last generated.",
+    "cta": "Regenerate now"
+  },
+  "regenerateSuccess": "Tour regenerated.",
+  "regenerateError": {
+    "notIndexed": "This repo hasn't been indexed yet — index it before generating a tour.",
+    "failedWithPrevious": "Generation failed — your previous tour is still shown below.",
+    "failedNoPrevious": "Generation failed. Try again."
+  },
+  "share": {
+    "cta": "Share link",
+    "copied": "Link copied to clipboard."
+  },
+  "openOnGitHub": "Open on GitHub"
 }

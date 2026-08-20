@@ -1,0 +1,122 @@
+import type { CSSProperties } from "react";
+
+/** Co-located styles for the Onboarding Tour page — mirrors
+   conventions/styles.ts's tokens. */
+export const s = {
+  pageHeader: {
+    padding: "24px 32px 10px",
+    display: "flex",
+    alignItems: "flex-end",
+    gap: 16,
+  } satisfies CSSProperties,
+  pageTitle: {
+    fontSize: 24,
+    fontWeight: 700,
+    letterSpacing: "-0.02em",
+  } satisfies CSSProperties,
+  pageSubtitle: {
+    fontSize: 14,
+    color: "var(--text-secondary)",
+    marginTop: 4,
+  } satisfies CSSProperties,
+  headerActions: {
+    marginLeft: "auto",
+    display: "flex",
+    gap: 10,
+    alignItems: "center",
+  } satisfies CSSProperties,
+  banner: {
+    margin: "0 32px 16px",
+    padding: "10px 14px",
+    borderRadius: 8,
+    fontSize: 13.5,
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+  } satisfies CSSProperties,
+  staleBanner: {
+    background: "var(--bg-elevated)",
+    border: "1px solid var(--border-strong)",
+    color: "var(--text-secondary)",
+  } satisfies CSSProperties,
+  errorBanner: {
+    background: "var(--crit-bg)",
+    border: "1px solid var(--crit)",
+    color: "var(--text-primary)",
+  } satisfies CSSProperties,
+  bannerDismiss: {
+    marginLeft: "auto",
+    background: "none",
+    border: "none",
+    color: "var(--text-muted)",
+    cursor: "pointer",
+    fontSize: 15,
+  } satisfies CSSProperties,
+  nav: {
+    margin: "0 32px 20px",
+    display: "flex",
+    flexWrap: "wrap",
+    gap: 8,
+  } satisfies CSSProperties,
+  navButton: {
+    padding: "6px 12px",
+    borderRadius: 999,
+    border: "1px solid var(--border-strong)",
+    background: "var(--bg-elevated)",
+    color: "var(--text-secondary)",
+    fontSize: 12.5,
+    cursor: "pointer",
+  } satisfies CSSProperties,
+  list: {
+    margin: "0 32px 44px",
+    display: "flex",
+    flexDirection: "column",
+    gap: 20,
+  } satisfies CSSProperties,
+  loadingStack: {
+    margin: "0 32px",
+    display: "flex",
+    flexDirection: "column",
+    gap: 14,
+  } satisfies CSSProperties,
+  card: {
+    border: "1px solid var(--border)",
+    borderRadius: 10,
+    background: "var(--bg-panel)",
+    padding: "18px 20px",
+  } satisfies CSSProperties,
+  cardTitle: {
+    fontSize: 15,
+    fontWeight: 650,
+    marginBottom: 10,
+  } satisfies CSSProperties,
+  linksRow: {
+    marginTop: 12,
+    display: "flex",
+    flexWrap: "wrap",
+    gap: 8,
+  } satisfies CSSProperties,
+  linkChip: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 4,
+    fontSize: 12.5,
+    padding: "3px 9px",
+    borderRadius: 6,
+    background: "var(--bg-elevated)",
+    border: "1px solid var(--border)",
+    color: "var(--accent-text)",
+    textDecoration: "none",
+  } satisfies CSSProperties,
+  srOnly: {
+    position: "absolute",
+    width: 1,
+    height: 1,
+    padding: 0,
+    margin: -1,
+    overflow: "hidden",
+    clip: "rect(0, 0, 0, 0)",
+    whiteSpace: "nowrap",
+    border: 0,
+  } satisfies CSSProperties,
+} as const;

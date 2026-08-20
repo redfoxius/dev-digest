@@ -5,6 +5,7 @@ import {
   integer,
   boolean,
   jsonb,
+  numeric,
   timestamp,
   vector,
   index,
@@ -119,10 +120,27 @@ export const references = pgTable(
   }),
 );
 
+/**
+ * `onboarding` — one row per repo (upserted in place, never versioned; see
+ * spec §9's "deliberately different from `blast_summaries`" lifecycle note).
+ * The 7 columns below (`docs/onboarding-generator-plan.md` Work Item 2) are
+ * all new/nullable so pre-existing rows keep working unchanged. `costUsd` is
+ * `numeric` (never `doublePrecision`) — money/cost columns must stay decimal
+ * so aggregation never drifts from binary-float rounding; `reviews.costUsd`
+ * (`reviews.ts:28`, `doublePrecision`) is pre-existing debt in a different
+ * table, not a type precedent to copy, only its nullability convention is.
+ */
 export const onboarding = pgTable('onboarding', {
   repoId: uuid('repo_id')
     .primaryKey()
     .references(() => repos.id, { onDelete: 'cascade' }),
   json: jsonb('json').notNull(),
   generatedAt: timestamp('generated_at', { withTimezone: true }).defaultNow().notNull(),
+  indexedSha: text('indexed_sha'),
+  fileCount: integer('file_count'),
+  provider: text('provider'),
+  model: text('model'),
+  tokensIn: integer('tokens_in'),
+  tokensOut: integer('tokens_out'),
+  costUsd: numeric('cost_usd'),
 });
