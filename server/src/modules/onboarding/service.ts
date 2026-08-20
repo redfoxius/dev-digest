@@ -137,8 +137,23 @@ export class OnboardingService {
       tokensOut = result.tokensOut;
       costUsd = result.costUsd;
     } catch (err) {
-      log.error({ repoId, err: (err as Error).message }, 'onboarding: generation failed');
-      throw new ExternalServiceError(`Onboarding generation failed: ${(err as Error).message}`);
+      // `OpenRouterProvider.completeStructured` attaches the model's last raw
+      // output as `cause: { raw }` on its own schema-validation failure (see
+      // reviewer-core/src/llm/openrouter.ts) — surface it here rather than
+      // just the generic message, or a bad model/moderation-classifier
+      // response (e.g. a misconfigured workspace feature-model override) is
+      // undiagnosable from server logs alone. Truncated to bound both the
+      // log line and the client-facing error body.
+      const cause = (err as Error).cause as { raw?: unknown } | undefined;
+      const raw = typeof cause?.raw === 'string' ? cause.raw.slice(0, 2000) : undefined;
+      log.error(
+        { repoId, err: (err as Error).message, ...(raw ? { raw } : {}) },
+        'onboarding: generation failed',
+      );
+      throw new ExternalServiceError(
+        `Onboarding generation failed: ${(err as Error).message}`,
+        raw ? { raw } : undefined,
+      );
     }
 
     const row = await this.repo.upsert(repoId, {
