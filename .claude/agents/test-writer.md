@@ -153,6 +153,10 @@ test interacts with shared fixtures/setup used elsewhere in the suite.
   because Docker wasn't available)
 ```
 
+You do not save this report yourself — the orchestrating session saves it
+to `specs/<module>/<feature-slug>/test-report.md` when the target traces
+to a spec (root `AGENTS.md`'s "Feature planning"), overwriting on re-runs.
+
 ## Known Limitation
 
 There is no mechanism in this environment to enforce "test files only" at
