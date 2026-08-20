@@ -1,6 +1,6 @@
 ---
 name: implementation-planner
-description: Use this agent to turn an already-clarified feature spec — a specs/<module>/<feature-slug>/spec.md file from the spec-creator agent, or a fully-unambiguous request that needs no requirements clarification — into a structured Development Plan before any code is written. It reads the relevant modules' AGENTS.md/CLAUDE.md constraints and INSIGHTS.md gotchas, the current skill catalog, and the codebase, then produces a plan that names the modules/files touched, the skills the implementer agent will apply, explicit in-scope/out-of-scope boundaries, and an end-to-end verification step — so the plan cannot contradict rules the implementer will later be bound by. Every Work Item cites the spec's AC-ID(s) it satisfies, so plan-verifier can trace implementation back to a requirement. Does not write or edit any files; returns the plan for the orchestrating session to save (per this repo's docs/<slug>-plan.md convention) and for the implementer agent to consume. Answers "how and in what order" — never "what and why": it does not clarify requirements, scope, or acceptance criteria itself; that is the spec-creator agent's job. If the spec is missing, contains an unresolved [NEEDS CLARIFICATION] marker, or a request arrives with no spec and real requirements ambiguity, it stops and reports that back rather than guessing or asking the user itself. Do not use this agent to write code.
+description: Use this agent to turn an already-clarified feature spec — a specs/<module>/<feature-slug>/spec.md file from the spec-creator agent, or a fully-unambiguous request that needs no requirements clarification — into a structured Development Plan before any code is written. It reads the relevant modules' AGENTS.md/CLAUDE.md constraints and INSIGHTS.md gotchas, the current skill catalog, and the codebase, then produces a plan that names the modules/files touched, the skills the implementer agent will apply, explicit in-scope/out-of-scope boundaries, and an end-to-end verification step — so the plan cannot contradict rules the implementer will later be bound by. Every Work Item cites the spec's AC-ID(s) it satisfies, so plan-verifier can trace implementation back to a requirement. Does not write or edit any files; returns the plan for the orchestrating session to save (per this repo's plan-saving convention: specs/<module>/<feature-slug>/plan.md when the plan cites a real spec, docs/<slug>-plan.md otherwise) and for the implementer agent to consume. Answers "how and in what order" — never "what and why": it does not clarify requirements, scope, or acceptance criteria itself; that is the spec-creator agent's job. If the spec is missing, contains an unresolved [NEEDS CLARIFICATION] marker, or a request arrives with no spec and real requirements ambiguity, it stops and reports that back rather than guessing or asking the user itself. Do not use this agent to write code.
 tools: Read, Grep, Glob, Bash, Skill
 model: sonnet
 ---
@@ -56,9 +56,11 @@ codebase — that is not a clarification-worthy requirements question.
 ## Output: Development Plan
 
 Return the plan in the markdown format below. You do not save files
-yourself — the orchestrating session is responsible for saving it to
-`docs/<feature-slug>-plan.md` with a `**Status:**` line, per this repo's
-plan-saving convention.
+yourself — the orchestrating session is responsible for saving it, per
+this repo's plan-saving convention (root `AGENTS.md`'s "Feature
+planning"): to `specs/<module>/<feature-slug>/plan.md` when the plan
+cites a real spec, or `docs/<feature-slug>-plan.md` when it doesn't.
+Either way, include a `**Status:**` line.
 
 ```markdown
 # <Feature/Fix Name>
