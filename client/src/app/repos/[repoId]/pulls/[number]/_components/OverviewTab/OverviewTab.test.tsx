@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { render, screen, cleanup } from "@testing-library/react";
+import { render, screen, fireEvent, cleanup } from "@testing-library/react";
 import { NextIntlClientProvider } from "next-intl";
 import prReviewMessages from "../../../../../../../../messages/en/prReview.json";
 
@@ -32,6 +32,27 @@ vi.mock("./_components/BlastRadiusCard", () => ({
   ),
 }));
 
+// RiskBriefCard self-fetches via usePrRiskBrief (React Query) — mocked for
+// the same reason as the other three cards, but its mock exposes a clickable
+// row so this file's own AC-20 test can assert the exact `onViewInDiff` prop
+// OverviewTab threads through as `onJumpToDiff` (RiskBriefCard.test.tsx
+// covers the real review-focus-row click behavior; this only checks
+// OverviewTab wires the right callback into the right prop).
+vi.mock("./_components/RiskBriefCard", () => ({
+  RiskBriefCard: ({
+    prId,
+    onViewInDiff,
+  }: {
+    prId: string | null | undefined;
+    onViewInDiff: (file: string, line: number) => void;
+  }) => (
+    <div data-testid="risk-brief-card">
+      {prId}
+      <button onClick={() => onViewInDiff("src/config.ts", 12)}>review-focus-row</button>
+    </div>
+  ),
+}));
+
 import { OverviewTab } from "./OverviewTab";
 
 afterEach(cleanup);
@@ -59,6 +80,7 @@ describe("OverviewTab", () => {
         onOpenBlast={() => {}}
         onViewInDiff={() => {}}
         prFilePaths={new Set()}
+        onJumpToDiff={() => {}}
       />,
     );
     const order = Array.from(container.querySelectorAll("[data-testid], section")).map((el) =>
@@ -81,6 +103,7 @@ describe("OverviewTab", () => {
         onOpenBlast={() => {}}
         onViewInDiff={() => {}}
         prFilePaths={new Set()}
+        onJumpToDiff={() => {}}
       />,
     );
     expect(prBriefBannerMock).toHaveBeenCalledWith({
@@ -103,6 +126,7 @@ describe("OverviewTab", () => {
         onOpenBlast={() => {}}
         onViewInDiff={() => {}}
         prFilePaths={new Set()}
+        onJumpToDiff={() => {}}
       />,
     );
     expect(screen.getByTestId("intent-card")).toHaveTextContent("pr-42");
@@ -120,8 +144,60 @@ describe("OverviewTab", () => {
         onOpenBlast={() => {}}
         onViewInDiff={() => {}}
         prFilePaths={new Set()}
+        onJumpToDiff={() => {}}
       />,
     );
     expect(screen.queryByText("Description")).not.toBeInTheDocument();
+  });
+
+  // AC-17: all four Overview cards render additively — PrBriefBanner,
+  // IntentCard, BlastRadiusCard, and the new Risk Brief card.
+  it("renders all four card sections (PrBriefBanner, IntentCard, BlastRadiusCard, RiskBriefCard)", () => {
+    renderWithIntl(
+      <OverviewTab
+        prBody={null}
+        prId="pr-1"
+        verdict={null}
+        score={null}
+        findings={null}
+        latestRunCostUsd={null}
+        onOpenBlast={() => {}}
+        onViewInDiff={() => {}}
+        prFilePaths={new Set()}
+        onJumpToDiff={() => {}}
+      />,
+    );
+    expect(screen.getByTestId("pr-brief-banner")).toBeInTheDocument();
+    expect(screen.getByTestId("intent-card")).toBeInTheDocument();
+    expect(screen.getByTestId("blast-radius-card")).toBeInTheDocument();
+    expect(screen.getByTestId("risk-brief-card")).toBeInTheDocument();
+  });
+
+  // AC-20: a Review Focus row click must call the distinct `onJumpToDiff`
+  // callback (bound to page.tsx's raw, always-in-app `handleViewInDiff`) —
+  // never the existing `onViewInDiff` prop (bound to `handleCallerClick`,
+  // which has a GitHub-fallback branch), with the exact {file, line}.
+  it("threads onJumpToDiff into RiskBriefCard's onViewInDiff prop, called with the exact {file, line}", () => {
+    const onJumpToDiff = vi.fn();
+    const onViewInDiff = vi.fn();
+    renderWithIntl(
+      <OverviewTab
+        prBody={null}
+        prId="pr-1"
+        verdict={null}
+        score={null}
+        findings={null}
+        latestRunCostUsd={null}
+        onOpenBlast={() => {}}
+        onViewInDiff={onViewInDiff}
+        prFilePaths={new Set()}
+        onJumpToDiff={onJumpToDiff}
+      />,
+    );
+
+    fireEvent.click(screen.getByText("review-focus-row"));
+
+    expect(onJumpToDiff).toHaveBeenCalledWith("src/config.ts", 12);
+    expect(onViewInDiff).not.toHaveBeenCalled();
   });
 });

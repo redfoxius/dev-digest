@@ -288,11 +288,16 @@ export default async function pullsRoutes(appBase: FastifyInstance) {
     const batchReviews = await container.reviewRepo.getReviewsByIds(reviewIds);
     const scores = batchReviews.map((r) => r.score).filter((s): s is number => s != null);
     const costs = batchReviews.map((r) => r.costUsd).filter((c): c is number => c != null);
+    // Sourced from the PR's persisted Risk Brief (AC-22) — `null` when none
+    // exists yet. One additional repository read, folded into this same
+    // shared aggregate so both return branches below pick it up for free.
+    const riskBrief = await container.riskBriefRepo.getByPrId(pr.id);
     const prBrief = {
       score: scores.length > 0 ? Math.min(...scores) : null,
       latest_run_cost_usd: costs.length > 0 ? costs.reduce((a, b) => a + b, 0) : null,
       findings: reviewIds.length > 0 ? rollupSeverities(latestFindings) : null,
       verdict: worstVerdict(batchReviews.map((r) => r.verdict)),
+      risk_level: riskBrief?.risk_level ?? null,
     };
 
     // Local-first: refresh detail from GitHub when a token is configured;

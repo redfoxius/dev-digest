@@ -30,6 +30,11 @@
   "prBrief": {
     "empty": "Run a review to see the PR Brief — verdict, score, and findings will appear here."
   },
+  "riskBadge": {
+    "high": "High risk",
+    "medium": "Medium risk",
+    "low": "Low risk"
+  },
   "panel": {
     "hideLowConfidence": "Hide low confidence",
     "noMatchTitle": "No findings match",

@@ -30,6 +30,7 @@ import { ReviewRepository } from '../modules/reviews/repository.js';
 import { SkillsRepository } from '../modules/skills/repository.js';
 import { RepoRepository } from '../modules/repos/repository.js';
 import { ContextDocsRepository } from '../modules/context-docs/repository.js';
+import { RiskBriefRepository } from '../modules/risk-brief/repository.js';
 import type { RepoIntel } from '../modules/repo-intel/types.js';
 import { RepoIntelService } from '../modules/repo-intel/service.js';
 import type { IntentDeriver } from '../modules/intent/types.js';
@@ -91,6 +92,7 @@ export class Container {
   private _skillsRepo?: SkillsRepository;
   private _reposRepo?: RepoRepository;
   private _contextDocsRepo?: ContextDocsRepository;
+  private _riskBriefRepo?: RiskBriefRepository;
   private _repoIntel?: RepoIntel;
   private _intentDeriver?: IntentDeriver;
   private _pullsSync?: PullsSync;
@@ -138,6 +140,17 @@ export class Container {
    */
   get contextDocsRepo(): ContextDocsRepository {
     return (this._contextDocsRepo ??= new ContextDocsRepository(this.db));
+  }
+
+  /**
+   * PR Why + Risk Brief (`specs/cross-cutting/pr-why-risk-brief/plan.md`) —
+   * persisted `risk_brief` data access, for OTHER modules' cross-reads (e.g.
+   * `pulls/routes.ts`'s PR Brief aggregate). Same convention as
+   * `contextDocsRepo` above: this module's own `service.ts`
+   * (`RiskBriefService`) constructs its own instance directly.
+   */
+  get riskBriefRepo(): RiskBriefRepository {
+    return (this._riskBriefRepo ??= new RiskBriefRepository(this.db));
   }
 
   get codeIndex(): CodeIndex {

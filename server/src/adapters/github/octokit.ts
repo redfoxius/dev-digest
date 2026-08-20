@@ -116,6 +116,12 @@ export class OctokitGitHubClient implements GitHubClient {
               committed_at: c.commit.author?.date,
             })),
             linked_issue: linkedIssue,
+            // This is a low-level GitHub-detail builder, not the `GET
+            // /pulls/:id` route response — it has no access to a persisted
+            // Risk Brief. The real enrichment happens in
+            // `pulls/routes.ts`'s route handler, which overwrites this via
+            // its shared `prBrief` aggregate on every response.
+            risk_level: null,
           };
         })(),
         TIMEOUT,

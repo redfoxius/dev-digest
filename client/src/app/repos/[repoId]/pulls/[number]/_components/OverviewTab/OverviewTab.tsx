@@ -2,10 +2,11 @@
 
 import React from "react";
 import { SectionLabel } from "@devdigest/ui";
-import type { Verdict } from "@devdigest/shared";
+import type { RiskSeverity, Verdict } from "@devdigest/shared";
 import { IntentCard } from "./_components/IntentCard";
 import { PrBriefBanner } from "./_components/PrBriefBanner";
 import { BlastRadiusCard } from "./_components/BlastRadiusCard";
+import { RiskBriefCard } from "./_components/RiskBriefCard";
 import { s } from "./styles";
 
 interface OverviewTabProps {
@@ -26,13 +27,32 @@ interface OverviewTabProps {
    *  for whether the blast index's commit matches this PR's head SHA, not
    *  just raw diff membership) — anything else shows the GitHub icon. */
   prFilePaths: Set<string>;
+  /** PR Why + Risk Brief (specs/cross-cutting/pr-why-risk-brief), AC-23 —
+   *  threaded into PrBriefBanner's risk badge. Sourced from `page.tsx`'s
+   *  already-fetched `pr.risk_level` (`GET /pulls/:id`), not a new fetch
+   *  here. */
+  riskLevel?: RiskSeverity | null;
+  /** AC-24 — parent-derived map of a caller's `file` or an endpoint/cron
+   *  string to the highest-severity `RiskBrief.risks[]` entry citing it (or
+   *  the neutral `'flagged'` sentinel when only cited via `review_focus[]`),
+   *  threaded into BlastRadiusCard's flagged-dot indicator. */
+  flaggedRefs?: Map<string, RiskSeverity | "flagged">;
+  /** Jump to a `review_focus[]` entry's exact file:line in the
+   *  Files-changed tab — ALWAYS an in-app jump (AC-20), threaded into the
+   *  new RiskBriefCard. Deliberately distinct from `onViewInDiff` above,
+   *  which is bound to page.tsx's `handleCallerClick` and has a
+   *  GitHub-fallback branch for caller files outside this PR's diff —
+   *  Review Focus entries are server-validated to always be diff files and
+   *  must never fall back to GitHub. */
+  onJumpToDiff: (file: string, line: number) => void;
 }
 
 // Kept free of any fetching logic (only threads props through) — the
-// data-fetching concern (usePrIntent/useDeriveIntent) lives inside
-// IntentCard itself, and the PR Brief aggregate comes from `page.tsx`'s
-// already-fetched `pr` object, preserving OverviewTab's presentational/pure
-// shape (no new useQuery here).
+// data-fetching concern (usePrIntent/useDeriveIntent, usePrRiskBrief) lives
+// inside IntentCard/RiskBriefCard themselves, and the PR Brief aggregate
+// plus `riskLevel`/`flaggedRefs` come from `page.tsx`'s already-fetched
+// data, preserving OverviewTab's presentational/pure shape (no new
+// useQuery here).
 export function OverviewTab({
   prBody,
   prId,
@@ -43,10 +63,19 @@ export function OverviewTab({
   onOpenBlast,
   onViewInDiff,
   prFilePaths,
+  riskLevel,
+  flaggedRefs,
+  onJumpToDiff,
 }: OverviewTabProps) {
   return (
     <>
-      <PrBriefBanner verdict={verdict} score={score} findings={findings} costUsd={latestRunCostUsd} />
+      <PrBriefBanner
+        verdict={verdict}
+        score={score}
+        findings={findings}
+        costUsd={latestRunCostUsd}
+        riskLevel={riskLevel}
+      />
 
       <IntentCard prId={prId} />
 
@@ -55,7 +84,10 @@ export function OverviewTab({
         onViewFull={onOpenBlast}
         onViewInDiff={onViewInDiff}
         prFilePaths={prFilePaths}
+        flaggedRefs={flaggedRefs}
       />
+
+      <RiskBriefCard prId={prId} onViewInDiff={onJumpToDiff} />
 
       {prBody && (
         <section>

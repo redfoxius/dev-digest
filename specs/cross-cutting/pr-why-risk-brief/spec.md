@@ -430,7 +430,7 @@ Shapes only — fields, direction, optionality. No schema-library code.
 
 | Field | Type | Optionality | Notes |
 |---|---|---|---|
-| `risk_level` | `"high" \| "medium" \| "low" \| null` | required (nullable) | New field, AC-22. |
+| `risk_level` | `"high" \| "medium" \| "low" \| null` | optional, nullable (`.nullish()`) | New field, AC-22. Matches the `.nullish()` convention already used by this same `PrDetail` extension's sibling enrichment fields (`verdict`, `score`) — corrected here (2026-08-20, post-implementation review) after the code shipped `RiskSeverity.nullish()`; an older/minimal `PrDetail` fixture predating this field must still parse without it (`server/test/contracts.test.ts`), which `required` would have broken. |
 
 **Client component contracts (shape only, additive):**
 

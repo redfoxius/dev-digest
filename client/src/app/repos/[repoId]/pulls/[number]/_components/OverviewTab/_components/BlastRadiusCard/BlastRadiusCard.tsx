@@ -1,10 +1,12 @@
 "use client";
 
 import React from "react";
+import type { RiskSeverity } from "@devdigest/shared";
 import { Badge, Button, Card, ErrorState, Icon, SectionLabel, Skeleton } from "@devdigest/ui";
 import { usePrBlastRadius } from "@/lib/hooks/blast";
 import { blastRadiusCounts, topBlastSymbols } from "@/lib/blast-stats";
 import { ApiError } from "@/lib/api";
+import { RISK_SEVERITY_COLOR } from "@/lib/risk-severity";
 import { s } from "./styles";
 
 interface BlastRadiusCardProps {
@@ -22,6 +24,38 @@ interface BlastRadiusCardProps {
    *  SHA, not just raw diff membership) — anything else shows a GitHub
    *  icon instead of the in-diff jump arrow. */
   prFilePaths: Set<string>;
+  /** PR Why + Risk Brief (AC-24): parent-derived map of a caller's `file`
+   *  or an endpoint/cron string to the highest-severity `RiskBrief.risks[]`
+   *  entry citing it, or the neutral `'flagged'` sentinel when only cited
+   *  via `review_focus[]`. This component never fetches this data itself —
+   *  entirely parent-derived (`buildFlaggedRefsMap`). */
+  flaggedRefs?: Map<string, RiskSeverity | "flagged">;
+}
+
+/** Dot fill color for a flagged ref — the real severity color for a real
+ *  `RiskSeverity`, or the neutral muted token for the `'flagged'`
+ *  sentinel (a ref cited only via `review_focus[]`, not any `risks[]`
+ *  entry). */
+function flaggedDotColor(value: RiskSeverity | "flagged"): string {
+  return value === "flagged" ? "var(--text-muted)" : RISK_SEVERITY_COLOR[value].color;
+}
+
+/** Appends the "flagged by Risk Brief" suffix (plus the severity word,
+ *  when it's a real severity and not the neutral sentinel) to a row's
+ *  existing title/accessible-name text (AC-24). */
+function withFlaggedSuffix(title: string, value: RiskSeverity | "flagged"): string {
+  return value === "flagged"
+    ? `${title} — flagged by Risk Brief`
+    : `${title} — flagged by Risk Brief (${value})`;
+}
+
+/** Small filled dot marking a flagged caller/endpoint/cron row — purely
+ *  decorative (the accessible name carries the "flagged" text via the
+ *  row's `title`), so it's `aria-hidden`. */
+function FlaggedDot({ value }: { value: RiskSeverity | "flagged" }) {
+  return (
+    <span aria-hidden="true" data-testid="flagged-dot" style={{ ...s.flaggedDot, background: flaggedDotColor(value) }} />
+  );
 }
 
 const PREVIEW_CALLER_COUNT = 4;
@@ -34,7 +68,7 @@ const PREVIEW_CHIP_COUNT = 6;
  * a count — with a link to the full "Blast radius" tab for everything else.
  * Self-contained fetching, same pattern as the sibling IntentCard.
  */
-export function BlastRadiusCard({ prId, onViewFull, onViewInDiff, prFilePaths }: BlastRadiusCardProps) {
+export function BlastRadiusCard({ prId, onViewFull, onViewInDiff, prFilePaths, flaggedRefs }: BlastRadiusCardProps) {
   const { data, isLoading, isError, error, refetch } = usePrBlastRadius(prId);
   const hasData = !!data && !data.degraded && data.changed_symbols.length > 0;
   const counts = hasData ? blastRadiusCounts(data!.downstream) : null;
@@ -116,13 +150,18 @@ export function BlastRadiusCard({ prId, onViewFull, onViewInDiff, prFilePaths }:
                 <div style={s.callerList}>
                   {topSymbol.callers.slice(0, PREVIEW_CALLER_COUNT).map((c, i) => {
                     const external = !prFilePaths.has(c.file);
+                    const flagged = flaggedRefs?.get(c.file);
+                    const baseTitle = external
+                      ? "Opens on GitHub — not part of this PR's diff"
+                      : "Jump to this line in Files changed";
                     return (
                       <button
                         key={`${c.file}:${c.line}:${i}`}
                         onClick={() => onViewInDiff(c.file, c.line)}
                         style={s.callerRow}
-                        title={external ? "Opens on GitHub — not part of this PR's diff" : "Jump to this line in Files changed"}
+                        title={flagged !== undefined ? withFlaggedSuffix(baseTitle, flagged) : baseTitle}
                       >
+                        {flagged !== undefined && <FlaggedDot value={flagged} />}
                         {external ? (
                           <Icon.Github size={12} style={{ color: "var(--ok)", flexShrink: 0 }} />
                         ) : (
@@ -148,6 +187,7 @@ export function BlastRadiusCard({ prId, onViewFull, onViewInDiff, prFilePaths }:
                   endpoints={topSymbol.endpoints_affected}
                   crons={topSymbol.crons_affected}
                   max={PREVIEW_CHIP_COUNT}
+                  flaggedRefs={flaggedRefs}
                 />
               )}
             </div>
@@ -170,25 +210,57 @@ function CountBadge({ n, noun }: { n: number; noun: string }) {
 /** Combined endpoint (blue) + cron (amber) chip row, capped at `max` total
  *  with a "+N more" tail — a compact-panel concern the full BlastTab
  *  (which lists every chip) doesn't need. */
-function ChipPreview({ endpoints, crons, max }: { endpoints: string[]; crons: string[]; max: number }) {
+function ChipPreview({
+  endpoints,
+  crons,
+  max,
+  flaggedRefs,
+}: {
+  endpoints: string[];
+  crons: string[];
+  max: number;
+  flaggedRefs?: Map<string, RiskSeverity | "flagged">;
+}) {
   const shownEndpoints = endpoints.slice(0, max);
   const shownCrons = crons.slice(0, Math.max(0, max - shownEndpoints.length));
   const hidden = endpoints.length + crons.length - shownEndpoints.length - shownCrons.length;
 
   return (
     <div style={s.chipRow}>
-      {shownEndpoints.map((ep) => (
-        <Badge key={ep} bg="var(--accent-bg)" color="var(--accent)">
-          <Icon.Globe size={11} style={{ marginRight: 4 }} />
-          {ep}
-        </Badge>
-      ))}
-      {shownCrons.map((cr) => (
-        <Badge key={cr} bg="var(--warn-bg)" color="var(--warn)">
-          <Icon.Clock size={11} style={{ marginRight: 4 }} />
-          {cr}
-        </Badge>
-      ))}
+      {shownEndpoints.map((ep) => {
+        const flagged = flaggedRefs?.get(ep);
+        const badge = (
+          <Badge bg="var(--accent-bg)" color="var(--accent)">
+            {flagged !== undefined && <FlaggedDot value={flagged} />}
+            <Icon.Globe size={11} style={{ marginRight: 4 }} />
+            {ep}
+          </Badge>
+        );
+        return flagged !== undefined ? (
+          <span key={ep} title={withFlaggedSuffix(`Endpoint: ${ep}`, flagged)}>
+            {badge}
+          </span>
+        ) : (
+          <span key={ep}>{badge}</span>
+        );
+      })}
+      {shownCrons.map((cr) => {
+        const flagged = flaggedRefs?.get(cr);
+        const badge = (
+          <Badge bg="var(--warn-bg)" color="var(--warn)">
+            {flagged !== undefined && <FlaggedDot value={flagged} />}
+            <Icon.Clock size={11} style={{ marginRight: 4 }} />
+            {cr}
+          </Badge>
+        );
+        return flagged !== undefined ? (
+          <span key={cr} title={withFlaggedSuffix(`Cron: ${cr}`, flagged)}>
+            {badge}
+          </span>
+        ) : (
+          <span key={cr}>{badge}</span>
+        );
+      })}
       {hidden > 0 && (
         <Badge bg="var(--bg-hover)" color="var(--text-muted)">
           +{hidden} more

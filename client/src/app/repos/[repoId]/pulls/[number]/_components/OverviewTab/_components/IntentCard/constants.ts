@@ -1,4 +1,4 @@
-import type { EvidenceTier, RiskSeverity } from "@devdigest/shared";
+import type { EvidenceTier } from "@devdigest/shared";
 
 /**
  * Qualitative (never numeric) evidence-tier badge coloring. The label text
@@ -13,17 +13,10 @@ export const EVIDENCE_TIER_COLOR: Record<EvidenceTier, { color: string; bg: stri
 };
 
 /**
- * Risk-severity chip coloring/icon (Phase 1 — Risk Areas,
- * docs/intent-smartdiff-improvements.md). `RiskSeverity` ('high'/'medium'/
- * 'low') is a DISTINCT enum from `Severity` ('CRITICAL'/'WARNING'/
- * 'SUGGESTION') — never conflate them or reuse `SeverityBadge`/`SEV_COLOR`
- * for a risk's severity.
+ * Promoted to `lib/risk-severity.ts` — this feature made `RISK_SEVERITY_COLOR`
+ * a genuine 3+-unrelated-folder consumer (`IntentCard`, `PrBriefBanner`,
+ * `BlastRadiusCard`, `RiskBriefCard`), triggering the `frontend-ui-architecture`
+ * skill's constants-promotion rule. Re-exported here so this folder's other
+ * consumers don't need an import-path change.
  */
-export const RISK_SEVERITY_COLOR: Record<
-  RiskSeverity,
-  { color: string; bg: string; icon: "AlertOctagon" | "AlertTriangle" | "Info" }
-> = {
-  high: { color: "var(--crit)", bg: "var(--crit-bg)", icon: "AlertOctagon" },
-  medium: { color: "var(--warn)", bg: "var(--warn-bg)", icon: "AlertTriangle" },
-  low: { color: "var(--text-muted)", bg: "var(--bg-hover)", icon: "Info" },
-};
+export { RISK_SEVERITY_COLOR } from "@/lib/risk-severity";

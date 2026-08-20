@@ -77,4 +77,14 @@ export const s = {
     flexWrap: "wrap",
     gap: 6,
   } satisfies CSSProperties,
+  /** Small filled dot rendered before a flagged caller row's icon or a
+   *  flagged endpoint/cron chip's icon (PR Why + Risk Brief, AC-24) —
+   *  `background` is set per-instance from `RISK_SEVERITY_COLOR`/the
+   *  neutral `'flagged'` token, so only shape/sizing lives here. */
+  flaggedDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 99,
+    flexShrink: 0,
+  } satisfies CSSProperties,
 } as const;
