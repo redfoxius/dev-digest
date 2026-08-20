@@ -384,6 +384,92 @@ func main() {}
   });
 });
 
+// AC-7: per-file/per-module graceful degradation — a directory with no
+// governing go.mod anywhere in its ancestry must not affect edge
+// resolution for an unrelated directory elsewhere in the repo that does
+// have one, and buildEdges must not throw. No dedicated WI/test existed
+// for this AC in the original implementer pass (WI-2 was production-code
+// only; no test work item cited AC-7) — added here as a spec-derived gap
+// fix, independent of go.ts's current internals.
+describe('GoDepGraph — mixed fixture: one governed directory, one ungoverned directory (AC-7)', () => {
+  let mixedRoot: string;
+
+  beforeAll(async () => {
+    mixedRoot = await mkdtemp(join(tmpdir(), 'devdigest-go-depgraph-mixed-'));
+
+    // moduleA/ has its own go.mod and a real local import — should still
+    // resolve edges normally.
+    await mkdir(join(mixedRoot, 'moduleA', 'internal', 'foo'), { recursive: true });
+    await writeFile(join(mixedRoot, 'moduleA', 'go.mod'), 'module example.com/modulea\n\ngo 1.22\n');
+    await writeFile(
+      join(mixedRoot, 'moduleA', 'main.go'),
+      `package main
+
+import "example.com/modulea/internal/foo"
+
+func main() {
+	foo.Do()
+}
+`,
+    );
+    await writeFile(join(mixedRoot, 'moduleA', 'internal', 'foo', 'foo.go'), 'package foo\n\nfunc Do() {}\n');
+
+    // orphan/ is a wholly unrelated directory with no go.mod anywhere in
+    // its ancestry up to root (root itself also has no go.mod) — this
+    // directory's files must be degraded (no edges), not the whole build.
+    await mkdir(join(mixedRoot, 'orphan'), { recursive: true });
+    await writeFile(join(mixedRoot, 'orphan', 'scratch.go'), 'package orphan\n\nfunc Scratch() {}\n');
+  });
+
+  afterAll(async () => {
+    await rm(mixedRoot, { recursive: true, force: true }).catch(() => undefined);
+  });
+
+  it('resolves edges for the governed directory and omits edges for the ungoverned directory, without throwing', async () => {
+    const mixedFiles = ['moduleA/main.go', 'moduleA/internal/foo/foo.go', 'orphan/scratch.go'];
+    const edges = await new GoDepGraph().buildEdges(mixedRoot, mixedFiles);
+
+    expect(edges).toContainEqual({ from: 'moduleA/main.go', to: 'moduleA/internal/foo/foo.go' });
+    expect(edges.some((e) => e.from === 'orphan/scratch.go' || e.to === 'orphan/scratch.go')).toBe(false);
+  });
+});
+
+// AC-9: the upward discovery walk must stop at root and never read/stat
+// any path above it. The existing "returns [] when go.mod is missing"
+// test (AC-8) uses this exact shape (a file directly at root, no go.mod
+// anywhere) but asserts only the return value, and must stay unmodified
+// per AC-8's own Verify clause ("continues to pass unmodified") — so this
+// is a separate, additive test asserting the fs-call boundary the spec's
+// own AC-9 Verify text names explicitly.
+describe('GoDepGraph — file directly at root, no go.mod anywhere (AC-9)', () => {
+  let rootOnlyRoot: string;
+
+  beforeAll(async () => {
+    rootOnlyRoot = await mkdtemp(join(tmpdir(), 'devdigest-go-depgraph-rootonly-'));
+    await writeFile(join(rootOnlyRoot, 'main.go'), 'package main\n\nfunc main() {}\n');
+  });
+
+  afterAll(async () => {
+    await rm(rootOnlyRoot, { recursive: true, force: true }).catch(() => undefined);
+  });
+
+  it('terminates discovery after checking root itself, with no fs call for any path outside root', async () => {
+    const mockedReadFile = vi.mocked(readFile);
+    mockedReadFile.mockClear();
+
+    const edges = await new GoDepGraph().buildEdges(rootOnlyRoot, ['main.go']);
+    expect(edges).toEqual([]);
+
+    const outsideRootCalls = mockedReadFile.mock.calls.filter(([path]) => !String(path).startsWith(rootOnlyRoot));
+    expect(outsideRootCalls).toEqual([]);
+
+    // Exactly one go.mod candidate is checked: root's own go.mod. No
+    // ancestor-of-root candidate is ever read.
+    const goModCalls = mockedReadFile.mock.calls.filter(([path]) => String(path).endsWith('go.mod'));
+    expect(goModCalls).toEqual([[join(rootOnlyRoot, 'go.mod'), 'utf8']]);
+  });
+});
+
 describe('UnionDepGraph', () => {
   it('concatenates edges from every composed builder', async () => {
     const a: DepGraph = { buildEdges: async () => [{ from: 'a.ts', to: 'b.ts' }] };
