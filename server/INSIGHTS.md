@@ -43,6 +43,17 @@ workflow and quality bar.
   `server/src/modules/reviews/run-executor.ts:96-105`,
   `server/src/modules/reviews/service.ts:221-238`, `server/src/app.ts:153-158`)
 
+- 2026-08-20 — `vi.mock('node:fs/promises', async (importOriginal) => ({
+  ...await importOriginal(), readFile: vi.fn(actual.readFile) }))` lets a test
+  assert call counts/paths on exactly one fs export (`readFile`) while every
+  other export used by the same test file's fixture setup (`mkdtemp`,
+  `mkdir`, `writeFile`, `rm`) keeps running for real — no new export needed
+  from the module under test just to make it spy-able. Used to prove
+  `go.mod` discovery memoization (a shared directory's `go.mod` is read at
+  most once) and that no `readFile` call ever touches a path outside the
+  fixture root for a traversal-shaped import.
+  (`server/test/depgraph-go.test.ts` — top-level `vi.mock('node:fs/promises', ...)`)
+
 ## What Doesn't Work
 
 - 2026-08-14 — `RunBus`'s `buffers`/`seq`/`completed` Maps
@@ -597,6 +608,49 @@ workflow and quality bar.
   (`server/src/modules/context-docs/chunker.ts`,
   `server/src/modules/context-docs/reader.ts:classifyRoot`,
   `server/src/modules/context-docs/service.ts:rootToChunkSource`)
+
+- 2026-08-20 — `GoDepGraph.resolveLocalPackageDir()` returns a path relative
+  to the *module's own* directory (e.g. `internal/foo`), not repo-relative —
+  any caller that looks it up against a repo-relative map (`filesByDir`)
+  must first join it with the governing `go.mod`'s own repo-relative
+  directory (`moduleDir === '.' ? pkgDir : join(moduleDir, pkgDir)`). This
+  was silently correct for the entire v1 (single-language, root-only-`go.mod`)
+  implementation only because `moduleDir` was always `'.'` — the bug was
+  purely latent, invisible in tests, until multi-module discovery made
+  `moduleDir` vary. Treat "module-relative vs repo-relative" as two distinct
+  coordinate spaces from the start for any future per-directory-manifest
+  resolver (e.g. Rust's `Cargo.toml`), not something safe to conflate until
+  it visibly breaks.
+  (`server/src/adapters/depgraph/go.ts:88` — `joinModuleRelative`)
+
+- 2026-08-20 — Per-directory `go.mod` discovery (`discoverGoverningModule`,
+  `go.ts:135-164`) memoizes every directory visited during an upward walk,
+  not just the directory that triggered it — so a shared ancestor's
+  `go.mod` read is deduped across *different* directories' first lookups
+  too, not only repeat lookups of the same directory. The cache `Map` is
+  shared between source-side (a file's own governing module) and
+  target-side (an import's resolved candidate directory's governing module,
+  the WI-4/AC-3 cross-module guard) lookups within one `buildEdges` call —
+  one Map, one discovery function, no separate cache needed per lookup kind.
+  (`server/src/adapters/depgraph/go.ts:63,68,107,135-164`)
+
+- 2026-08-20 — A target-side governing-module guard is required, not
+  optional, once `GoDepGraph` supports nested `go.mod` boundaries: without
+  it, an outer-module file whose import string happens to string-prefix-match
+  into a more-nested inner module's directory (e.g. outer module
+  `example.com/outer` importing `example.com/outer/b/x` where `a/b/go.mod`
+  declares its own module `example.com/outer/b`) silently produces a real
+  cross-module edge that could never exist under actual Go semantics.
+  Verified load-bearing by temporarily neutering the guard (`if (false)` in
+  place of the module-match comparison) and confirming exactly one test
+  failed — the other nested-module tests (genuine same-module case, inner
+  module's own local-import resolution) were unaffected, proving the guard
+  isn't redundant with source-side deepest-`go.mod`-wins discovery; the two
+  are independent checks and both are needed.
+  (`server/src/adapters/depgraph/go.ts:97-110`; test:
+  `server/test/depgraph-go.test.ts` — "GoDepGraph — nested-module boundary
+  guard (WI-4, AC-3) > produces zero edges from an outer-module file into an
+  inner module it only string-prefix-matches into")
 
 - 2026-08-20 — Onboarding Generator (`docs/onboarding-generator-plan.md`)
   needed `assembleOnboardingFacts` (the `repo-intel`-composing algorithm) to
