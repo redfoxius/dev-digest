@@ -1,19 +1,23 @@
 import type { ChangedSymbol, DownstreamImpact, Intent } from '@devdigest/shared';
-import { estimateTokens, renderIntentText, wrapUntrusted } from '@devdigest/reviewer-core';
+import { estimateTokens, renderIntentText, wrapUntrusted } from '../prompt.js';
 
 /**
  * Risk Brief — input assembly + token-budget trimming (pure function, no
  * DB/LLM/FS/network — `specs/cross-cutting/pr-why-risk-brief/plan.md` Work
- * Item 5, spec §6.2/§11). `RiskBriefService` (a later Work Item) is
+ * Item 5, spec §6.2/§11). The caller (`RiskBriefService`, `server/`) is
  * responsible for fetching every fact below; this module only renders and
- * trims already-fetched data into an LLM-ready section list.
+ * trims already-fetched data into an LLM-ready section list. Lives in
+ * `reviewer-core` (not `server/src/modules/risk-brief/`) because it's zero
+ * I/O beyond the `estimateTokens`/`wrapUntrusted`/`renderIntentText` helpers
+ * this package already owns — the same Domain Purity rule that puts
+ * `assemblePrompt`/`groundFindings` here for the main review pipeline.
  *
- * Wrapping convention (mirrors `intent/service.ts:330-355`, the EXACT
- * existing precedent §11 cites):
+ * Wrapping convention (mirrors `server/src/modules/intent/service.ts:330-355`,
+ * the EXACT existing precedent §11 cites):
  *   - PR title: UNWRAPPED (low-risk structured metadata, same as
  *     `intent/service.ts`'s own convention).
  *   - Derived Intent: WRAPPED via `wrapUntrusted('derived-intent', ...)` —
- *     the same label `reviewer-core/src/prompt.ts:150` already uses to
+ *     the same label `../prompt.ts`'s own `assemblePrompt` already uses to
  *     re-wrap a previously-derived Intent string.
  *   - Blast summary + structured `changed_symbols`/`downstream` facts:
  *     UNWRAPPED — deterministic, server-computed structural facts, same

@@ -2,8 +2,12 @@ import { describe, it, expect } from 'vitest';
 import {
   assembleRiskBriefInput,
   type RiskBriefInputFacts,
-} from '../src/modules/risk-brief/prompt.js';
-import { RISK_BRIEF_INPUT_TOKEN_BUDGET } from '../src/modules/risk-brief/constants.js';
+} from '../src/risk-brief/prompt.js';
+
+// Same budget the server enforces (`server/src/modules/risk-brief/constants.ts`'s
+// `RISK_BRIEF_INPUT_TOKEN_BUDGET`) — duplicated here as a plain number since
+// this test lives in reviewer-core and must not import server config.
+const RISK_BRIEF_INPUT_TOKEN_BUDGET = 8000;
 
 const baseFacts: RiskBriefInputFacts = {
   prTitle: 'Fix pagination bug',

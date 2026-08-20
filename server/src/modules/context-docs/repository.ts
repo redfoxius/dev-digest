@@ -187,8 +187,11 @@ export class ContextDocsRepository {
         ),
       );
     return rows
-      .filter((r) => r.source !== 'code')
-      .map((r) => ({ id: r.id, path: r.path, content: r.content, embedding: r.embedding! }));
+      .filter(
+        (r): r is typeof r & { embedding: number[] } =>
+          r.source !== 'code' && r.embedding != null,
+      )
+      .map((r) => ({ id: r.id, path: r.path, content: r.content, embedding: r.embedding }));
   }
 
   /**

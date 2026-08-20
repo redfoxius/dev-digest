@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { render, screen, cleanup } from "@testing-library/react";
+import { render, screen, cleanup, within } from "@testing-library/react";
 import type { BlastRadiusResponse } from "@devdigest/shared";
 
 // `usePrBlastRadius` is mocked directly (same pattern as
@@ -64,7 +64,7 @@ describe("BlastRadiusCard — flagged-dot indicator (PR Why + Risk Brief, AC-24)
     expect(flaggedRow).toBeInTheDocument();
     expect(flaggedRow.tagName).toBe("BUTTON");
 
-    const dot = flaggedRow.querySelector('[data-testid="flagged-dot"]');
+    const dot = within(flaggedRow).queryByTestId("flagged-dot");
     expect(dot).not.toBeNull();
     expect(dot).toHaveStyle({ background: "var(--crit)" });
   });
@@ -86,7 +86,7 @@ describe("BlastRadiusCard — flagged-dot indicator (PR Why + Risk Brief, AC-24)
     );
 
     const flaggedRow = screen.getByTitle(/flagged by Risk Brief$/);
-    const dot = flaggedRow.querySelector('[data-testid="flagged-dot"]');
+    const dot = within(flaggedRow).queryByTestId("flagged-dot");
     expect(dot).not.toBeNull();
     expect(dot).toHaveStyle({ background: "var(--text-muted)" });
   });
@@ -108,7 +108,7 @@ describe("BlastRadiusCard — flagged-dot indicator (PR Why + Risk Brief, AC-24)
     );
 
     const unflaggedRow = screen.getByTitle("Jump to this line in Files changed");
-    expect(unflaggedRow.querySelector('[data-testid="flagged-dot"]')).toBeNull();
+    expect(within(unflaggedRow).queryByTestId("flagged-dot")).toBeNull();
     expect(screen.queryByTitle(/flagged/i)).not.toBe(unflaggedRow);
   });
 
@@ -145,7 +145,7 @@ describe("BlastRadiusCard — flagged-dot indicator (PR Why + Risk Brief, AC-24)
     );
 
     const flaggedChip = screen.getByTitle(/flagged by Risk Brief \(medium\)/);
-    const dot = flaggedChip.querySelector('[data-testid="flagged-dot"]');
+    const dot = within(flaggedChip).queryByTestId("flagged-dot");
     expect(dot).not.toBeNull();
     expect(dot).toHaveStyle({ background: "var(--warn)" });
   });

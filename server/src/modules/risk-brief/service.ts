@@ -9,9 +9,14 @@ import type { Logger } from '../reviews/run-executor.js';
 import { BlastService } from '../blast/service.js';
 import { ContextDocsService } from '../context-docs/service.js';
 import { RiskBriefRepository } from './repository.js';
-import { assembleRiskBriefInput, type RiskBriefInputFacts } from './prompt.js';
-import { filterRiskRefs, filterReviewFocus, boundRiskBriefOutput } from './grounding.js';
-import { RISK_BRIEF_INPUT_TOKEN_BUDGET, RELEVANT_SPEC_K } from './constants.js';
+import {
+  assembleRiskBriefInput,
+  filterRiskRefs,
+  filterReviewFocus,
+  boundRiskBriefOutput,
+  type RiskBriefInputFacts,
+} from '@devdigest/reviewer-core';
+import { RISK_BRIEF_INPUT_TOKEN_BUDGET, RELEVANT_SPEC_K, MAX_RISKS, MAX_REVIEW_FOCUS, MAX_WHAT_WHY_CHARS } from './constants.js';
 
 /**
  * Risk Brief orchestration service (`specs/cross-cutting/pr-why-risk-brief/plan.md`
@@ -201,7 +206,11 @@ export class RiskBriefService {
 
     const groundedRisks = filterRiskRefs(result.data.risks, validPaths);
     const groundedReviewFocus = filterReviewFocus(result.data.review_focus, diffFilesToHunks);
-    const bounded = boundRiskBriefOutput(groundedRisks, groundedReviewFocus, result.data.what, result.data.why);
+    const bounded = boundRiskBriefOutput(groundedRisks, groundedReviewFocus, result.data.what, result.data.why, {
+      maxRisks: MAX_RISKS,
+      maxReviewFocus: MAX_REVIEW_FOCUS,
+      maxWhatWhyChars: MAX_WHAT_WHY_CHARS,
+    });
 
     const brief: RiskBrief = {
       what: bounded.what,
