@@ -57,15 +57,11 @@ function Harness({ prId }: { prId: string }) {
     <OverviewTab
       prBody={null}
       prId={prId}
-      verdict={null}
-      score={null}
-      findings={null}
-      latestRunCostUsd={null}
+      reviewSummary={{ verdict: null, score: null, findings: null, latestRunCostUsd: null }}
       onOpenBlast={() => {}}
       onViewInDiff={() => {}}
       prFilePaths={new Set()}
-      riskLevel={pr?.risk_level}
-      onJumpToDiff={() => {}}
+      riskBrief={{ level: pr?.risk_level, flaggedRefs: undefined, onJumpToDiff: () => {} }}
     />
   );
 }

@@ -272,8 +272,8 @@ describe('RiskBriefService.generate — cache semantics (AC-4, AC-5, AC-6)', () 
   it('AC-4 — a cache-hit (matching head_sha, not forced) returns the cached brief with zero LLM calls', async () => {
     const existing = validBrief({ pr_head_sha: 'new-sha' }); // matches pullRow.headSha
     const { db, calls } = makeFakeDb([[pullRow], [{ prId: PR_ID, json: existing }]]);
-    const llm = new MockLLMProvider('openai');
-    const container = new Container(config(), db, { llm: { openai: llm } });
+    const llm = new MockLLMProvider('openrouter');
+    const container = new Container(config(), db, { llm: { openrouter: llm } });
     const service = new RiskBriefService(container);
 
     const result = await service.generate(WS, PR_ID, false);
@@ -286,10 +286,10 @@ describe('RiskBriefService.generate — cache semantics (AC-4, AC-5, AC-6)', () 
   it('AC-5 — a stale head_sha triggers exactly one LLM call and overwrites the row', async () => {
     const existing = validBrief({ pr_head_sha: 'old-sha' }); // stale vs pullRow.headSha === 'new-sha'
     const { db, calls } = makeFakeDb(fullPipelineSelectQueue({ existing: [{ prId: PR_ID, json: existing }] }));
-    const llm = new MockLLMProvider('openai', { structured: LLM_FIXTURE });
+    const llm = new MockLLMProvider('openrouter', { structured: LLM_FIXTURE });
     const repoIntel = new FakeRepoIntel();
     const container = new Container(config(), db, {
-      llm: { openai: llm },
+      llm: { openrouter: llm },
       repoIntel,
       git: new MockGitClient(),
     });
@@ -308,9 +308,9 @@ describe('RiskBriefService.generate — cache semantics (AC-4, AC-5, AC-6)', () 
   it('AC-6 — force:true always regenerates, even on an otherwise-valid cache hit', async () => {
     const existing = validBrief({ pr_head_sha: 'new-sha' }); // would cache-hit if not forced
     const { db, calls } = makeFakeDb(fullPipelineSelectQueue({ existing: [{ prId: PR_ID, json: existing }] }));
-    const llm = new MockLLMProvider('openai', { structured: LLM_FIXTURE });
+    const llm = new MockLLMProvider('openrouter', { structured: LLM_FIXTURE });
     const container = new Container(config(), db, {
-      llm: { openai: llm },
+      llm: { openrouter: llm },
       repoIntel: new FakeRepoIntel(),
       git: new MockGitClient(),
     });
@@ -327,9 +327,9 @@ describe('RiskBriefService.generate — cache semantics (AC-4, AC-5, AC-6)', () 
 describe('RiskBriefService.generate — best-effort upstream facts never block generation (§4/§5)', () => {
   it('Intent fetch throwing still proceeds to generate (one LLM call)', async () => {
     const { db } = makeFakeDb(fullPipelineSelectQueue({ intent: new Error('prIntent read failed (mock)') }));
-    const llm = new MockLLMProvider('openai', { structured: LLM_FIXTURE });
+    const llm = new MockLLMProvider('openrouter', { structured: LLM_FIXTURE });
     const container = new Container(config(), db, {
-      llm: { openai: llm },
+      llm: { openrouter: llm },
       repoIntel: new FakeRepoIntel(),
       git: new MockGitClient(),
     });
@@ -343,11 +343,11 @@ describe('RiskBriefService.generate — best-effort upstream facts never block g
 
   it('a degraded Blast Radius response (degraded: true) proceeds with an empty blast section rather than throwing', async () => {
     const { db } = makeFakeDb(fullPipelineSelectQueue());
-    const llm = new MockLLMProvider('openai', { structured: LLM_FIXTURE });
+    const llm = new MockLLMProvider('openrouter', { structured: LLM_FIXTURE });
     const repoIntel = new FakeRepoIntel({
       blast: { changedSymbols: [], callers: [], degraded: true, reason: 'not_indexed' },
     });
-    const container = new Container(config(), db, { llm: { openai: llm }, repoIntel, git: new MockGitClient() });
+    const container = new Container(config(), db, { llm: { openrouter: llm }, repoIntel, git: new MockGitClient() });
     const service = new RiskBriefService(container);
 
     const result = await service.generate(WS, PR_ID, false);
@@ -358,9 +358,9 @@ describe('RiskBriefService.generate — best-effort upstream facts never block g
 
   it('BlastService.getBlastRadius throwing outright also proceeds with an empty blast section', async () => {
     const { db } = makeFakeDb(fullPipelineSelectQueue());
-    const llm = new MockLLMProvider('openai', { structured: LLM_FIXTURE });
+    const llm = new MockLLMProvider('openrouter', { structured: LLM_FIXTURE });
     const repoIntel = new FakeRepoIntel({ blastThrows: true });
-    const container = new Container(config(), db, { llm: { openai: llm }, repoIntel, git: new MockGitClient() });
+    const container = new Container(config(), db, { llm: { openrouter: llm }, repoIntel, git: new MockGitClient() });
     const service = new RiskBriefService(container);
 
     const result = await service.generate(WS, PR_ID, false);
@@ -379,12 +379,12 @@ describe('RiskBriefService.generate — LLM failure (AC-14)', () => {
       [pullRow],
       [{ prId: PR_ID, json: existing }],
     ]);
-    const llm = new MockLLMProvider('openai');
+    const llm = new MockLLMProvider('openrouter');
     llm.completeStructured = async () => {
       throw new Error('provider unreachable (mock)');
     };
     const container = new Container(config(), db, {
-      llm: { openai: llm },
+      llm: { openrouter: llm },
       repoIntel: new FakeRepoIntel(),
       git: new MockGitClient(),
     });
@@ -408,10 +408,10 @@ describe('RiskBriefService.generate — model selection (AC-13)', () => {
       value: { risk_brief: { provider: 'anthropic', model: 'claude-x' } },
     };
     const { db } = makeFakeDb(fullPipelineSelectQueue({ settings: [settingsRow] }));
-    const llmOpenAI = new MockLLMProvider('openai', { structured: LLM_FIXTURE }); // registry default — never called
+    const llmOpenRouter = new MockLLMProvider('openrouter', { structured: LLM_FIXTURE }); // registry default — never called
     const llmAnthropic = new MockLLMProvider('anthropic', { structured: LLM_FIXTURE });
     const container = new Container(config(), db, {
-      llm: { openai: llmOpenAI, anthropic: llmAnthropic },
+      llm: { openrouter: llmOpenRouter, anthropic: llmAnthropic },
       repoIntel: new FakeRepoIntel(),
       git: new MockGitClient(),
     });
@@ -420,7 +420,7 @@ describe('RiskBriefService.generate — model selection (AC-13)', () => {
     const result = await service.generate(WS, PR_ID, false);
 
     expect(llmAnthropic.calls.filter((c) => c.method === 'completeStructured')).toHaveLength(1);
-    expect(llmOpenAI.calls).toHaveLength(0);
+    expect(llmOpenRouter.calls).toHaveLength(0);
     expect(result.brief?.provider).toBe('anthropic');
     expect(result.brief?.model).toBe('claude-x');
   });

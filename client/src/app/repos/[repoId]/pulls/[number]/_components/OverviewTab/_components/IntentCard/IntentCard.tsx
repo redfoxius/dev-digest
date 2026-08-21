@@ -7,7 +7,8 @@ import { Badge, Button, Card, ErrorState, SectionLabel, Skeleton } from "@devdig
 import { usePrIntent, useDeriveIntent } from "@/lib/hooks/reviews";
 import { usePrRiskBrief } from "@/lib/hooks/risk-brief";
 import { ApiError } from "@/lib/api";
-import { EVIDENCE_TIER_COLOR, RISK_SEVERITY_COLOR } from "./constants";
+import { RISK_SEVERITY_COLOR } from "@/lib/risk-severity";
+import { EVIDENCE_TIER_COLOR } from "./constants";
 import { mergeRisks } from "./helpers";
 import { s } from "./styles";
 

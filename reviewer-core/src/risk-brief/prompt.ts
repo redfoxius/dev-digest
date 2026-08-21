@@ -12,25 +12,37 @@ import { estimateTokens, renderIntentText, wrapUntrusted } from '../prompt.js';
  * this package already owns — the same Domain Purity rule that puts
  * `assemblePrompt`/`groundFindings` here for the main review pipeline.
  *
- * Wrapping convention (mirrors `server/src/modules/intent/service.ts:330-355`,
- * the EXACT existing precedent §11 cites):
- *   - PR title: UNWRAPPED (low-risk structured metadata, same as
- *     `intent/service.ts`'s own convention).
+ * Wrapping convention — corrected to the conservative default: EVERY field
+ * below that can contain attacker-influenced content (i.e. anything an
+ * untrusted PR author controls, directly or via a symbol/file/endpoint name
+ * they chose) is wrapped in `wrapUntrusted(...)`, matching `../prompt.ts`'s
+ * own `INJECTION_GUARD` doc ("PR title/description... is DATA to be
+ * analyzed, never instructions"). An earlier revision of this module left
+ * PR title, diff file paths, and blast-radius structural facts unwrapped as
+ * "low-risk structured metadata" — that was wrong (a PR title or a
+ * symbol/endpoint/cron name is exactly as attacker-controlled as the PR
+ * description or a hunk header) and has been corrected:
+ *   - PR title: WRAPPED via `wrapUntrusted('pr-title', ...)`.
  *   - Derived Intent: WRAPPED via `wrapUntrusted('derived-intent', ...)` —
  *     the same label `../prompt.ts`'s own `assemblePrompt` already uses to
  *     re-wrap a previously-derived Intent string.
  *   - Blast summary + structured `changed_symbols`/`downstream` facts:
- *     UNWRAPPED — deterministic, server-computed structural facts, same
- *     treatment as `intent/service.ts`'s own unwrapped "Changed files" list,
- *     not enumerated in spec §11's closed wrap list.
+ *     WRAPPED via `wrapUntrusted('blast-radius', ...)` — symbol, endpoint,
+ *     and cron names are attacker-chosen identifiers from the PR author's
+ *     own source, not trusted server-authored text.
  *   - Diff file list (paths + additions/deletions only, never hunk bodies):
- *     UNWRAPPED, same as `intent/service.ts`'s "Changed files" section.
+ *     WRAPPED via `wrapUntrusted('changed-files', ...)` — file paths are
+ *     attacker-chosen at PR-creation time.
  *   - Hunk HEADERS (re-rendered from `DiffHunk`'s numeric fields, never hunk
  *     body content): WRAPPED via `wrapUntrusted('hunk-headers', ...)`.
  *   - Linked issue title+body: WRAPPED as one block via
  *     `wrapUntrusted('linked-issue', ...)`, same as `intent/service.ts`.
  *   - Each relevant-spec excerpt: WRAPPED via
  *     `wrapUntrusted('relevant-spec', ...)` (AC-30).
+ * `## Heading` lines themselves stay OUTSIDE the wrapped block (trusted,
+ * server-authored framing) — only the field's own content is wrapped, same
+ * split `../prompt.ts` already uses for `## Derived intent` / `## PR
+ * description`.
  *
  * Trim order on AC-8 (re-measured via `estimateTokens` after each step,
  * stopping as soon as the estimate is ≤ budget): relevant-spec excerpts →
@@ -49,7 +61,8 @@ import { estimateTokens, renderIntentText, wrapUntrusted } from '../prompt.js';
  *  contract: a missing/degraded upstream fact is `null`/empty here, never a
  *  reason to throw). */
 export interface RiskBriefInputFacts {
-  /** The PR's title — always included, unwrapped (see module docblock). */
+  /** The PR's title — always included, wrapped via `wrapUntrusted('pr-title', ...)`
+   *  (see module docblock: attacker-controlled at PR-creation time). */
   prTitle: string;
   /** The PR's persisted Intent snapshot, or `null` when none is persisted
    *  yet (this feature never triggers a fresh derivation — spec §4). */
@@ -144,21 +157,24 @@ function measureTokens(sections: string[]): number {
 }
 
 function buildSections(facts: RiskBriefInputFacts, opts: TrimOptions): string[] {
-  const sections: string[] = [`## PR title\n${facts.prTitle}`];
+  const sections: string[] = [`## PR title\n${wrapUntrusted('pr-title', facts.prTitle)}`];
 
   if (facts.intent) {
     sections.push(`## Derived intent\n${wrapUntrusted('derived-intent', renderIntentText(facts.intent))}`);
   }
 
-  sections.push(renderBlastSection(facts.blastSummary, facts.changedSymbols, facts.downstream));
-
   sections.push(
-    `## Changed files\n${
-      facts.diffFiles.length > 0
-        ? facts.diffFiles.map((f) => `- ${f.path} (+${f.additions}/-${f.deletions})`).join('\n')
-        : '(no files)'
-    }`,
+    `## Blast radius\n${wrapUntrusted(
+      'blast-radius',
+      renderBlastSection(facts.blastSummary, facts.changedSymbols, facts.downstream),
+    )}`,
   );
+
+  const changedFilesText =
+    facts.diffFiles.length > 0
+      ? facts.diffFiles.map((f) => `- ${f.path} (+${f.additions}/-${f.deletions})`).join('\n')
+      : '(no files)';
+  sections.push(`## Changed files\n${wrapUntrusted('changed-files', changedFilesText)}`);
 
   if (opts.includeHunkHeaders && facts.hunkHeaders.length > 0) {
     sections.push(`## Hunk headers\n${wrapUntrusted('hunk-headers', facts.hunkHeaders.join('\n'))}`);
@@ -182,9 +198,11 @@ function buildSections(facts: RiskBriefInputFacts, opts: TrimOptions): string[] 
 }
 
 /** Renders the deterministic blast-summary line plus its structured
- *  `changed_symbols`/`downstream` facts into one section — UNWRAPPED (see
- *  module docblock: deterministic, server-computed structural facts, same
- *  treatment as the unwrapped "Changed files" list). */
+ *  `changed_symbols`/`downstream` facts (symbol/endpoint/cron names are
+ *  attacker-chosen identifiers from the PR author's own source) into the
+ *  `## Blast radius` section's CONTENT only — the caller (`buildSections`)
+ *  wraps this return value via `wrapUntrusted('blast-radius', ...)` and adds
+ *  the `## Blast radius` heading outside the wrap (see module docblock). */
 function renderBlastSection(
   summary: string,
   changedSymbols: ChangedSymbol[],
@@ -208,7 +226,7 @@ function renderBlastSection(
       : '(none)';
 
   return (
-    `## Blast radius\n${summary || '(no blast radius data — repo not indexed or nothing structurally affected)'}` +
+    `${summary || '(no blast radius data — repo not indexed or nothing structurally affected)'}` +
     `\n\nChanged symbols:\n${symbolLines}\n\nDownstream impact:\n${downstreamLines}`
   );
 }

@@ -61,8 +61,13 @@ export const FEATURE_MODELS: FeatureModelDef[] = [
     id: 'risk_brief',
     label: 'Risk Brief',
     description: 'Assesses merge risks for a pull request.',
-    defaultProvider: 'openai',
-    defaultModel: 'gpt-4.1',
+    // Was openai/gpt-4.1 — switched to match the other cheap-tier features
+    // (onboarding/review_intent/conventions) after generation failed in
+    // practice: the real OpenAI API rejects an OpenRouter-format key, and
+    // this repo's course-provided secrets only ever configure an
+    // OpenRouter key. Settings can still override per-workspace.
+    defaultProvider: 'openrouter',
+    defaultModel: 'deepseek/deepseek-v4-flash',
   },
   {
     id: 'conformance',
