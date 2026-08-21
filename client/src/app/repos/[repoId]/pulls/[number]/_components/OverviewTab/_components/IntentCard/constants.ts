@@ -11,12 +11,3 @@ export const EVIDENCE_TIER_COLOR: Record<EvidenceTier, { color: string; bg: stri
   ticket_only: { color: "var(--warn)", bg: "var(--warn-bg)" },
   indirect_only: { color: "var(--text-muted)", bg: "var(--bg-hover)" },
 };
-
-/**
- * Promoted to `lib/risk-severity.ts` — this feature made `RISK_SEVERITY_COLOR`
- * a genuine 3+-unrelated-folder consumer (`IntentCard`, `PrBriefBanner`,
- * `BlastRadiusCard`, `RiskBriefCard`), triggering the `frontend-ui-architecture`
- * skill's constants-promotion rule. Re-exported here so this folder's other
- * consumers don't need an import-path change.
- */
-export { RISK_SEVERITY_COLOR } from "@/lib/risk-severity";

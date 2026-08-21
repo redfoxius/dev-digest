@@ -73,14 +73,16 @@ describe("OverviewTab", () => {
       <OverviewTab
         prBody="Some PR description."
         prId="pr-1"
-        verdict="request_changes"
-        score={65}
-        findings={FINDINGS}
-        latestRunCostUsd={0.003}
+        reviewSummary={{
+          verdict: "request_changes",
+          score: 65,
+          findings: FINDINGS,
+          latestRunCostUsd: 0.003,
+        }}
         onOpenBlast={() => {}}
         onViewInDiff={() => {}}
         prFilePaths={new Set()}
-        onJumpToDiff={() => {}}
+        riskBrief={{ level: null, flaggedRefs: undefined, onJumpToDiff: () => {} }}
       />,
     );
     const order = Array.from(container.querySelectorAll("[data-testid], section")).map((el) =>
@@ -96,14 +98,11 @@ describe("OverviewTab", () => {
       <OverviewTab
         prBody={null}
         prId="pr-1"
-        verdict="approve"
-        score={100}
-        findings={FINDINGS}
-        latestRunCostUsd={0.01}
+        reviewSummary={{ verdict: "approve", score: 100, findings: FINDINGS, latestRunCostUsd: 0.01 }}
         onOpenBlast={() => {}}
         onViewInDiff={() => {}}
         prFilePaths={new Set()}
-        onJumpToDiff={() => {}}
+        riskBrief={{ level: null, flaggedRefs: undefined, onJumpToDiff: () => {} }}
       />,
     );
     expect(prBriefBannerMock).toHaveBeenCalledWith({
@@ -111,6 +110,7 @@ describe("OverviewTab", () => {
       score: 100,
       findings: FINDINGS,
       costUsd: 0.01,
+      riskLevel: null,
     });
   });
 
@@ -119,14 +119,11 @@ describe("OverviewTab", () => {
       <OverviewTab
         prBody={null}
         prId="pr-42"
-        verdict={null}
-        score={null}
-        findings={null}
-        latestRunCostUsd={null}
+        reviewSummary={{ verdict: null, score: null, findings: null, latestRunCostUsd: null }}
         onOpenBlast={() => {}}
         onViewInDiff={() => {}}
         prFilePaths={new Set()}
-        onJumpToDiff={() => {}}
+        riskBrief={{ level: null, flaggedRefs: undefined, onJumpToDiff: () => {} }}
       />,
     );
     expect(screen.getByTestId("intent-card")).toHaveTextContent("pr-42");
@@ -137,14 +134,11 @@ describe("OverviewTab", () => {
       <OverviewTab
         prBody={null}
         prId="pr-1"
-        verdict={null}
-        score={null}
-        findings={null}
-        latestRunCostUsd={null}
+        reviewSummary={{ verdict: null, score: null, findings: null, latestRunCostUsd: null }}
         onOpenBlast={() => {}}
         onViewInDiff={() => {}}
         prFilePaths={new Set()}
-        onJumpToDiff={() => {}}
+        riskBrief={{ level: null, flaggedRefs: undefined, onJumpToDiff: () => {} }}
       />,
     );
     expect(screen.queryByText("Description")).not.toBeInTheDocument();
@@ -157,14 +151,11 @@ describe("OverviewTab", () => {
       <OverviewTab
         prBody={null}
         prId="pr-1"
-        verdict={null}
-        score={null}
-        findings={null}
-        latestRunCostUsd={null}
+        reviewSummary={{ verdict: null, score: null, findings: null, latestRunCostUsd: null }}
         onOpenBlast={() => {}}
         onViewInDiff={() => {}}
         prFilePaths={new Set()}
-        onJumpToDiff={() => {}}
+        riskBrief={{ level: null, flaggedRefs: undefined, onJumpToDiff: () => {} }}
       />,
     );
     expect(screen.getByTestId("pr-brief-banner")).toBeInTheDocument();
@@ -184,14 +175,11 @@ describe("OverviewTab", () => {
       <OverviewTab
         prBody={null}
         prId="pr-1"
-        verdict={null}
-        score={null}
-        findings={null}
-        latestRunCostUsd={null}
+        reviewSummary={{ verdict: null, score: null, findings: null, latestRunCostUsd: null }}
         onOpenBlast={() => {}}
         onViewInDiff={onViewInDiff}
         prFilePaths={new Set()}
-        onJumpToDiff={onJumpToDiff}
+        riskBrief={{ level: null, flaggedRefs: undefined, onJumpToDiff }}
       />,
     );
 

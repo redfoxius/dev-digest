@@ -220,16 +220,20 @@ export default function PRDetailPage() {
           <OverviewTab
             prBody={pr.body}
             prId={prId}
-            verdict={pr.verdict}
-            score={pr.score}
-            findings={pr.findings}
-            latestRunCostUsd={pr.latest_run_cost_usd}
+            reviewSummary={{
+              verdict: pr.verdict,
+              score: pr.score,
+              findings: pr.findings,
+              latestRunCostUsd: pr.latest_run_cost_usd,
+            }}
             onOpenBlast={() => setTab("blast")}
             onViewInDiff={handleCallerClick}
             prFilePaths={inAppJumpFiles}
-            riskLevel={pr.risk_level}
-            flaggedRefs={flaggedRefs}
-            onJumpToDiff={handleViewInDiff}
+            riskBrief={{
+              level: pr.risk_level,
+              flaggedRefs,
+              onJumpToDiff: handleViewInDiff,
+            }}
           />
         )}
 

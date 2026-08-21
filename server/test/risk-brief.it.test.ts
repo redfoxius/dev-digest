@@ -159,7 +159,7 @@ d('risk-brief module (Testcontainers pg)', () => {
       git: new MockGitClient({ diff: opts.diff ?? DIFF }),
       github: new MockGitHubClient(),
     };
-    if (opts.llm) overrides.llm = { openai: opts.llm };
+    if (opts.llm) overrides.llm = { openrouter: opts.llm };
     return buildApp({ config, db: pg.handle.db, overrides });
   }
 
@@ -198,7 +198,7 @@ d('risk-brief module (Testcontainers pg)', () => {
   }
 
   it('AC-1 — GET with a persisted brief returns it verbatim, zero LLM calls', async () => {
-    const llm = new MockLLMProvider('openai', { structured: makeDerivationFixture() });
+    const llm = new MockLLMProvider('openrouter', { structured: makeDerivationFixture() });
     const app = await makeApp({ llm });
     const { pr } = await setupRepoAndPr();
     const fixture = makeRiskBriefFixture({ pr_head_sha: pr.headSha });
@@ -260,7 +260,7 @@ d('risk-brief module (Testcontainers pg)', () => {
   });
 
   it('AC-15 — an 11th POST within 60s from the same source returns 429 (real rate limiter)', async () => {
-    const llm = new MockLLMProvider('openai', { structured: makeDerivationFixture() });
+    const llm = new MockLLMProvider('openrouter', { structured: makeDerivationFixture() });
     const app = await makeApp({ llm, nodeEnv: 'development' });
     const { pr } = await setupRepoAndPr();
 
@@ -318,7 +318,7 @@ d('risk-brief module (Testcontainers pg)', () => {
         // fixture value asserted in isolation.
         review_focus: [{ file: 'src/config.ts', line: 11, reason: 'Hardcoded Stripe key committed here.' }],
       };
-      const llm = new MockLLMProvider('openai', { structured: derivation });
+      const llm = new MockLLMProvider('openrouter', { structured: derivation });
       const app = await makeApp({ llm });
       const { pr } = await setupRepoAndPr();
 
@@ -359,7 +359,7 @@ d('risk-brief module (Testcontainers pg)', () => {
       // MockLLMProvider with no `structured` fixture supplied defaults to
       // `{}`, which fails RiskBriefDerivation's schema — completeStructured
       // throws, exactly like a real schema-invalid/failed LLM response.
-      const llm = new MockLLMProvider('openai', {});
+      const llm = new MockLLMProvider('openrouter', {});
       const app = await makeApp({ llm });
       const { pr } = await setupRepoAndPr();
 
@@ -389,7 +389,7 @@ d('risk-brief module (Testcontainers pg)', () => {
       "return degraded_reason: 'input_too_large' with zero LLM calls, and leaves a " +
       'prior valid persisted brief in Postgres untouched',
     async () => {
-      const llm = new MockLLMProvider('openai', { structured: makeDerivationFixture() });
+      const llm = new MockLLMProvider('openrouter', { structured: makeDerivationFixture() });
       const app = await makeApp({ llm, diff: buildHugeDiff(3000) });
       const { pr } = await setupRepoAndPr();
 

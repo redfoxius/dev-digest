@@ -12,10 +12,15 @@ import { s } from "./styles";
 interface OverviewTabProps {
   prBody: string | null | undefined;
   prId: string | null | undefined;
-  verdict: Verdict | null | undefined;
-  score: number | null | undefined;
-  findings: { critical: number; warning: number; suggestion: number } | null | undefined;
-  latestRunCostUsd: number | null | undefined;
+  /** Grouped — all four fields are consumed exclusively by PrBriefBanner
+   *  (verdict/score/findings/cost), so they're threaded through OverviewTab
+   *  as one object rather than four separate flat props. */
+  reviewSummary: {
+    verdict: Verdict | null | undefined;
+    score: number | null | undefined;
+    findings: { critical: number; warning: number; suggestion: number } | null | undefined;
+    latestRunCostUsd: number | null | undefined;
+  };
   /** Switches the PR page to the full "Blast radius" tab — threaded through
    *  to BlastRadiusCard's "View full blast radius" action. */
   onOpenBlast: () => void;
@@ -27,24 +32,29 @@ interface OverviewTabProps {
    *  for whether the blast index's commit matches this PR's head SHA, not
    *  just raw diff membership) — anything else shows the GitHub icon. */
   prFilePaths: Set<string>;
-  /** PR Why + Risk Brief (specs/cross-cutting/pr-why-risk-brief), AC-23 —
-   *  threaded into PrBriefBanner's risk badge. Sourced from `page.tsx`'s
-   *  already-fetched `pr.risk_level` (`GET /pulls/:id`), not a new fetch
-   *  here. */
-  riskLevel?: RiskSeverity | null;
-  /** AC-24 — parent-derived map of a caller's `file` or an endpoint/cron
-   *  string to the highest-severity `RiskBrief.risks[]` entry citing it (or
-   *  the neutral `'flagged'` sentinel when only cited via `review_focus[]`),
-   *  threaded into BlastRadiusCard's flagged-dot indicator. */
-  flaggedRefs?: Map<string, RiskSeverity | "flagged">;
-  /** Jump to a `review_focus[]` entry's exact file:line in the
-   *  Files-changed tab — ALWAYS an in-app jump (AC-20), threaded into the
-   *  new RiskBriefCard. Deliberately distinct from `onViewInDiff` above,
-   *  which is bound to page.tsx's `handleCallerClick` and has a
-   *  GitHub-fallback branch for caller files outside this PR's diff —
-   *  Review Focus entries are server-validated to always be diff files and
-   *  must never fall back to GitHub. */
-  onJumpToDiff: (file: string, line: number) => void;
+  /** PR Why + Risk Brief (specs/cross-cutting/pr-why-risk-brief) — grouped
+   *  because all three fields are the same logical concern (the Risk Brief
+   *  feature) and get threaded into this tab's three risk-aware children. */
+  riskBrief: {
+    /** AC-23 — threaded into PrBriefBanner's risk badge. Sourced from
+     *  `page.tsx`'s already-fetched `pr.risk_level` (`GET /pulls/:id`), not
+     *  a new fetch here. */
+    level: RiskSeverity | null | undefined;
+    /** AC-24 — parent-derived map of a caller's `file` or an endpoint/cron
+     *  string to the highest-severity `RiskBrief.risks[]` entry citing it
+     *  (or the neutral `'flagged'` sentinel when only cited via
+     *  `review_focus[]`), threaded into BlastRadiusCard's flagged-dot
+     *  indicator. */
+    flaggedRefs: Map<string, RiskSeverity | "flagged"> | undefined;
+    /** Jump to a `review_focus[]` entry's exact file:line in the
+     *  Files-changed tab — ALWAYS an in-app jump (AC-20), threaded into the
+     *  new RiskBriefCard. Deliberately distinct from `onViewInDiff` above,
+     *  which is bound to page.tsx's `handleCallerClick` and has a
+     *  GitHub-fallback branch for caller files outside this PR's diff —
+     *  Review Focus entries are server-validated to always be diff files
+     *  and must never fall back to GitHub. */
+    onJumpToDiff: (file: string, line: number) => void;
+  };
 }
 
 // Kept free of any fetching logic (only threads props through) — the
@@ -56,25 +66,20 @@ interface OverviewTabProps {
 export function OverviewTab({
   prBody,
   prId,
-  verdict,
-  score,
-  findings,
-  latestRunCostUsd,
+  reviewSummary,
   onOpenBlast,
   onViewInDiff,
   prFilePaths,
-  riskLevel,
-  flaggedRefs,
-  onJumpToDiff,
+  riskBrief,
 }: OverviewTabProps) {
   return (
     <>
       <PrBriefBanner
-        verdict={verdict}
-        score={score}
-        findings={findings}
-        costUsd={latestRunCostUsd}
-        riskLevel={riskLevel}
+        verdict={reviewSummary.verdict}
+        score={reviewSummary.score}
+        findings={reviewSummary.findings}
+        costUsd={reviewSummary.latestRunCostUsd}
+        riskLevel={riskBrief.level}
       />
 
       <IntentCard prId={prId} />
@@ -84,10 +89,10 @@ export function OverviewTab({
         onViewFull={onOpenBlast}
         onViewInDiff={onViewInDiff}
         prFilePaths={prFilePaths}
-        flaggedRefs={flaggedRefs}
+        flaggedRefs={riskBrief.flaggedRefs}
       />
 
-      <RiskBriefCard prId={prId} onViewInDiff={onJumpToDiff} />
+      <RiskBriefCard prId={prId} onViewInDiff={riskBrief.onJumpToDiff} />
 
       {prBody && (
         <section>
