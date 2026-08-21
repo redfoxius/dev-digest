@@ -31,5 +31,34 @@
       "ticket_only": "Inferred from a linked issue/ticket only — no PR description",
       "indirect_only": "Inferred from branch/commits/file names only — low confidence"
     }
+  },
+  "riskBriefCard": {
+    "title": "Risk Brief",
+    "emptyTitle": "No risk brief yet",
+    "emptyBody": "Generate a composed Why + Risk Brief from this PR's intent, blast radius, diff stats, and linked issue.",
+    "generate": "Generate risk brief",
+    "regenerate": "Regenerate",
+    "regenerating": "Regenerating…",
+    "loadError": "Couldn't load the risk brief",
+    "loadErrorBody": "Failed to load the persisted risk brief for this PR.",
+    "riskLevel": {
+      "high": "High risk",
+      "medium": "Medium risk",
+      "low": "Low risk"
+    },
+    "risks": "Risks",
+    "noRisks": "No notable risks flagged.",
+    "reviewFocus": "Review focus — read these first",
+    "noReviewFocus": "No specific review focus flagged.",
+    "degraded": {
+      "llm_failed": {
+        "title": "Couldn't generate a risk brief",
+        "body": "The model call failed, timed out, or returned an invalid response. Try again."
+      },
+      "input_too_large": {
+        "title": "This PR is too large to summarize",
+        "body": "Even after trimming optional context, this PR's diff and metadata still exceed the risk brief's input budget."
+      }
+    }
   }
 }

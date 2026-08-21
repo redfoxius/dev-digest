@@ -78,6 +78,44 @@ export const BlastRadius = z.object({
 });
 export type BlastRadius = z.infer<typeof BlastRadius>;
 
+// ---- Risk Brief ----
+// Declared after Risk/RiskSeverity (risks[] reuses Risk) and after
+// BlastRadius (ordering not load-bearing here, but keeps this block after
+// every building block it conceptually composes) — see the TDZ-ordering note
+// atop this file.
+export const ReviewFocusItem = z.object({
+  /** Always one of the PR's diff file paths (server-validated). */
+  file: z.string(),
+  /** Always within a real hunk's new-line range for `file` (server-validated). */
+  line: z.number().int(),
+  reason: z.string(),
+});
+export type ReviewFocusItem = z.infer<typeof ReviewFocusItem>;
+
+export const RiskBrief = z.object({
+  what: z.string().max(600),
+  why: z.string().max(600),
+  /** Model-judged directly — never aggregated server-side from risks[].severity. */
+  risk_level: RiskSeverity,
+  risks: z.array(Risk).max(8),
+  review_focus: z.array(ReviewFocusItem).max(8),
+  /** Cache-freshness fingerprint — the PR's head_sha at generation time. */
+  pr_head_sha: z.string(),
+  provider: z.string(),
+  model: z.string(),
+  generated_at: z.string(),
+});
+export type RiskBrief = z.infer<typeof RiskBrief>;
+
+/** POST /pulls/:id/brief response shape — always populated, never a bare
+ * error for an LLM-side failure. */
+export const RiskBriefGenerateResult = z.object({
+  brief: RiskBrief.nullable(),
+  cached: z.boolean().optional(),
+  degraded_reason: z.enum(['llm_failed', 'input_too_large']).optional(),
+});
+export type RiskBriefGenerateResult = z.infer<typeof RiskBriefGenerateResult>;
+
 // ---- PR History ----
 export const PrHistoryItem = z.object({
   pr_number: z.number().int(),
