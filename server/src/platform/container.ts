@@ -37,9 +37,30 @@ import type { IntentDeriver } from '../modules/intent/types.js';
 import { IntentDeriverService } from '../modules/intent/service.js';
 import type { PullsSync } from '../modules/pulls/service.js';
 import { PullsSyncService } from '../modules/pulls/service.js';
+import type { PullRow } from '../modules/reviews/repository.js';
+import { loadDiff } from '../modules/reviews/diff-loader.js';
+import type * as schema from '../db/schema.js';
+import type { UnifiedDiff } from '@devdigest/shared';
 import type { DepGraph } from '../adapters/depgraph/index.js';
 import { UnionDepGraph } from '../adapters/depgraph/union.js';
 import { type Tokenizer, TiktokenTokenizer } from '../adapters/tokenizer/index.js';
+
+/**
+ * `diff-loader.ts`'s `loadDiff` wrapped as a container capability (see the
+ * `diffLoader` getter below) — the function itself already takes a
+ * `Container` as its first argument, so this just binds `this` and exposes
+ * the rest of the signature as a `.load(...)` method, mirroring how
+ * `repoIntel`/`intentDeriver`/`pullsSync` expose an interface rather than a
+ * bare function.
+ */
+export interface DiffLoader {
+  load(
+    repo: ReviewRepository,
+    workspaceId: string,
+    pull: PullRow,
+    repoRow: typeof schema.repos.$inferSelect,
+  ): Promise<UnifiedDiff>;
+}
 
 /**
  * DI container. One per app instance. Holds config, db, the JobRunner,
@@ -63,6 +84,8 @@ export interface ContainerOverrides {
   intentDeriver?: IntentDeriver;
   /** Layer 2 PR diff self-heal — tests inject mock PullsSync implementations. */
   pullsSync?: PullsSync;
+  /** PR diff loading (`diff-loader.ts`'s `loadDiff`) — tests inject mock DiffLoader implementations. */
+  diffLoader?: DiffLoader;
   /** repo-intel T3 adapters — only the indexer pipeline reads these. */
   depgraph?: DepGraph;
   tokenizer?: Tokenizer;
@@ -96,6 +119,7 @@ export class Container {
   private _repoIntel?: RepoIntel;
   private _intentDeriver?: IntentDeriver;
   private _pullsSync?: PullsSync;
+  private _diffLoader?: DiffLoader;
   private _depgraph?: DepGraph;
   private _tokenizer?: Tokenizer;
   private _priceBook?: PriceBook;
@@ -197,6 +221,27 @@ export class Container {
     if (this.overrides.pullsSync) return this.overrides.pullsSync;
     this._pullsSync ??= new PullsSyncService(this);
     return this._pullsSync;
+  }
+
+  /**
+   * PR diff loading with self-heal (docs/pr-diff-reindex-plan.md) —
+   * `diff-loader.ts`'s `loadDiff` composes `container.git`,
+   * `container.pullsSync`, and a `ReviewRepository` to produce a PR's
+   * unified diff. Modeled on `repoIntel`/`intentDeriver`/`pullsSync` above:
+   * wired here so cross-module consumers (e.g. `risk-brief/service.ts`) use
+   * `container.diffLoader.load(...)` instead of importing `diff-loader.ts`
+   * directly from another module's folder, and so it stays swappable via
+   * `ContainerOverrides` in unit tests. `reviews/service.ts` — `loadDiff`'s
+   * own module — keeps calling it directly; same-module direct use is the
+   * established, correct pattern (mirrors `RiskBriefRepository`'s own-module
+   * construction above).
+   */
+  get diffLoader(): DiffLoader {
+    if (this.overrides.diffLoader) return this.overrides.diffLoader;
+    this._diffLoader ??= {
+      load: (repo, workspaceId, pull, repoRow) => loadDiff(this, repo, workspaceId, pull, repoRow),
+    };
+    return this._diffLoader;
   }
 
   /** Import-graph builder (dependency-cruiser). T3 indexer pipeline only. */

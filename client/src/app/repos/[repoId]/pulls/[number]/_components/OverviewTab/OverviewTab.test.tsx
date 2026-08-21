@@ -65,11 +65,17 @@ function renderWithIntl(ui: React.ReactElement) {
   );
 }
 
+/** Returns true if `a` appears before `b` in document order. Mirrors
+ *  IntentCard.test.tsx's `isBefore` helper. */
+function isBefore(a: Element, b: Element): boolean {
+  return !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+}
+
 const FINDINGS = { critical: 1, warning: 2, suggestion: 3 };
 
 describe("OverviewTab", () => {
   it("renders PrBriefBanner above IntentCard, above Description", () => {
-    const { container } = renderWithIntl(
+    renderWithIntl(
       <OverviewTab
         prBody="Some PR description."
         prId="pr-1"
@@ -85,12 +91,12 @@ describe("OverviewTab", () => {
         riskBrief={{ level: null, flaggedRefs: undefined, onJumpToDiff: () => {} }}
       />,
     );
-    const order = Array.from(container.querySelectorAll("[data-testid], section")).map((el) =>
-      el.getAttribute("data-testid") ?? el.tagName,
-    );
-    expect(order.indexOf("pr-brief-banner")).toBeLessThan(order.indexOf("intent-card"));
-    expect(order.indexOf("intent-card")).toBeLessThan(order.indexOf("SECTION"));
-    expect(screen.getByText("Some PR description.")).toBeInTheDocument();
+    const prBriefBannerEl = screen.getByTestId("pr-brief-banner");
+    const intentCardEl = screen.getByTestId("intent-card");
+    const descriptionEl = screen.getByText("Some PR description.");
+
+    expect(isBefore(prBriefBannerEl, intentCardEl)).toBe(true);
+    expect(isBefore(intentCardEl, descriptionEl)).toBe(true);
   });
 
   it("threads verdict/score/findings/latestRunCostUsd into PrBriefBanner unchanged", () => {

@@ -4,7 +4,6 @@ import { RiskSeverity } from '@devdigest/shared';
 import type { Container } from '../../platform/container.js';
 import { NotFoundError } from '../../platform/errors.js';
 import { resolveFeatureModel } from '../settings/feature-models.js';
-import { loadDiff } from '../reviews/diff-loader.js';
 import type { Logger } from '../reviews/run-executor.js';
 import { BlastService } from '../blast/service.js';
 import { ContextDocsService } from '../context-docs/service.js';
@@ -129,7 +128,9 @@ export class RiskBriefService {
     // minimum-required input (AC-9) and the source of Review Focus grounding
     // (AC-10/AC-11) — a genuine diff failure should surface loudly, same as
     // `deriveIntent`'s own treatment of `loadDiff`'s `DiffUnavailableError`.
-    const diff = await loadDiff(this.container, this.container.reviewRepo, workspaceId, pull, repoRow);
+    // Consumed via `container.diffLoader` (not a direct cross-module import
+    // of `reviews/diff-loader.ts`) — see `platform/container.ts`.
+    const diff = await this.container.diffLoader.load(this.container.reviewRepo, workspaceId, pull, repoRow);
     const linkedIssue = await this.fetchLinkedIssue(pull.body, repoRow, log);
     const relevantSpecs = await this.fetchRelevantSpecs(repoRow.id, intent, pull.title, log);
 
