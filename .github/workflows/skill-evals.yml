@@ -1,0 +1,49 @@
+# Skill evals — regression gate for `.claude/skills/<name>/evals/evals.json`.
+#
+# Runs each skill's evals through the real `claude` CLI (scripts/run-skill-evals.mjs):
+# a headless review pass with only Read/Glob/Skill allowed (so triggering is
+# natural, not forced), graded against each eval's `expectations` by a second
+# `claude -p` call. There's no baseline file — every expectation is a
+# ground-truth fact about its fixture, so any expectation that fails to hold
+# *is* the regression. See .claude/skills/zod/evals/evals.json for the current
+# suite; .claude/skills/zod-workspace/ (gitignored) holds ad-hoc run output.
+name: skill evals
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.claude/skills/**/evals/**'
+      - 'scripts/run-skill-evals.mjs'
+      - '.github/workflows/skill-evals.yml'
+  pull_request:
+    paths:
+      - '.claude/skills/**/evals/**'
+      - 'scripts/run-skill-evals.mjs'
+      - '.github/workflows/skill-evals.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: skill-evals-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  evals:
+    name: run skill evals
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install claude CLI
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Run skill evals
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: node scripts/run-skill-evals.mjs

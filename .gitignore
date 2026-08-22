@@ -26,3 +26,7 @@ test-results/
 
 # ad-hoc mockups/screenshots dropped in for a planning session — never committed
 working-screenshots/
+
+# skill-creator eval run output (transcripts, grading, benchmarks, viewer HTML) —
+# regenerated on every eval run; the actual test cases live in .claude/skills/<name>/evals/
+.claude/skills/*-workspace/
