@@ -20,6 +20,8 @@ import { usePullDetail, usePulls } from "../../../../../lib/hooks";
 import { useQueryClient } from "@tanstack/react-query";
 import { usePrReviews, useCancelRun, usePrActiveRuns, usePrRuns, useDeleteRun } from "../../../../../lib/hooks/reviews";
 import { usePrBlastRadius } from "@/lib/hooks/blast";
+import { usePrRiskBrief } from "@/lib/hooks/risk-brief";
+import { buildFlaggedRefsMap } from "@/lib/risk-brief-helpers";
 import { useActiveRepo, useRepoNotFound } from "../../../../../lib/repo-context";
 import { ApiError } from "../../../../../lib/api";
 import { githubPrUrl, githubBlobUrl } from "../../../../../lib/github-urls";
@@ -119,6 +121,17 @@ export default function PRDetailPage() {
     [pr?.files],
   );
   const blastMatchesDiffSnapshot = !!blastData?.indexed_sha && !!pr && blastData.indexed_sha === pr.head_sha;
+
+  // PR Why + Risk Brief (specs/cross-cutting/pr-why-risk-brief) — same
+  // `["pr-risk-brief", prId]` query key `RiskBriefCard`/`IntentCard`
+  // self-fetch, so React Query dedupes to one network call. Derives the
+  // BlastRadiusCard flagged-dot map here (AC-24) rather than inside that
+  // card, per its own "parent-derived, no new data-fetch inside" contract.
+  const { data: riskBrief } = usePrRiskBrief(prId);
+  const flaggedRefs = React.useMemo(
+    () => (riskBrief ? buildFlaggedRefsMap(riskBrief.risks, riskBrief.review_focus) : undefined),
+    [riskBrief],
+  );
   // What onViewInDiff below will actually treat as an in-app jump — empty
   // whenever the blast index doesn't match this PR's exact head SHA, even
   // though those files are technically in `pr.files` (see
@@ -207,13 +220,20 @@ export default function PRDetailPage() {
           <OverviewTab
             prBody={pr.body}
             prId={prId}
-            verdict={pr.verdict}
-            score={pr.score}
-            findings={pr.findings}
-            latestRunCostUsd={pr.latest_run_cost_usd}
+            reviewSummary={{
+              verdict: pr.verdict,
+              score: pr.score,
+              findings: pr.findings,
+              latestRunCostUsd: pr.latest_run_cost_usd,
+            }}
             onOpenBlast={() => setTab("blast")}
             onViewInDiff={handleCallerClick}
             prFilePaths={inAppJumpFiles}
+            riskBrief={{
+              level: pr.risk_level,
+              flaggedRefs,
+              onJumpToDiff: handleViewInDiff,
+            }}
           />
         )}
 

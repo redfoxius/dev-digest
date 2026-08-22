@@ -184,6 +184,11 @@ export class MockGitHubClient implements GitHubClient {
         { sha: 'a1b2c3d4', message: 'Add limiter', author: 'marisa.koch', committed_at: null },
       ],
       linked_issue: null,
+      // Mirrors octokit.ts: this mock builds a raw GitHub-detail payload, not
+      // the `GET /pulls/:id` route response — the route's shared `prBrief`
+      // aggregate (sourced from `RiskBriefRepository`) is what actually
+      // supplies `risk_level` to callers, overwriting this placeholder.
+      risk_level: null,
     };
     return { ...base, ...this.opts.detail };
   }

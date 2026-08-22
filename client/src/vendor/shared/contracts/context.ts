@@ -54,6 +54,6 @@ export type SkillContextDocLink = z.infer<typeof SkillContextDocLink>;
 
 // ---- Per-repo search-root config ----
 export const ContextSearchConfig = z.object({
-  globs: z.array(z.string()),
+  excludes: z.array(z.string()),
 });
 export type ContextSearchConfig = z.infer<typeof ContextSearchConfig>;

@@ -88,7 +88,7 @@ const SKILL_LINKS: SkillContextDocLink[] = [
   { path: "specs/public-api.md", order: 0, enabled: false, document: DOC },
 ];
 
-const CONFIG: ContextSearchConfig = { globs: ["**/{specs,docs,insights}/**/*.md"] };
+const CONFIG: ContextSearchConfig = { excludes: ["**/{specs,docs,insights}/**/*.md"] };
 
 describe("useContextDocs", () => {
   it("fetches GET /repos/:repoId/context-docs", async () => {
@@ -205,34 +205,38 @@ describe("useContextConfig", () => {
 });
 
 describe("useSetContextConfig", () => {
-  it("PUTs { globs } to /repos/:repoId/context-config and seeds the config cache", async () => {
+  it("PUTs { excludes } to /repos/:repoId/context-config and seeds the config cache", async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(CONFIG));
     vi.stubGlobal("fetch", fetchMock);
     const { qc, wrapper } = makeWrapper();
 
     const { result } = renderHook(() => useSetContextConfig("r1"), { wrapper });
-    result.current.mutate(CONFIG.globs);
+    result.current.mutate(CONFIG.excludes);
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe("http://localhost:3001/repos/r1/context-config");
     expect(init.method).toBe("PUT");
-    expect(JSON.parse(init.body as string)).toEqual({ globs: CONFIG.globs });
+    expect(JSON.parse(init.body as string)).toEqual({ excludes: CONFIG.excludes });
     expect(qc.getQueryData(["context-config", "r1"])).toEqual(CONFIG);
   });
 
-  it("surfaces a 422 escaping-glob rejection as an ApiError", async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValue(jsonResponse({ error: { message: "glob escapes clonePath" } }, 422));
+  it("persists a clonePath-escaping-looking exclude pattern (excludes can only narrow, never widen, an already-bounded scan)", async () => {
+    const escapingConfig: ContextSearchConfig = { excludes: ["../../etc/**/*.md"] };
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(escapingConfig));
     vi.stubGlobal("fetch", fetchMock);
-    const { wrapper } = makeWrapper();
+    const { qc, wrapper } = makeWrapper();
 
     const { result } = renderHook(() => useSetContextConfig("r1"), { wrapper });
     result.current.mutate(["../../etc/**/*.md"]);
 
-    await waitFor(() => expect(result.current.isError).toBe(true));
-    expect((result.current.error as Error).message).toBe("glob escapes clonePath");
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("http://localhost:3001/repos/r1/context-config");
+    expect(init.method).toBe("PUT");
+    expect(JSON.parse(init.body as string)).toEqual({ excludes: ["../../etc/**/*.md"] });
+    expect(result.current.data).toEqual(escapingConfig);
+    expect(qc.getQueryData(["context-config", "r1"])).toEqual(escapingConfig);
   });
 });
 

@@ -33,6 +33,24 @@ export {
 // Citation grounding — the mandatory mechanical gate for diff findings.
 export { groundFindings, groundingSummary, type GroundingResult } from './grounding.js';
 
+// Risk Brief — input assembly + token-budget trimming (pure; see module
+// docblock for why this lives here rather than in `server/src/modules/`).
+export {
+  assembleRiskBriefInput,
+  type RiskBriefInputFacts,
+  type RiskBriefAssembledInput,
+} from './risk-brief/prompt.js';
+
+// Risk Brief — grounding + output bounding (pure; server injects its own
+// `RiskBriefOutputLimits` config into `boundRiskBriefOutput`).
+export {
+  filterRiskRefs,
+  filterReviewFocus,
+  boundRiskBriefOutput,
+  type BoundedRiskBriefOutput,
+  type RiskBriefOutputLimits,
+} from './risk-brief/grounding.js';
+
 // Structured-output helpers (Zod → JSON Schema + parse-with-repair).
 export {
   toJsonSchema,
