@@ -346,7 +346,7 @@ d('SmartDiffService.getSmartDiff — real DB-backed wiring (Testcontainers pg)',
 
       expect(result.split_suggestion.proposed_splits).toEqual([
         { name: 'src/api', files: ['src/api/handler.ts', 'src/api/router.ts'] },
-        { name: 'src/other', files: ['src/other/isolated.ts'] },
+        { name: 'isolated.ts', files: ['src/other/isolated.ts'] },
       ]);
     },
   );
