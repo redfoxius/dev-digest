@@ -95,8 +95,8 @@ export function useContextDocPreview(repoId: string | null | undefined, path: st
   });
 }
 
-/** Per-repo search-root glob config; unset repos fall back to the server's
-   default glob. */
+/** Per-repo search-root exclude-pattern config; unset repos fall back to the
+   server's default excludes. */
 export function useContextConfig(repoId: string | null | undefined) {
   return useQuery({
     queryKey: ["context-config", repoId],
@@ -105,14 +105,14 @@ export function useContextConfig(repoId: string | null | undefined) {
   });
 }
 
-/** Persists the search-root globs (`422` on an escaping glob, AC-7); takes
-   effect on the next reindex, not retroactively — callers don't need to
-   invalidate `context-docs` here. */
+/** Persists the search-root exclude patterns (`422` on an empty/whitespace-
+   only pattern, AC-7); takes effect on the next reindex, not retroactively —
+   callers don't need to invalidate `context-docs` here. */
 export function useSetContextConfig(repoId: string | null | undefined) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (globs: string[]) =>
-      api.put<ContextSearchConfig>(`/repos/${repoId}/context-config`, { globs }),
+    mutationFn: (excludes: string[]) =>
+      api.put<ContextSearchConfig>(`/repos/${repoId}/context-config`, { excludes }),
     onSuccess: (data) => {
       qc.setQueryData(["context-config", repoId], data);
     },
