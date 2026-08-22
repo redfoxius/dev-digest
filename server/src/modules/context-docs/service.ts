@@ -8,7 +8,7 @@ import type {
 } from '@devdigest/shared';
 import { ConfigError, NotFoundError } from '../../platform/errors.js';
 import { ContextDocsRepository, type ContextDocumentRow } from './repository.js';
-import { DEFAULT_CONTEXT_GLOBS, discoverContextDocs } from './reader.js';
+import { DEFAULT_CONTEXT_EXCLUDES, discoverContextDocs } from './reader.js';
 import { chunkMarkdown } from './chunker.js';
 import { rankBySimilarity, type RankedChunk } from './similarity.js';
 
@@ -17,7 +17,7 @@ import { rankBySimilarity, type RankedChunk } from './similarity.js';
  * business logic (spec §6.1-6.4, `docs/project-context-folder-plan.md` Work
  * Items 3, 4, 5, 6). No HTTP and no `drizzle-orm` import here — persistence
  * goes through `ContextDocsRepository`; cross-module reads (`repos.clonePath`
- * / `repos.context_search_globs`) go through `container.reposRepo`, never a
+ * / `repos.context_search_excludes`) go through `container.reposRepo`, never a
  * direct `schema.repos` query (onion-architecture "Anti-Patterns").
  */
 
@@ -75,8 +75,8 @@ export class ContextDocsService {
     const repoRow = await this.getOwnedRepo(workspaceId, repoId);
     if (!repoRow.clonePath) return this.notIndexedResult();
 
-    const globs = repoRow.contextSearchGlobs?.length ? repoRow.contextSearchGlobs : DEFAULT_CONTEXT_GLOBS;
-    const discovered = await discoverContextDocs(repoRow.clonePath, globs);
+    const excludes = repoRow.contextSearchExcludes ?? DEFAULT_CONTEXT_EXCLUDES;
+    const discovered = await discoverContextDocs(repoRow.clonePath, excludes);
 
     const existingRows = await this.repo.listByRepo(repoId);
     const existingByPath = new Map(existingRows.map((r) => [r.path, r]));
@@ -151,16 +151,16 @@ export class ContextDocsService {
   /** GET /repos/:repoId/context-config */
   async getConfig(workspaceId: string, repoId: string): Promise<ContextSearchConfig> {
     const repoRow = await this.getOwnedRepo(workspaceId, repoId);
-    return { globs: repoRow.contextSearchGlobs?.length ? repoRow.contextSearchGlobs : DEFAULT_CONTEXT_GLOBS };
+    return { excludes: repoRow.contextSearchExcludes ?? DEFAULT_CONTEXT_EXCLUDES };
   }
 
   /** PUT /repos/:repoId/context-config — the route's zod schema already
-   *  rejected any escaping glob with a 422 before this runs (AC-7). */
-  async setConfig(workspaceId: string, repoId: string, globs: string[]): Promise<ContextSearchConfig> {
+   *  rejected any empty/whitespace-only pattern with a 422 before this runs (AC-7). */
+  async setConfig(workspaceId: string, repoId: string, excludes: string[]): Promise<ContextSearchConfig> {
     await this.getOwnedRepo(workspaceId, repoId);
-    const updated = await this.container.reposRepo.updateContextSearchGlobs(workspaceId, repoId, globs);
+    const updated = await this.container.reposRepo.updateContextSearchExcludes(workspaceId, repoId, excludes);
     if (!updated) throw new NotFoundError('Repo not found');
-    return { globs: updated.contextSearchGlobs?.length ? updated.contextSearchGlobs : DEFAULT_CONTEXT_GLOBS };
+    return { excludes: updated.contextSearchExcludes ?? DEFAULT_CONTEXT_EXCLUDES };
   }
 
   /** GET /repos/:repoId/context-docs/preview?path=... — read-only; no

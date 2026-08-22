@@ -64,7 +64,7 @@ const repoRow = {
   fullName: 'acme/widgets',
   defaultBranch: 'main',
   clonePath: '/clones/acme-widgets',
-  contextSearchGlobs: null,
+  contextSearchExcludes: null,
   lastPolledAt: null,
   createdBy: null,
   createdAt: new Date('2026-01-01T00:00:00Z'),
