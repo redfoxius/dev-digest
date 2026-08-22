@@ -1,7 +1,7 @@
 ---
 name: onion-architecture
 description: "Forces the Onion/Ports-and-Adapters dependency rule for backend code in server/ and reviewer-core/: dependencies point inward only, business logic never imports infrastructure (Drizzle, Fastify, Octokit, LLM SDKs) directly, and every external dependency crosses a port interface wired in one composition root. Use when adding a new backend module, adding a new external integration/adapter, reviewing a service/route/repository for layering violations, or deciding where new backend logic belongs. Architecture and dependency direction only — NOT Fastify request-lifecycle mechanics (see fastify-best-practices) and NOT Drizzle query/schema mechanics (see drizzle-orm-patterns)."
-version: "1.0.0"
+version: "1.1.0"
 ---
 
 # Onion Architecture (Backend)
@@ -154,6 +154,21 @@ worked example of the innermost ring:
 - New pure business-rule logic (scoring, grounding, prompt shaping) belongs
   here, not in `server/src/modules/*/service.ts`, if it can be expressed with
   zero I/O beyond an injected provider.
+
+## Filesystem Ownership Per Module (HIGH)
+
+- Within a `modules/<name>/` plugin, filesystem access to a project's cloned
+  working tree (reading files, walking directories) is owned by exactly one
+  designated file, the same way `repository.ts` is the only file allowed to
+  import `drizzle-orm` for that domain. For `context-docs`, that file is
+  `reader.ts` (`discoverContextDocs`, the only place `node:fs`/
+  `node:fs/promises` is imported for that module).
+- `service.ts` orchestrates the use case and calls into the module's
+  FS-owning file — it never imports `node:fs`/`node:fs/promises`/`node:path`
+  to read repo content itself, even for a "just this once" or debug-only
+  read. Treat that exactly like `service.ts` importing `drizzle-orm`
+  directly: push the read into the designated reader/repository file
+  instead of inlining it, regardless of how the change is described.
 
 ## Contracts as the Cross-Ring Language (HIGH)
 
