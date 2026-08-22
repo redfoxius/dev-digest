@@ -8,15 +8,16 @@ import type {
 } from '@devdigest/shared';
 import { ConfigError, NotFoundError } from '../../platform/errors.js';
 import { ContextDocsRepository, type ContextDocumentRow } from './repository.js';
-import { DEFAULT_CONTEXT_GLOBS, discoverContextDocs } from './reader.js';
+import { DEFAULT_CONTEXT_EXCLUDES, discoverContextDocs } from './reader.js';
 import { chunkMarkdown } from './chunker.js';
+import { rankBySimilarity, type RankedChunk } from './similarity.js';
 
 /**
  * Project Context Folder — reader/reindex, search-root config, and browser
  * business logic (spec §6.1-6.4, `docs/project-context-folder-plan.md` Work
  * Items 3, 4, 5, 6). No HTTP and no `drizzle-orm` import here — persistence
  * goes through `ContextDocsRepository`; cross-module reads (`repos.clonePath`
- * / `repos.context_search_globs`) go through `container.reposRepo`, never a
+ * / `repos.context_search_excludes`) go through `container.reposRepo`, never a
  * direct `schema.repos` query (onion-architecture "Anti-Patterns").
  */
 
@@ -74,8 +75,8 @@ export class ContextDocsService {
     const repoRow = await this.getOwnedRepo(workspaceId, repoId);
     if (!repoRow.clonePath) return this.notIndexedResult();
 
-    const globs = repoRow.contextSearchGlobs?.length ? repoRow.contextSearchGlobs : DEFAULT_CONTEXT_GLOBS;
-    const discovered = await discoverContextDocs(repoRow.clonePath, globs);
+    const excludes = repoRow.contextSearchExcludes ?? DEFAULT_CONTEXT_EXCLUDES;
+    const discovered = await discoverContextDocs(repoRow.clonePath, excludes);
 
     const existingRows = await this.repo.listByRepo(repoId);
     const existingByPath = new Map(existingRows.map((r) => [r.path, r]));
@@ -150,16 +151,16 @@ export class ContextDocsService {
   /** GET /repos/:repoId/context-config */
   async getConfig(workspaceId: string, repoId: string): Promise<ContextSearchConfig> {
     const repoRow = await this.getOwnedRepo(workspaceId, repoId);
-    return { globs: repoRow.contextSearchGlobs?.length ? repoRow.contextSearchGlobs : DEFAULT_CONTEXT_GLOBS };
+    return { excludes: repoRow.contextSearchExcludes ?? DEFAULT_CONTEXT_EXCLUDES };
   }
 
   /** PUT /repos/:repoId/context-config — the route's zod schema already
-   *  rejected any escaping glob with a 422 before this runs (AC-7). */
-  async setConfig(workspaceId: string, repoId: string, globs: string[]): Promise<ContextSearchConfig> {
+   *  rejected any empty/whitespace-only pattern with a 422 before this runs (AC-7). */
+  async setConfig(workspaceId: string, repoId: string, excludes: string[]): Promise<ContextSearchConfig> {
     await this.getOwnedRepo(workspaceId, repoId);
-    const updated = await this.container.reposRepo.updateContextSearchGlobs(workspaceId, repoId, globs);
+    const updated = await this.container.reposRepo.updateContextSearchExcludes(workspaceId, repoId, excludes);
     if (!updated) throw new NotFoundError('Repo not found');
-    return { globs: updated.contextSearchGlobs?.length ? updated.contextSearchGlobs : DEFAULT_CONTEXT_GLOBS };
+    return { excludes: updated.contextSearchExcludes ?? DEFAULT_CONTEXT_EXCLUDES };
   }
 
   /** GET /repos/:repoId/context-docs/preview?path=... — read-only; no
@@ -175,6 +176,29 @@ export class ContextDocsService {
     if (content === null) throw new NotFoundError('Document not found');
 
     return { path, content };
+  }
+
+  /**
+   * Top-K cosine-similarity search over indexed Project Context chunks
+   * (`specs/cross-cutting/pr-why-risk-brief` spec §6.2a/AC-29) — new
+   * capability, no prior consumer. Not workspace-scoped/ownership-checked
+   * here: this is an internal read a future caller (the Risk Brief
+   * service) already resolves a `repoId` for via its own ownership check
+   * (mirrors `resolveEmbedStatus()`'s own status-only, no-ownership-check
+   * shape) — no route exposes this method directly (spec §12 — "no public
+   * search route").
+   *
+   * Degrades to `[]` (never throws, never blocks a caller) whenever
+   * embeddings aren't `'ready'` — mirrors this same class's `reindex()`/
+   * `list()` treatment of `resolveEmbedStatus()`.
+   */
+  async search(repoId: string, query: string, k: number): Promise<RankedChunk[]> {
+    const embedResolution = await this.resolveEmbedStatus();
+    if (embedResolution.status !== 'ready') return [];
+
+    const [queryEmbedding] = await embedResolution.embedder.embed([query]);
+    const chunks = await this.repo.getEmbeddedChunks(repoId);
+    return rankBySimilarity(queryEmbedding!, chunks, k);
   }
 
   /** Ownership check mirroring the existing `GET /pulls/:id/blast` pattern

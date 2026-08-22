@@ -15,6 +15,7 @@ import { SkillsRepository } from '../src/modules/skills/repository.js';
 import type { Db } from '../src/db/client.js';
 import type { ContainerOverrides } from '../src/platform/container.js';
 import { MAX_INDEXABLE_BYTES } from '../src/modules/context-docs/service.js';
+import { DEFAULT_CONTEXT_EXCLUDES } from '../src/modules/context-docs/reader.js';
 
 const hasDocker = await dockerAvailable();
 const d = hasDocker ? describe : describe.skip;
@@ -76,7 +77,7 @@ d('context-docs module', () => {
   async function makeRepo(
     db: Db,
     fullName: string,
-    opts: { ws?: string; clonePath?: string | null; contextSearchGlobs?: string[] | null } = {},
+    opts: { ws?: string; clonePath?: string | null; contextSearchExcludes?: string[] | null } = {},
   ) {
     const [owner, name] = fullName.split('/');
     const [row] = await db
@@ -87,7 +88,7 @@ d('context-docs module', () => {
         name: name!,
         fullName,
         clonePath: opts.clonePath ?? null,
-        contextSearchGlobs: opts.contextSearchGlobs ?? null,
+        contextSearchExcludes: opts.contextSearchExcludes ?? null,
       })
       .returning();
     return row!;
@@ -192,16 +193,16 @@ d('context-docs module', () => {
   });
 
   describe('context-config', () => {
-    it('AC-5: a fresh repo returns the literal default glob', async () => {
+    it('AC-5: a fresh repo returns the literal default excludes', async () => {
       const app = await makeApp();
       const repo = await makeRepo(pg.handle.db, 'acme/config-default');
       const res = await app.inject({ method: 'GET', url: `/repos/${repo.id}/context-config` });
       expect(res.statusCode).toBe(200);
-      expect(res.json()).toEqual({ globs: ['**/{specs,docs,insights}/**/*.md'] });
+      expect(res.json()).toEqual({ excludes: DEFAULT_CONTEXT_EXCLUDES });
       await app.close();
     });
 
-    it('AC-6: PUT persists a custom glob scoped to that repo only, taking effect on next reindex', async () => {
+    it('AC-6: PUT persists a custom exclude scoped to that repo only, taking effect on next reindex', async () => {
       const app = await makeApp();
       const clonePathA = await makeFixtureClone({ 'guides/only.md': '# Only', 'docs/ignored.md': '# Ignored' });
       const clonePathB = await makeFixtureClone({ 'docs/untouched.md': '# Untouched' });
@@ -211,36 +212,116 @@ d('context-docs module', () => {
       const putRes = await app.inject({
         method: 'PUT',
         url: `/repos/${repoA.id}/context-config`,
-        payload: { globs: ['guides/**/*.md'] },
+        payload: { excludes: ['docs/**/*.md'] },
       });
       expect(putRes.statusCode).toBe(200);
-      expect(putRes.json()).toEqual({ globs: ['guides/**/*.md'] });
+      expect(putRes.json()).toEqual({ excludes: ['docs/**/*.md'] });
 
       const reindexA = await app.inject({ method: 'POST', url: `/repos/${repoA.id}/context-docs/reindex` });
       expect(reindexA.json().documents.map((doc: { path: string }) => doc.path)).toEqual(['guides/only.md']);
 
       // repoB's own config/documents are unaffected.
       const configB = await app.inject({ method: 'GET', url: `/repos/${repoB.id}/context-config` });
-      expect(configB.json()).toEqual({ globs: ['**/{specs,docs,insights}/**/*.md'] });
+      expect(configB.json()).toEqual({ excludes: DEFAULT_CONTEXT_EXCLUDES });
       const reindexB = await app.inject({ method: 'POST', url: `/repos/${repoB.id}/context-docs/reindex` });
       expect(reindexB.json().documents.map((doc: { path: string }) => doc.path)).toEqual(['docs/untouched.md']);
 
       await app.close();
     });
 
-    it('AC-7/AC-41: PUT with an escaping glob is rejected with 422 and never persists', async () => {
+    it(
+      'AC-6: null vs [] — getConfig() defaults when unconfigured, setConfig([]) persists ' +
+        'verbatim (not defaults), and reindex only discovers AGENTS.md once excludes are []',
+      async () => {
+        const app = await makeApp();
+        const clonePath = await makeFixtureClone({
+          'AGENTS.md': '# Agent instructions',
+          'docs/readme.md': '# Readme',
+        });
+        const repo = await makeRepo(pg.handle.db, 'acme/null-vs-empty', { clonePath });
+
+        // Unconfigured (`contextSearchExcludes` is null) — getConfig() returns the default set.
+        const configBefore = await app.inject({ method: 'GET', url: `/repos/${repo.id}/context-config` });
+        expect(configBefore.json()).toEqual({ excludes: DEFAULT_CONTEXT_EXCLUDES });
+
+        // Reindex under that unconfigured default excludes AGENTS.md.
+        const reindexUnconfigured = await app.inject({
+          method: 'POST',
+          url: `/repos/${repo.id}/context-docs/reindex`,
+        });
+        expect(
+          reindexUnconfigured.json().documents.map((doc: { path: string }) => doc.path),
+        ).toEqual(['docs/readme.md']);
+
+        // Explicitly persist an empty array — must NOT collapse back to the defaults.
+        const putRes = await app.inject({
+          method: 'PUT',
+          url: `/repos/${repo.id}/context-config`,
+          payload: { excludes: [] },
+        });
+        expect(putRes.statusCode).toBe(200);
+        expect(putRes.json()).toEqual({ excludes: [] });
+
+        const configAfter = await app.inject({ method: 'GET', url: `/repos/${repo.id}/context-config` });
+        expect(configAfter.json()).toEqual({ excludes: [] });
+
+        // With excludes == [], the same fixture's AGENTS.md is now discovered too.
+        const reindexEmpty = await app.inject({
+          method: 'POST',
+          url: `/repos/${repo.id}/context-docs/reindex`,
+        });
+        const paths = reindexEmpty
+          .json()
+          .documents.map((doc: { path: string }) => doc.path)
+          .sort();
+        expect(paths).toEqual(['AGENTS.md', 'docs/readme.md']);
+
+        await app.close();
+      },
+    );
+
+    it('AC-7: PUT with a clonePath-escaping exclude pattern is no longer rejected (200)', async () => {
       const app = await makeApp();
       const repo = await makeRepo(pg.handle.db, 'acme/config-escape');
 
       const res = await app.inject({
         method: 'PUT',
         url: `/repos/${repo.id}/context-config`,
-        payload: { globs: ['../../etc/**/*.md'] },
+        payload: { excludes: ['../../etc/**/*.md'] },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual({ excludes: ['../../etc/**/*.md'] });
+
+      const config = await app.inject({ method: 'GET', url: `/repos/${repo.id}/context-config` });
+      expect(config.json()).toEqual({ excludes: ['../../etc/**/*.md'] });
+
+      await app.close();
+    });
+
+    it('AC-7: PUT with a whitespace-only exclude pattern is rejected with 422', async () => {
+      const app = await makeApp();
+      const repo = await makeRepo(pg.handle.db, 'acme/config-whitespace');
+
+      const res = await app.inject({
+        method: 'PUT',
+        url: `/repos/${repo.id}/context-config`,
+        payload: { excludes: ['   '] },
       });
       expect(res.statusCode).toBe(422);
 
-      const config = await app.inject({ method: 'GET', url: `/repos/${repo.id}/context-config` });
-      expect(config.json()).toEqual({ globs: ['**/{specs,docs,insights}/**/*.md'] });
+      await app.close();
+    });
+
+    it('AC-7: PUT with an empty-string exclude pattern is rejected with 422', async () => {
+      const app = await makeApp();
+      const repo = await makeRepo(pg.handle.db, 'acme/config-empty-string');
+
+      const res = await app.inject({
+        method: 'PUT',
+        url: `/repos/${repo.id}/context-config`,
+        payload: { excludes: [''] },
+      });
+      expect(res.statusCode).toBe(422);
 
       await app.close();
     });
@@ -456,7 +537,7 @@ d('context-docs module', () => {
     const putConfig = await app.inject({
       method: 'PUT',
       url: `/repos/${foreign.id}/context-config`,
-      payload: { globs: ['docs/**/*.md'] },
+      payload: { excludes: ['docs/**/*.md'] },
     });
     expect(putConfig.statusCode).toBe(404);
 

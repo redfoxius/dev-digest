@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { Provider } from './knowledge.js';
 import { Verdict } from './findings.js';
+import { RiskSeverity } from './brief.js';
 
 /**
  * Platform / scaffolding DTOs owned by F1:
@@ -60,8 +61,13 @@ export const FEATURE_MODELS: FeatureModelDef[] = [
     id: 'risk_brief',
     label: 'Risk Brief',
     description: 'Assesses merge risks for a pull request.',
-    defaultProvider: 'openai',
-    defaultModel: 'gpt-4.1',
+    // Was openai/gpt-4.1 — switched to match the other cheap-tier features
+    // (onboarding/review_intent/conventions) after generation failed in
+    // practice: the real OpenAI API rejects an OpenRouter-format key, and
+    // this repo's course-provided secrets only ever configure an
+    // OpenRouter key. Settings can still override per-workspace.
+    defaultProvider: 'openrouter',
+    defaultModel: 'deepseek/deepseek-v4-flash',
   },
   {
     id: 'conformance',
@@ -232,6 +238,11 @@ export const PrDetail = PrMeta.extend({
   files: z.array(PrFile),
   commits: z.array(PrCommit),
   linked_issue: IssueMeta.nullish(),
+  // Sourced from the PR's persisted Risk Brief; null when none exists yet.
+  // .nullish() (not .nullable()), matching sibling enrichment fields
+  // (verdict/score above) — an older/minimal PrDetail fixture that predates
+  // this field must still parse without it (server/test/contracts.test.ts).
+  risk_level: RiskSeverity.nullish(),
 });
 export type PrDetail = z.infer<typeof PrDetail>;
 

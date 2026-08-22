@@ -5,6 +5,10 @@
  * verdict (worstVerdict) — computed once and shared by BOTH the live-refresh
  * and offline-fallback branches. No existing integration test exercises this
  * route at all before this file.
+ *
+ * Also covers `risk_level` (AC-22, `pr-why-risk-brief` Work Item 9) — sourced
+ * from a persisted `pr_brief` row via the same shared aggregate, on both
+ * branches, and `null` when no such row exists.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { eq } from 'drizzle-orm';
@@ -22,9 +26,11 @@ import {
   MockIntentDeriver,
   MockSecretsProvider,
 } from '../src/adapters/mocks.js';
+import { RiskBriefRepository } from '../src/modules/risk-brief/repository.js';
 import * as t from '../src/db/schema.js';
 import type {
   Review,
+  RiskBrief,
   LLMProvider,
   ModelInfo,
   CompletionRequest,
@@ -32,6 +38,22 @@ import type {
   StructuredRequest,
   StructuredResult,
 } from '@devdigest/shared';
+
+/** A minimal, schema-valid `RiskBrief` fixture for seeding `pr_brief` rows. */
+function makeRiskBriefFixture(overrides: Partial<RiskBrief> = {}): RiskBrief {
+  return {
+    what: 'Touches the rate-limit config.',
+    why: 'Config changes can silently disable protection.',
+    risk_level: 'high',
+    risks: [],
+    review_focus: [],
+    pr_head_sha: 'a1b2c3d4',
+    provider: 'openai',
+    model: 'gpt-4.1',
+    generated_at: '2026-08-20T00:00:00Z',
+    ...overrides,
+  };
+}
 
 const hasDocker = await dockerAvailable();
 const d = hasDocker ? describe : describe.skip;
@@ -326,6 +348,79 @@ d('GET /pulls/:id — PR Brief banner aggregate (Testcontainers pg)', () => {
     expect(detail.score).toBeNull();
     expect(detail.latest_run_cost_usd).toBeNull();
     expect(detail.findings).toBeNull();
+    // No pr_brief row seeded — risk_level degrades to null, not a crash (AC-22).
+    expect(detail.risk_level).toBeNull();
+
+    await app.close();
+  });
+
+  it('live-refresh branch: risk_level reflects a seeded pr_brief row (AC-22)', async () => {
+    const app = await buildApp({
+      config: config(),
+      db: pg.handle.db,
+      overrides: {
+        embedder: new MockEmbedder(),
+        intentDeriver: new MockIntentDeriver(undefined),
+        git: new MockGitClient({ diff: DIFF }),
+        github: new MockGitHubClient(),
+      },
+    });
+    const { pr } = await setupRepoAndPr(pg.handle.db, workspaceId);
+    await new RiskBriefRepository(pg.handle.db).upsert(
+      pr.id,
+      makeRiskBriefFixture({ risk_level: 'high' }),
+    );
+
+    const res = await app.inject({ method: 'GET', url: `/pulls/${pr.id}` });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().risk_level).toBe('high');
+
+    await app.close();
+  });
+
+  it('offline-fallback branch (no GitHub token): risk_level reflects a seeded pr_brief row (AC-22)', async () => {
+    const app = await buildApp({
+      config: config(),
+      db: pg.handle.db,
+      overrides: {
+        embedder: new MockEmbedder(),
+        intentDeriver: new MockIntentDeriver(undefined),
+        git: new MockGitClient({ diff: DIFF }),
+        // No `github` override + no GitHub token → container.github() throws,
+        // driving the route into its offline-fallback branch (same trick the
+        // "offline-fallback branch" test above uses).
+        secrets: new MockSecretsProvider({}),
+      },
+    });
+    const { pr } = await setupRepoAndPr(pg.handle.db, workspaceId);
+    await new RiskBriefRepository(pg.handle.db).upsert(
+      pr.id,
+      makeRiskBriefFixture({ risk_level: 'medium' }),
+    );
+
+    const res = await app.inject({ method: 'GET', url: `/pulls/${pr.id}` });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().risk_level).toBe('medium');
+
+    await app.close();
+  });
+
+  it('offline-fallback branch (no GitHub token): risk_level is null with no seeded pr_brief row (AC-22)', async () => {
+    const app = await buildApp({
+      config: config(),
+      db: pg.handle.db,
+      overrides: {
+        embedder: new MockEmbedder(),
+        intentDeriver: new MockIntentDeriver(undefined),
+        git: new MockGitClient({ diff: DIFF }),
+        secrets: new MockSecretsProvider({}),
+      },
+    });
+    const { pr } = await setupRepoAndPr(pg.handle.db, workspaceId);
+
+    const res = await app.inject({ method: 'GET', url: `/pulls/${pr.id}` });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().risk_level).toBeNull();
 
     await app.close();
   });

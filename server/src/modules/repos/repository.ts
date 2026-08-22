@@ -78,23 +78,25 @@ export class RepoRepository {
   }
 
   /**
-   * Project Context Folder (`docs/project-context-folder-plan.md` Work Item
-   * 4, AC-6) — persist a repo's own search-root glob config. Lives here
+   * Project Context Folder (`specs/cross-cutting/project-context-folder/spec.md`
+   * AC-6) — persist a repo's own exclude-list config verbatim. Lives here
    * (not in `context-docs/repository.ts`) per onion-architecture's
    * cross-module rule: another module reaches a table it doesn't own only
    * through that table's own repository, never a direct `schema.repos`
-   * query. `globs.length === 0` is treated as "clear the override" (falls
-   * back to the default glob), mirroring `null` semantics elsewhere on this
-   * column. Returns `undefined` if no such repo exists in the workspace.
+   * query. `excludes` is written exactly as given, including an explicitly
+   * submitted `[]` (AC-6: "zero exclusions" — scan everything) — the caller
+   * (`context-docs/service.ts`) is responsible for the null-vs-empty-array
+   * default resolution, not this write path. Returns `undefined` if no such
+   * repo exists in the workspace.
    */
-  async updateContextSearchGlobs(
+  async updateContextSearchExcludes(
     workspaceId: string,
     id: string,
-    globs: string[],
+    excludes: string[],
   ): Promise<RepoRow | undefined> {
     const [row] = await this.db
       .update(t.repos)
-      .set({ contextSearchGlobs: globs.length > 0 ? globs : null })
+      .set({ contextSearchExcludes: excludes })
       .where(and(eq(t.repos.workspaceId, workspaceId), eq(t.repos.id, id)))
       .returning();
     return row;

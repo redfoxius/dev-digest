@@ -14,9 +14,14 @@ export const repos = pgTable(
     fullName: text('full_name').notNull(),
     defaultBranch: text('default_branch').notNull().default('main'),
     clonePath: text('clone_path'),
-    // Per-repo search-root globs for Project Context document discovery.
-    // `null` -> default glob `**/{specs,docs,insights}/**/*.md` applies (AC-5).
-    contextSearchGlobs: text('context_search_globs').array(),
+    // Per-repo gitignore-style exclude patterns for Project Context document
+    // discovery (v0.2, renamed from `context_search_globs`). Three states:
+    // `null` -> unconfigured; default agent-instruction-file exclude set
+    // applies (`**/AGENTS.md`, `**/CLAUDE.md`, `**/.claude/**`, AC-5, AC-43).
+    // `[]` -> explicitly persisted zero exclusions; every discovered `.md`
+    // file is in scope (AC-6). Any other array -> the repo's own configured
+    // exclude patterns, evaluated with real gitignore semantics (AC-44).
+    contextSearchExcludes: text('context_search_excludes').array(),
     lastPolledAt: timestamp('last_polled_at', { withTimezone: true }),
     createdBy: uuid('created_by').references(() => users.id),
     createdAt: now(),

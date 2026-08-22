@@ -1,0 +1,1 @@
+ALTER TABLE "repos" RENAME COLUMN "context_search_globs" TO "context_search_excludes";
