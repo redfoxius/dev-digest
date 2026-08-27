@@ -7,13 +7,21 @@ const REVIEW_PROMPT = `Audit this diff against DevDigest's documented structural
 
 ${fx("checkout-service.diff")}`;
 
-// A second real diff whose violations map onto DevDigest-SPECIFIC rule names
-// (`reviewer-core-zero-io`, `reviewer-core-ground-findings-gate`) that a competent model will
-// describe in prose but will not spontaneously name unless the agent forces a citation. This is
-// the discriminating case for the strict-vs-lite A/B: both variants should FIND both problems,
-// but only the strict variant (which keeps the "cite the exact documented rule per finding" hard
-// rule) should reliably emit the identifier. The checkout diff's textbook violations don't
-// discriminate — the model volunteers `inward-only-dependencies`/`di-discipline` either way.
+// A second real diff whose violations map onto DevDigest-SPECIFIC, actually-documented rule
+// names (onion-architecture's "Domain Purity" section; reviewer-core/CLAUDE.md's mandatory
+// `groundFindings()` citation gate) that a competent model will describe in prose but will not
+// spontaneously name unless the agent forces a citation. This is the discriminating case for the
+// strict-vs-lite A/B: both variants should FIND both problems, but only the strict variant (which
+// keeps the "cite the exact documented rule per finding" hard rule) should reliably name the rule.
+// The checkout diff's textbook violations don't discriminate — the model volunteers "The
+// Dependency Rule"/"Composition Root" either way.
+//
+// NOTE: earlier versions of this file asked for invented kebab-case slugs
+// (`inward-only-dependencies`, `di-discipline`, `reviewer-core-zero-io`,
+// `reviewer-core-ground-findings-gate`) that never existed in any doc the agent can read —
+// onion-architecture/SKILL.md names rules by section heading, not by ID. Both agents scored 0% on
+// citing them because there was nothing to cite. Practices below now check for the REAL,
+// documented rule names instead.
 const REVIEWER_CORE_PROMPT = `Audit this diff against DevDigest's documented structural contracts.
 
 ${fx("reviewer-core-gate.diff")}`;
@@ -38,7 +46,7 @@ export const cases: AgentCase[] = [
     practices: [
       "flags the domain file (checkout.ts) importing a type from 'fastify' as a violation of the inward-only dependency rule between Domain and Presentation layers",
       "flags the `new PgCheckoutRepository()` call inside service.ts as a violation of DI discipline (concrete adapters/repositories must be constructed only in the composition root / container)",
-      "names the specific documented rule identifier for EVERY finding (e.g. `inward-only-dependencies`, `di-discipline`) rather than describing the problem only in prose",
+      "names the specific documented onion-architecture rule/section for EVERY finding (e.g. 'The Dependency Rule' for the fastify import, 'Composition Root' for the DI violation) rather than describing the problem only in prose",
       "assigns a severity (critical/high/medium/low/info) to each finding",
       "quotes the offending line verbatim as evidence for each finding, not a paraphrase",
       "ends with an explicit PASS/FAIL gate verdict based on whether any critical or high findings exist",
@@ -51,7 +59,7 @@ export const cases: AgentCase[] = [
     kind: "quality",
     prompt: REVIEW_PROMPT,
     practices: [
-      "does not invent an architecture-contract violation for the optional `reply?: FastifyReply` parameter beyond the inward-only-dependencies import issue itself (no runtime bug/security finding fabricated as an architecture rule)",
+      "does not invent an architecture-contract violation for the optional `reply?: FastifyReply` parameter beyond the Dependency Rule / fastify-import issue itself (no runtime bug/security finding fabricated as an architecture rule)",
       "stays scoped to structural/layering/DI findings and does not comment on naming, style, or test coverage",
     ],
     threshold: 1.0,
@@ -64,8 +72,8 @@ export const cases: AgentCase[] = [
     practices: [
       "flags the `import { readFileSync } from 'node:fs'` added to reviewer-core/src/pipeline/run.ts as a violation (reviewer-core must do no I/O except the injected LLMProvider)",
       "flags that runPipeline now returns `deduped` directly, skipping the mandatory `groundFindings()` gate before emitting findings",
-      "names the exact documented rule identifier `reviewer-core-zero-io` for the fs-import finding rather than only describing it in prose",
-      "names the exact documented rule identifier `reviewer-core-ground-findings-gate` for the skipped-gate finding rather than only describing it in prose",
+      "names the specific documented rule for the fs-import finding (e.g. onion-architecture's 'Domain Purity' section, or reviewer-core/CLAUDE.md's 'Never add DB/GitHub/FS calls here') rather than only describing it in prose",
+      "names the specific documented rule for the skipped-gate finding (e.g. reviewer-core/CLAUDE.md's mandatory `groundFindings()` citation gate) rather than only describing it in prose",
       "quotes the offending line verbatim as evidence for each finding, not a paraphrase",
       "ends with an explicit PASS/FAIL gate verdict based on whether any critical or high findings exist",
     ],
