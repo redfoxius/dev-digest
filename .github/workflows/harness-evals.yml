@@ -9,17 +9,30 @@
 #     so this repo's real edits land in AGENTS.md; that's what's checked, not the symlink itself)
 #
 # Runs entirely on OpenRouter (never the Anthropic subscription/API key) so CI cost is cheap and
-# predictable. Model is a knob, not a UI input — override via repository/organization Actions
-# variables (Settings → Secrets and variables → Actions → Variables):
-#   - EVAL_MODEL / EVAL_JUDGE_MODEL       → skill-evals + agent-evals (content/tool tiers).
-#     Default deepseek/deepseek-chat (task) + google/gemini-2.5-flash (judge, cross-family to
-#     soften self-preference) — both cheap, per evals/README.md's own OpenRouter benchmark.
-#   - EVAL_WORKFLOW_MODEL                 → workflow-evals only. Forced to google/gemini-2.5-flash
-#     by default: evals/README.md's benchmark shows DeepSeek does the work inline instead of
-#     dispatching a subagent, which would fail every `dispatch`-kind workflow case regardless of
-#     whether the harness actually regressed. Gemini is the only model in that benchmark confirmed
-#     to dispatch correctly, so don't repoint this at DeepSeek.
-# See evals/README.md's "Runners: Claude Code vs OpenRouter" section for the model-format rules.
+# predictable. Two different runtimes, per evals/README.md's "Runners" section:
+#
+#   - skill-evals is the CONTENT tier (skillTask -> a direct OpenAI-compatible call, no tool use).
+#     Any OpenRouter model works here natively. Default EVAL_MODEL=deepseek/deepseek-chat — cheap,
+#     and measured at 15/18 pass on this repo's actual skill suite.
+#   - agent-evals and workflow-evals are the TOOL tier (agentTask/workflowTask -> the real Claude
+#     Agent SDK, which only speaks the Anthropic wire protocol). A first pass tried routing this
+#     through DeepSeek via a LiteLLM translating proxy and hit three real problems: DeepSeek
+#     doesn't reliably dispatch subagents (does the work inline instead), a DeepSeek/DeepInfra
+#     backend caps context at 32K tokens (some cases run ~50K+), and the proxy's wildcard route
+#     mangles a dispatched subagent's own `model: sonnet` frontmatter into an invalid slug. Anthropic
+#     models don't have any of these problems — OpenRouter's native "Anthropic Skin" serves them
+#     directly (POST to https://openrouter.ai/api, no proxy container at all), so these two jobs
+#     run EVAL_MODEL=anthropic/claude-haiku-4.5: real Anthropic dispatch behavior, no translation
+#     layer, materially cheaper than Sonnet.
+#
+# EVAL_JUDGE_MODEL (the scorer) is independent of the above — llmJudge always goes through the
+# direct content-tier call (src/runtime/dispatch.ts's runContent), never the Agent SDK, so it never
+# needs the Skin/proxy regardless of which tier is being judged. Default
+# google/gemini-2.5-flash — cross-family from both task models above, to soften self-preference.
+#
+# All three are knobs, not a UI input — override via repository/organization Actions variables
+# (Settings → Secrets and variables → Actions → Variables): EVAL_MODEL, EVAL_JUDGE_MODEL,
+# EVAL_AGENT_MODEL (agent-evals + workflow-evals only).
 #
 # workflow-evals stays non-blocking (continue-on-error) as general LLM-eval flakiness insurance
 # (evals/README.md's own stats call a 20-80% pass rate "flaky") — skill-evals and agent-evals stay
@@ -33,7 +46,7 @@
 # pull_request from a fork instead of failing loudly. This is UX, not the security boundary — the
 # `pull_request` trigger (never `pull_request_target`) already means GitHub withholds
 # `secrets.OPENROUTER_API_KEY` from fork runs on its own, so a fork PR would otherwise just hard-fail
-# on an empty key (docker-compose's `${OPENROUTER_API_KEY:?...}`, or an OpenRouter auth error).
+# on an empty key (an OpenRouter auth error).
 name: harness evals
 
 on:
@@ -176,7 +189,10 @@ jobs:
       run:
         working-directory: evals
     env:
-      OPENROUTER_BASE_URL: http://localhost:4000
+      # Anthropic slug via OpenRouter's native Skin (https://openrouter.ai/api, the env.ts default)
+      # — no LiteLLM proxy needed, see the file-header comment for why this tier needs an
+      # Anthropic-family model in the first place.
+      EVAL_MODEL: ${{ vars.EVAL_AGENT_MODEL || 'anthropic/claude-haiku-4.5' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -192,17 +208,7 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - run: docker compose -f proxy/docker-compose.yml up -d
-
-      - run: pnpm proxy:wait
-
       - run: pnpm vitest run "agents/${{ matrix.agent }}"
-
-      - if: failure()
-        run: docker compose -f proxy/docker-compose.yml logs --tail 100
-
-      - if: always()
-        run: docker compose -f proxy/docker-compose.yml down
 
   workflow-evals:
     name: workflow evals (non-blocking)
@@ -216,11 +222,10 @@ jobs:
       run:
         working-directory: evals
     env:
-      OPENROUTER_BASE_URL: http://localhost:4000
-      # Forced to Gemini regardless of the EVAL_MODEL/EVAL_JUDGE_MODEL vars used by the other two
-      # jobs — see the file-header comment for why DeepSeek must not land here.
-      EVAL_MODEL: ${{ vars.EVAL_WORKFLOW_MODEL || 'google/gemini-2.5-flash' }}
-      EVAL_JUDGE_MODEL: ${{ vars.EVAL_WORKFLOW_MODEL || 'google/gemini-2.5-flash' }}
+      # Same Anthropic-Skin reasoning and same override var as agent-evals — a dispatched subagent
+      # in a workflow case needs the real Agent SDK dispatch path, which only Anthropic models get
+      # reliably through OpenRouter (see the file-header comment).
+      EVAL_MODEL: ${{ vars.EVAL_AGENT_MODEL || 'anthropic/claude-haiku-4.5' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -236,14 +241,4 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - run: docker compose -f proxy/docker-compose.yml up -d
-
-      - run: pnpm proxy:wait
-
       - run: pnpm eval:workflow
-
-      - if: failure()
-        run: docker compose -f proxy/docker-compose.yml logs --tail 100
-
-      - if: always()
-        run: docker compose -f proxy/docker-compose.yml down
