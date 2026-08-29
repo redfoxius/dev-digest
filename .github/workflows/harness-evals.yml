@@ -152,6 +152,12 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
+      # This matrix can run up to ~18 legs, all hitting the same OpenRouter account concurrently
+      # with agent-evals + workflow-evals. A live run hit 402 "exceed available credits given
+      # current in-flight requests" across ALL agent-evals legs even after capping agent-evals'
+      # own max-parallel, because skill-evals (this job) had no cap of its own — the account-wide
+      # concurrency ceiling is shared across every job in the run, not per-job.
+      max-parallel: 5
       matrix:
         skill: ${{ fromJson(needs.detect.outputs.skills) }}
     defaults:
