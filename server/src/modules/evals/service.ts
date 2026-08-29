@@ -1,6 +1,13 @@
 import { reviewPullRequest } from '@devdigest/reviewer-core';
 import { EvalCaseExpectedOutput } from '@devdigest/shared';
-import type { EvalCase, EvalDashboard, EvalRun, EvalRunRecord, EvalTrendPoint } from '@devdigest/shared';
+import type {
+  EvalCase,
+  EvalDashboard,
+  EvalRun,
+  EvalRunRecord,
+  EvalRunResult,
+  EvalTrendPoint,
+} from '@devdigest/shared';
 import type { Container } from '../../platform/container.js';
 import { NotFoundError, ValidationError } from '../../platform/errors.js';
 import { parseUnifiedDiff } from '../../adapters/git/diff-parser.js';
@@ -226,22 +233,36 @@ export class EvalsService {
   // ==========================================================================
 
   /** `POST /agents/:id/eval-cases/:caseId/run` (N=1). `undefined` (route ->
-   *  404) when the agent OR the case (scoped to that agent) isn't found. */
-  async runOne(workspaceId: string, agentId: string, caseId: string): Promise<EvalRun | undefined> {
+   *  404) when the agent OR the case (scoped to that agent) isn't found.
+   *  Returns the `EvalRunResult` wrapper (spec §10/AC-11) — the aggregate
+   *  `EvalRun` (identical in shape to `runAll`'s, degenerate to a single
+   *  trace here) PLUS the specific persisted `eval_runs` row's real id,
+   *  located from `runCases`' own `insertRunBatch(...)`-returned rows
+   *  (their `.returning()` already carries each row's DB-generated `id`) —
+   *  no second query needed. */
+  async runOne(workspaceId: string, agentId: string, caseId: string): Promise<EvalRunResult | undefined> {
     const agent = await this.container.agentsRepo.getById(workspaceId, agentId);
     if (!agent) return undefined;
     const row = await this.repo.getCase(workspaceId, caseId);
     if (!row || row.ownerId !== agentId) return undefined;
-    return this.runCases(agent, [row]);
+    const { aggregate, rows } = await this.runCases(agent, [row]);
+    // `runCases` was called with exactly one case, so `insertRunBatch` always
+    // persists exactly one row for it (success or isolated failure, AC-14) —
+    // this lookup cannot miss in practice.
+    const persisted = rows.find((r) => r.caseId === caseId);
+    return { run_id: persisted?.id ?? '', case_id: caseId, result: aggregate };
   }
 
   /** `POST /agents/:id/eval-runs` (N=all). `undefined` (route -> 404) when
-   *  the agent isn't in this workspace. */
+   *  the agent isn't in this workspace. Returns the aggregate `EvalRun`
+   *  ONLY — no per-run id wrapper (that's `runOne`'s single-case contract,
+   *  AC-11; AC-12's batch contract is unchanged). */
   async runAll(workspaceId: string, agentId: string): Promise<EvalRun | undefined> {
     const agent = await this.container.agentsRepo.getById(workspaceId, agentId);
     if (!agent) return undefined;
     const rows = await this.repo.listCases(workspaceId, agentId);
-    return this.runCases(agent, rows);
+    const { aggregate } = await this.runCases(agent, rows);
+    return aggregate;
   }
 
   /**
@@ -256,9 +277,17 @@ export class EvalsService {
    * (`scoring.ts`). `expected_output`/`EvalExpectation` data is read ONLY by
    * the pure scoring step below — never threaded into `reviewPullRequest`'s
    * `messages`/prompt (spec §11 — no new prompt-injection surface).
+   *
+   * Returns both the aggregate `EvalRun` AND the persisted `eval_runs` rows
+   * (`insertRunBatch`'s own `.returning()` result, real DB-generated `id`s
+   * included) — `runOne` needs the latter to locate its one case's row id
+   * for the `EvalRunResult` wrapper (AC-11); `runAll` uses only the former.
    */
-  private async runCases(agent: AgentRow, cases: EvalCaseRow[]): Promise<EvalRun> {
-    if (cases.length === 0) return degenerateEvalRun();
+  private async runCases(
+    agent: AgentRow,
+    cases: EvalCaseRow[],
+  ): Promise<{ aggregate: EvalRun; rows: EvalRunRow[] }> {
+    if (cases.length === 0) return { aggregate: degenerateEvalRun(), rows: [] };
 
     const rows: InsertEvalRun[] = [];
     const scores: ScoreResult[] = [];
@@ -362,10 +391,10 @@ export class EvalsService {
     // ONE transactional multi-row insert AFTER every case has run (success or
     // isolated failure) — gives every row in this batch a shared `ran_at`
     // (WI-2's `insertRunBatch`), never held open across the LLM calls above.
-    await this.repo.insertRunBatch(rows);
+    const insertedRows = await this.repo.insertRunBatch(rows);
 
     const agg = aggregateBatch(scores);
-    return {
+    const aggregate: EvalRun = {
       recall: agg.recall,
       precision: agg.precision,
       citation_accuracy: agg.citationAccuracy,
@@ -375,6 +404,7 @@ export class EvalsService {
       cost_usd: agg.costUsd,
       per_trace: perTrace,
     };
+    return { aggregate, rows: insertedRows };
   }
 
   // ==========================================================================

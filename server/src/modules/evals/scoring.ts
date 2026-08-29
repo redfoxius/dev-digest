@@ -226,9 +226,16 @@ function directionWord(delta: number): 'up' | 'down' | 'flat' {
  * Build a deterministic, template-generated alert sentence when at least
  * one metric swings by >= 2pts between two consecutive batches (AC-25).
  * `previous === null` (no prior batch to compare against) always yields
- * `null`. Otherwise the sentence names the metric with the LARGEST absolute
- * delta as the headline (direction + magnitude in points), plus a brief note
- * on the other two metrics' directions — e.g.
+ * `null`. Otherwise the headline prefers a REGRESSING metric (one that
+ * dropped by >= 2pts) over a raw-magnitude comparison — e.g. AC-25's own
+ * worked example (precision -0.02, recall +0.04, citation +0.01) headlines
+ * precision's drop, not recall's larger rise, since a regression is the
+ * more actionable signal even when a same-direction improvement moved
+ * further. Only when NO metric regressed by >= 2pts (all deltas are flat
+ * or improving) does the headline fall back to whichever metric has the
+ * largest absolute delta. Either way the sentence pairs the headline
+ * (direction + magnitude in points) with a brief note on the other two
+ * metrics' directions — e.g.
  * `"Precision dipped 2pts — recall and citation accuracy both up."`.
  * Pure string interpolation, no randomness — same inputs always produce the
  * same sentence (or the same `null`).
@@ -243,7 +250,15 @@ export function buildAlert(current: MetricSnapshot, previous: MetricSnapshot | n
   };
 
   const keys = Object.keys(deltas) as MetricKey[];
-  const maxKey = keys.reduce((a, b) => (Math.abs(deltas[b]) > Math.abs(deltas[a]) ? b : a));
+
+  // Prefer the largest REGRESSION (most negative delta) among metrics that
+  // dropped by at least the threshold — a drop is always worth headlining
+  // over a same-or-larger-magnitude improvement elsewhere.
+  const regressing = keys.filter((k) => deltas[k] <= -ALERT_THRESHOLD);
+  const maxKey =
+    regressing.length > 0
+      ? regressing.reduce((a, b) => (deltas[b] < deltas[a] ? b : a))
+      : keys.reduce((a, b) => (Math.abs(deltas[b]) > Math.abs(deltas[a]) ? b : a));
   const maxDelta = deltas[maxKey];
 
   if (Math.abs(maxDelta) < ALERT_THRESHOLD) return null;

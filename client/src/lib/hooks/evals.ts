@@ -18,7 +18,7 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
-import type { EvalCase, EvalCaseInput, EvalDashboard, EvalRun } from "@devdigest/shared";
+import type { EvalCase, EvalCaseInput, EvalDashboard, EvalRun, EvalRunResult } from "@devdigest/shared";
 
 /** Manual create/update body — `owner_kind`/`owner_id` are always derived
    server-side from the route's `:id`, so callers never supply them (matches
@@ -87,16 +87,13 @@ export function useDeleteEvalCase(agentId: string | null | undefined) {
 
 // ---- Run execution ----
 
-/** `POST /agents/:id/eval-cases/:caseId/run` (N=1).
-   NOTE: the route's real, current handler (`evals/routes.ts`) returns a bare
-   `EvalRun` — NOT the `EvalRunResult` wrapper (`{run_id, case_id, result}`)
-   spec §10 describes. That's a known, already-flagged spec/implementation
-   discrepancy pending a fix-loop review; this hook's return type matches
-   what the route actually returns today, not the spec. */
+/** `POST /agents/:id/eval-cases/:caseId/run` (N=1). Returns the
+   `EvalRunResult` wrapper (`{run_id, case_id, result}`, spec §10/AC-11) —
+   `result` carries the aggregate `EvalRun` metrics for this single-case run. */
 export function useRunEvalCase(agentId: string | null | undefined) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (caseId: string) => api.post<EvalRun>(`/agents/${agentId}/eval-cases/${caseId}/run`),
+    mutationFn: (caseId: string) => api.post<EvalRunResult>(`/agents/${agentId}/eval-cases/${caseId}/run`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["eval-cases", agentId] }),
   });
 }

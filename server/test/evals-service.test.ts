@@ -526,6 +526,30 @@ describe('EvalsService.runAll — batch isolation + zero-case degenerate result'
     expect(calls.filter((c) => c.op === 'insert')).toHaveLength(1);
   });
 
+  it('AC-13 — two consecutive runAll calls each trigger their own fresh reviewPullRequest/LLM call per case, never replaying the first', async () => {
+    // Spec AC-13's own Verify line: "two consecutive POST /agents/:id/eval-runs
+    // calls ... each trigger their own fresh reviewPullRequest/LLM adapter
+    // call per case (mocked adapter call count = 2x case count, not case
+    // count)". Simulates the "run, edit prompt, run again" flow at the
+    // service layer — the case set/count stays fixed; what this actually
+    // guards against is a caching/memoization bug that would silently reuse
+    // the first call's result instead of hitting the LLM again.
+    const llm = new MockLLMProvider('openai', { structured: reviewFixture() });
+    const c = evalCaseRow({ expectedOutput: { expectations: [] } });
+    const { db } = makeFakeDb([
+      [agentRow()], [c], [], [[{ id: 'run-1' }]], // first runAll (1 case)
+      [agentRow()], [c], [], [[{ id: 'run-2' }]], // second runAll, after a (simulated) prompt edit
+    ]);
+    const container = containerWith(db, llm);
+    const service = new EvalsService(container);
+
+    await service.runAll(WS, AGENT_ID);
+    await service.runAll(WS, AGENT_ID);
+
+    const structuredCalls = llm.calls.filter((call) => call.method === 'completeStructured');
+    expect(structuredCalls).toHaveLength(2); // 2x case count (1 case) — never cached/replayed
+  });
+
   it('never threads expected_output into the LLM call — only reviewPullRequest inputs (systemPrompt/model/diff/task) are passed to completeStructured', async () => {
     const secretExpectation = { expectations: [{ type: 'must_find', file: 'src/app.ts', start_line: 2, end_line: 2, description: 'UNIQUE_MARKER_XYZ' }] };
     const llm = new MockLLMProvider('openai', { structured: reviewFixture() });
