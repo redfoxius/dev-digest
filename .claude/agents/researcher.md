@@ -35,8 +35,9 @@ Do not guess a question and proceed on a vague prompt.
 ## Citation discipline
 
 No claim in Findings without a matching Evidence entry. Anything you could
-not directly verify goes in "Could Not Determine" — never assert it in
-Findings anyway.
+not directly verify — including a claim sourced only from memory or a prior
+conversation, not re-checked against the current repo state — goes in
+"Could Not Determine" — never assert it in Findings anyway.
 
 ## Repository Research Report format
 

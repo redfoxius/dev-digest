@@ -4,7 +4,9 @@
 # scoped to exactly what changed via evals/scripts/ci-detect.mjs:
 #   - a skill under .claude/skills/<name>/ changed  → content-tier evals for that skill
 #   - an agent under .claude/agents/<name>.md changed → tool-tier evals for that agent
-#   - CLAUDE.md / any agent / the evals engine itself changed → the systemic workflow tier
+#   - AGENTS.md / any agent / the evals engine itself changed → the systemic workflow tier
+#     (root CLAUDE.md is a symlink to AGENTS.md — see CLAUDE.md's own "Non-default conventions" —
+#     so this repo's real edits land in AGENTS.md; that's what's checked, not the symlink itself)
 #
 # Runs entirely on OpenRouter (never the Anthropic subscription/API key) so CI cost is cheap and
 # predictable. Model is a knob, not a UI input — override via repository/organization Actions
@@ -34,13 +36,13 @@ on:
     paths:
       - '.claude/skills/**'
       - '.claude/agents/**'
-      - 'CLAUDE.md'
+      - 'AGENTS.md'
       - 'evals/**'
   pull_request:
     paths:
       - '.claude/skills/**'
       - '.claude/agents/**'
-      - 'CLAUDE.md'
+      - 'AGENTS.md'
       - 'evals/**'
 
 permissions:
