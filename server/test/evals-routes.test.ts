@@ -294,6 +294,38 @@ describe('POST /agents/:id/eval-cases — AC-10 validation', () => {
 });
 
 // ==========================================================================
+// PUT /agents/:id/eval-cases/:caseId — empty-patch short-circuit
+// (pr-self-review fix 3): a body with no fields to update must not 500 — it
+// returns 200 with the case unchanged, and issues no UPDATE at all.
+// ==========================================================================
+
+describe('PUT /agents/:id/eval-cases/:caseId — empty-patch short-circuit (fix 3)', () => {
+  it('200s with the unchanged case instead of throwing when the body has no fields to update', async () => {
+    const { app, calls } = await buildTestApp([
+      [agentRow()], // agentsRepo.getById
+      [evalCaseRow()], // repo.getCase — existing-case ownership check
+      [evalCaseRow()], // repo.getCase — updateCase's own empty-patch short-circuit
+    ]);
+    // `buildApp` already reaps stale agent_runs on boot via its own
+    // `.update().returning()` call (`REAP`, see this file's header comment) —
+    // that call is unrelated to this request, so only calls made AFTER boot
+    // count toward "did this PUT issue an UPDATE".
+    const callsBeforeRequest = calls.length;
+
+    const res = await app.inject({
+      method: 'PUT',
+      url: `/agents/${AGENT_ID}/eval-cases/${CASE_ID}`,
+      payload: {},
+    });
+    await app.close();
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().id).toBe(CASE_ID);
+    expect(calls.slice(callsBeforeRequest).filter((c) => c.op === 'update')).toHaveLength(0);
+  });
+});
+
+// ==========================================================================
 // Single-case run response shape — POST /agents/:id/eval-cases/:caseId/run
 // (spec §10 documents `EvalRunResult` — {run_id, case_id, result: EvalRun} —
 // AC-11's own wording requires it for the single-case route. This test

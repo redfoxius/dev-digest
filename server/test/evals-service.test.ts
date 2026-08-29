@@ -451,6 +451,72 @@ describe('EvalsService manual case CRUD', () => {
     expect(result?.id).toBe('new-case');
     expect(calls.filter((c) => c.op === 'insert')).toHaveLength(1);
   });
+
+  it('a well-formed expected_output with end_line === start_line (single-line range) is still accepted', async () => {
+    const { db, calls } = makeFakeDb([[agentRow()], [{ ...evalCaseRow(), id: 'new-case' }]]);
+    const container = containerWith(db, new MockLLMProvider('openai'));
+    const service = new EvalsService(container);
+
+    const result = await service.createCase(WS, AGENT_ID, {
+      name: 'Good case',
+      expected_output: { expectations: [{ type: 'must_find', file: 'a.ts', start_line: 3, end_line: 3 }] },
+    });
+
+    expect(result?.id).toBe('new-case');
+    expect(calls.filter((c) => c.op === 'insert')).toHaveLength(1);
+  });
+
+  // ------------------------------------------------------------------------
+  // EvalExpectation validation gaps (pr-self-review fix 1/2, zod skill):
+  // empty `file`, non-positive `start_line`, and `end_line < start_line` must
+  // all be rejected with 422, persisting nothing.
+  // ------------------------------------------------------------------------
+
+  it('AC-10 — an expectation with an empty file path is rejected with 422, persisting nothing', async () => {
+    const { db, calls } = makeFakeDb([[agentRow()]]);
+    const container = containerWith(db, new MockLLMProvider('openai'));
+    const service = new EvalsService(container);
+
+    await expect(
+      service.createCase(WS, AGENT_ID, {
+        name: 'Bad case',
+        expected_output: { expectations: [{ type: 'must_find', file: '', start_line: 1, end_line: 2 }] },
+      }),
+    ).rejects.toBeInstanceOf(ValidationError);
+    expect(calls.filter((c) => c.op === 'insert')).toHaveLength(0);
+  });
+
+  it('AC-10 — an expectation with start_line <= 0 is rejected with 422 (both -1 and 0)', async () => {
+    for (const startLine of [-1, 0]) {
+      const { db, calls } = makeFakeDb([[agentRow()]]);
+      const container = containerWith(db, new MockLLMProvider('openai'));
+      const service = new EvalsService(container);
+
+      await expect(
+        service.createCase(WS, AGENT_ID, {
+          name: 'Bad case',
+          expected_output: {
+            expectations: [{ type: 'must_find', file: 'a.ts', start_line: startLine, end_line: 2 }],
+          },
+        }),
+      ).rejects.toBeInstanceOf(ValidationError);
+      expect(calls.filter((c) => c.op === 'insert')).toHaveLength(0);
+    }
+  });
+
+  it('AC-10 — an expectation with end_line < start_line is rejected with 422', async () => {
+    const { db, calls } = makeFakeDb([[agentRow()]]);
+    const container = containerWith(db, new MockLLMProvider('openai'));
+    const service = new EvalsService(container);
+
+    await expect(
+      service.createCase(WS, AGENT_ID, {
+        name: 'Bad case',
+        expected_output: { expectations: [{ type: 'must_find', file: 'a.ts', start_line: 5, end_line: 2 }] },
+      }),
+    ).rejects.toBeInstanceOf(ValidationError);
+    expect(calls.filter((c) => c.op === 'insert')).toHaveLength(0);
+  });
 });
 
 // ==========================================================================

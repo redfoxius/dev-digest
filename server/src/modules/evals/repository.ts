@@ -102,24 +102,38 @@ export class EvalsRepository {
   }
 
   /** Update editable fields, workspace-scoped — `undefined` if the case
-   *  doesn't exist or isn't in this workspace (AC-7). */
+   *  doesn't exist or isn't in this workspace (AC-7).
+   *
+   *  Empty-patch short-circuit: a patch with zero own keys (every field
+   *  `undefined` — e.g. a client `PUT`-ing `{}`) has nothing to `.set()`.
+   *  Drizzle's `.update(...).set({})` throws ("No values to set") rather
+   *  than issuing a no-op UPDATE, so this fetches and returns the current
+   *  row via `getCase` instead of ever calling `.update()` — matching
+   *  `insertRunBatch`/`listRunsByCaseIds`'s existing empty-input
+   *  short-circuit style in this same file. A no-op `PUT` is a legitimate
+   *  "update or no-op" per AC-7, not an error. */
   async updateCase(
     workspaceId: string,
     caseId: string,
     patch: UpdateEvalCase,
   ): Promise<EvalCaseRow | undefined> {
+    const setValues = {
+      ...(patch.name !== undefined ? { name: patch.name } : {}),
+      ...(patch.inputDiff !== undefined ? { inputDiff: patch.inputDiff } : {}),
+      ...(patch.inputFiles !== undefined ? { inputFiles: patch.inputFiles as object } : {}),
+      ...(patch.inputMeta !== undefined ? { inputMeta: patch.inputMeta as object } : {}),
+      ...(patch.expectedOutput !== undefined
+        ? { expectedOutput: patch.expectedOutput as object }
+        : {}),
+      ...(patch.notes !== undefined ? { notes: patch.notes } : {}),
+    };
+    if (Object.keys(setValues).length === 0) {
+      return this.getCase(workspaceId, caseId);
+    }
+
     const [row] = await this.db
       .update(t.evalCases)
-      .set({
-        ...(patch.name !== undefined ? { name: patch.name } : {}),
-        ...(patch.inputDiff !== undefined ? { inputDiff: patch.inputDiff } : {}),
-        ...(patch.inputFiles !== undefined ? { inputFiles: patch.inputFiles as object } : {}),
-        ...(patch.inputMeta !== undefined ? { inputMeta: patch.inputMeta as object } : {}),
-        ...(patch.expectedOutput !== undefined
-          ? { expectedOutput: patch.expectedOutput as object }
-          : {}),
-        ...(patch.notes !== undefined ? { notes: patch.notes } : {}),
-      })
+      .set(setValues)
       .where(and(eq(t.evalCases.workspaceId, workspaceId), eq(t.evalCases.id, caseId)))
       .returning();
     return row;

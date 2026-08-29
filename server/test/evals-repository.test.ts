@@ -204,6 +204,28 @@ describe('EvalsRepository — workspace scoping', () => {
 });
 
 // ==========================================================================
+// updateCase — empty-patch short-circuit (pr-self-review fix 3,
+// drizzle-orm-patterns skill): a patch with zero own keys (every field
+// `undefined`, e.g. a client PUT-ing `{}`) must never reach `.update().set({})`
+// — Drizzle throws on an empty `.set()` payload. Instead it fetches and
+// returns the current row via `getCase`, matching `insertRunBatch`/
+// `listRunsByCaseIds`'s existing empty-input short-circuit style in this file.
+// ==========================================================================
+
+describe('EvalsRepository.updateCase — empty-patch short-circuit', () => {
+  it('returns the current row via getCase and never calls .update() when the patch has zero keys', async () => {
+    const { db, calls } = makeFakeDb([[evalCaseRow()]]); // only getCase's own select is queued
+
+    const repo = new EvalsRepository(db);
+    const result = await repo.updateCase(WS, CASE_ID, {});
+
+    expect(result).toEqual(evalCaseRow());
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.op).toBe('select');
+  });
+});
+
+// ==========================================================================
 // deleteCase — relies entirely on the existing eval_runs.case_id ON DELETE
 // CASCADE (AC-8); no manual eval_runs cleanup query is issued.
 // ==========================================================================
