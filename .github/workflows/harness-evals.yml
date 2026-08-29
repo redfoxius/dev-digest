@@ -28,6 +28,12 @@
 # A changed skill/agent with NO written evals is never silently skipped — evals/scripts/ci-detect.mjs
 # logs it explicitly ("SKIP <name> (no evals)") and the `detect` job's summary lists it, instead of
 # either failing the run or making it look like nothing happened.
+#
+# Fork-PR guard: the model-calling jobs (skill-evals/agent-evals/workflow-evals) skip cleanly on a
+# pull_request from a fork instead of failing loudly. This is UX, not the security boundary — the
+# `pull_request` trigger (never `pull_request_target`) already means GitHub withholds
+# `secrets.OPENROUTER_API_KEY` from fork runs on its own, so a fork PR would otherwise just hard-fail
+# on an empty key (docker-compose's `${OPENROUTER_API_KEY:?...}`, or an OpenRouter auth error).
 name: harness evals
 
 on:
@@ -118,13 +124,18 @@ jobs:
             echo "- workflow tier: \`${RUN_WORKFLOW}\`"
             [ -n "$SKIPPED_SKILLS" ] && echo "- ⚠️ SKIP skills (changed, no evals written): ${SKIPPED_SKILLS}"
             [ -n "$SKIPPED_AGENTS" ] && echo "- ⚠️ SKIP agents (changed, no evals written): ${SKIPPED_AGENTS}"
+            if [ "${{ github.event_name }}" = "pull_request" ] && [ "${{ github.event.pull_request.head.repo.full_name }}" != "${{ github.repository }}" ]; then
+              echo "- ⚠️ fork PR detected — skill-evals/agent-evals/workflow-evals will skip (no secrets on fork PRs)"
+            fi
             true
           } >> "$GITHUB_STEP_SUMMARY"
 
   skill-evals:
     name: skill evals
     needs: detect
-    if: needs.detect.outputs.skills != '[]'
+    if: |
+      needs.detect.outputs.skills != '[]' &&
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -153,7 +164,9 @@ jobs:
   agent-evals:
     name: agent evals
     needs: detect
-    if: needs.detect.outputs.agents != '[]'
+    if: |
+      needs.detect.outputs.agents != '[]' &&
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -194,7 +207,9 @@ jobs:
   workflow-evals:
     name: workflow evals (non-blocking)
     needs: detect
-    if: needs.detect.outputs.run_workflow == 'true'
+    if: |
+      needs.detect.outputs.run_workflow == 'true' &&
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
     continue-on-error: true
     defaults:
