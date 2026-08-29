@@ -1,0 +1,7 @@
+{
+  "name": "devdigest",
+  "private": true,
+  "scripts": {
+    "verify:l06": "bash scripts/verify-l06.sh"
+  }
+}

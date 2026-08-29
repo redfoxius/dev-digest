@@ -1,13 +1,13 @@
 import type { Container } from '../../platform/container.js';
-import type { Provider, Review, RunTrace, UnifiedDiff } from '@devdigest/shared';
+import type { Review, RunTrace, UnifiedDiff } from '@devdigest/shared';
 import { reviewPullRequest, countBlockers, renderIntentText } from '@devdigest/reviewer-core';
 import { RunLogger } from '../../platform/run-logger.js';
 import * as schema from '../../db/schema.js';
 import type { AgentRow } from '../../db/rows.js';
 import type { ReviewRepository, FindingRow, PullRow, ReviewRow } from './repository.js';
-import { REVIEW_STRATEGY } from './constants.js';
-import { taskLine, buildStackFraming } from './helpers.js';
+import { taskLine } from './helpers.js';
 import { loadDiff } from './diff-loader.js';
+import { resolveAgentRunConfig } from '../agents/helpers.js';
 import { resolveContextDocs } from '../context-docs/resolve.js';
 
 /** Thrown by a run when the user cancels it mid-flight (between map files). */
@@ -189,13 +189,29 @@ export class ReviewRunExecutor {
     let resolvedSpecsRead: string[] = [];
 
     try {
-      // Resolve the agent's LLM provider. (container.llm throws if the provider
-      // key is missing — caught below and persisted as a failed run.)
-      const llm = await runLog.step(
-        `Resolving ${agent.provider} provider`,
-        () => this.container.llm(agent.provider as Provider),
+      // Resolve the agent's CURRENT effective run config — provider client,
+      // model, strategy, resolved (linked + both-enabled) skill bodies, and
+      // the final system prompt (base + stack-framing addendum). Shared with
+      // `EvalsService.runCases` (specs/cross-cutting/eval-pipeline/plan.md
+      // WI-6 Step 0) via `agents/helpers.ts`'s `resolveAgentRunConfig` — a
+      // pure, behavior-preserving extraction of what this block used to do
+      // inline, so an eval run reflects a real review's config by
+      // construction instead of a second, independently-drifting recipe.
+      // (container.llm throws if the provider key is missing — caught below
+      // and persisted as a failed run, same as before this extraction.)
+      const config = await runLog.step(
+        'Resolving agent run config',
+        () =>
+          resolveAgentRunConfig(
+            (p) => this.container.llm(p),
+            this.agents,
+            agent,
+            diff.files.map((f) => f.path),
+          ),
         { kind: 'tool' },
       );
+      const llm = config.llm;
+      resolvedSkills = config.skills;
 
       // Per-agent repo-intel toggle (Agent editor). When an agent opts out we
       // skip all enrichment entirely so its prompt is identical to the
@@ -218,24 +234,19 @@ export class ReviewRunExecutor {
       const rankNote = repoIntelOn ? await this.buildRankNote(pull.repoId, diff, runLog) : '';
 
       // Agent Skills — reusable text/config blocks linked via the Agent
-      // Editor's Skills tab (docs/skills-feature-plan.md). Resolved fresh on
-      // every run (not cached) so a toggled link/skill takes effect on the
-      // very next run. Filtered on BOTH the per-agent link's `enabled` AND
-      // the skill's own global `enabled` — attaching a skill while it's
-      // still unvetted is allowed, but it only injects once both are true.
-      // Rows come back ordered ascending by `order`, so no extra sort needed.
-      const linkedSkills = await this.agents.linkedSkills(agent.id);
-      const attachedSkills = linkedSkills.filter((l) => l.enabled && l.skill.enabled);
-      resolvedSkills = attachedSkills.map((l) => l.skill.body);
-      if (attachedSkills.length > 0) {
-        runLog.info(`skills: ${attachedSkills.length} attached`);
+      // Editor's Skills tab (docs/skills-feature-plan.md), resolved fresh on
+      // every run by `resolveAgentRunConfig` above (not cached) so a toggled
+      // link/skill takes effect on the very next run. Filtered on BOTH the
+      // per-agent link's `enabled` AND the skill's own global `enabled` —
+      // attaching a skill while it's still unvetted is allowed, but it only
+      // injects once both are true. Rows come back ordered ascending by
+      // `order`, so no extra sort needed.
+      if (config.skills.length > 0) {
+        runLog.info(`skills: ${config.skills.length} attached`);
         // Recorded regardless of this run's eventual outcome — "this skill
         // was attached for this run" feeds the Stats tab's pull-frequency
         // denominator (docs/skills-feature-plan.md#stats-tab--addendum).
-        await this.repo.recordRunSkills(
-          runId,
-          attachedSkills.map((l) => l.skill.id),
-        );
+        await this.repo.recordRunSkills(runId, config.skillIds);
       }
 
       // Project Context Folder (spec §6.7, docs/project-context-folder-plan.md
@@ -264,26 +275,23 @@ export class ReviewRunExecutor {
 
       const task = taskLine(pull) + rankNote + citationNote;
 
-      // Phase 4 (docs/go-language-support-plan.md) — the seeded system prompts
-      // are written language-neutral; this appends the actual language(s)
-      // touched in THIS diff, computed at run time rather than baked into the
-      // prompt or read from a repo-wide label, so a Go PR in a TS+Go repo gets
-      // Go framing instead of a wrong static "Node.js" assumption.
-      const stackFraming = buildStackFraming(diff.files.map((f) => f.path));
-      const systemPrompt = stackFraming ? `${agent.systemPrompt}\n\n${stackFraming}` : agent.systemPrompt;
-
       // ---- Engine: assemble → single-pass → grounding -----------------------
       // The pure review pipeline lives in @devdigest/reviewer-core (shared with
       // the CI runner). The service owns only I/O: repo-intel context resolution
       // above, and persistence + observability below.
+      //
+      // `systemPrompt`/`model`/`strategy` come from `config`
+      // (`resolveAgentRunConfig`, resolved above) — `systemPrompt` already
+      // includes the Phase 4 (docs/go-language-support-plan.md) stack-framing
+      // addendum for the language(s) touched in THIS diff.
       const outcome = await reviewPullRequest({
-        systemPrompt,
-        model: agent.model,
+        systemPrompt: config.systemPrompt,
+        model: config.model,
         diff,
         llm,
         // Per-agent review strategy (configured in the Agent editor); falls back
         // to the studio default. single-pass = whole diff in one call.
-        strategy: agent.strategy ?? REVIEW_STRATEGY,
+        strategy: config.strategy,
         // T1.3 — pass the callers digest only when we built one. assemblePrompt
         // omits the section when this is empty/undefined.
         ...(callersDigest ? { callers: callersDigest } : {}),

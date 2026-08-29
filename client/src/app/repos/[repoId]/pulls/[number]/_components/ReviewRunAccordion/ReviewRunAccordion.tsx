@@ -33,6 +33,7 @@ export function ReviewRunAccordion({
   targetRunId = null,
   targetNonce = 0,
   onViewInDiff,
+  onTurnIntoEvalCase,
 }: {
   review: ReviewRecord;
   prId: string;
@@ -44,6 +45,8 @@ export function ReviewRunAccordion({
   targetRunId?: string | null;
   targetNonce?: number;
   onViewInDiff?: (file: string, line: number) => void;
+  /** "Turn into eval case" affordance — omitted → no button rendered. */
+  onTurnIntoEvalCase?: (findingId: string) => void;
 }) {
   const [open, setOpen] = React.useState(defaultOpen);
   const rootRef = React.useRef<HTMLDivElement | null>(null);
@@ -159,6 +162,7 @@ export function ReviewRunAccordion({
             repoFullName={repoFullName}
             headSha={headSha}
             onViewInDiff={onViewInDiff}
+            onTurnIntoEvalCase={onTurnIntoEvalCase}
           />
         </div>
       )}
