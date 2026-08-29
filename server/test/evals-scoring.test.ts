@@ -241,16 +241,24 @@ describe('buildAlert — AC-25', () => {
     expect(alert).toBe('Precision dipped 2pts — recall and citation accuracy both up.');
   });
 
-  it('mentions a metric that individually crosses the threshold even when it is not the headline', () => {
+  it("headlines the regressing metric even when another metric's rise has a larger raw magnitude", () => {
     // AC-25's own worked example: precision -0.02, recall +0.04, citation +0.01.
-    // Recall has the largest absolute delta (4pts) so it headlines; the
-    // sentence still names precision's drop in the trailing note.
+    // Recall has the largest absolute delta (4pts), but precision is the
+    // only metric that REGRESSED (dropped by >= 2pts), so it headlines —
+    // matching the spec's literal example sentence, which names the drop.
     const previous = { recall: 0.76, precision: 0.93, citation_accuracy: 0.94 };
     const current = { recall: 0.8, precision: 0.91, citation_accuracy: 0.95 };
     const alert = buildAlert(current, previous);
-    expect(alert).toContain('Recall rose 4pts');
-    expect(alert).toContain('precision down');
-    expect(alert).toContain('citation accuracy up');
+    expect(alert).toBe('Precision dipped 2pts — recall and citation accuracy both up.');
+  });
+
+  it('falls back to the largest-magnitude metric when nothing regressed by >= 2pts', () => {
+    // All deltas are flat-or-positive — no regression to prioritize, so the
+    // fallback (largest absolute delta) still applies, unchanged from before.
+    const previous = { recall: 0.7, precision: 0.9, citation_accuracy: 0.94 };
+    const current = { recall: 0.75, precision: 0.9, citation_accuracy: 0.95 };
+    const alert = buildAlert(current, previous);
+    expect(alert).toBe('Recall rose 5pts — precision flat, citation accuracy up.');
   });
 
   it('is deterministic — identical inputs always produce the identical sentence', () => {

@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
+import { EvalRunResult } from '@devdigest/shared';
 import { getContext } from '../_shared/context.js';
 import { IdParams } from '../_shared/schemas.js';
 import { NotFoundError } from '../../platform/errors.js';
@@ -120,7 +121,7 @@ export default async function evalsRoutes(appBase: FastifyInstance) {
 
   app.post(
     '/agents/:id/eval-cases/:caseId/run',
-    { schema: { params: EvalCaseParams } },
+    { schema: { params: EvalCaseParams, response: { 200: EvalRunResult } } },
     async (req) => {
       const { workspaceId } = await getContext(container, req);
       const result = await service.runOne(workspaceId, req.params.id, req.params.caseId);
