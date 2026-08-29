@@ -87,6 +87,17 @@ asserts on. So under `openrouter`:
   `evals/proxy/`. Start it (`pnpm proxy:up`) and point `OPENROUTER_BASE_URL` at it
   (`http://localhost:4000`). See [Running tool tiers on cheap models](#running-tool-tiers-on-cheap-models-litellm-proxy).
 
+  **Prefer an `anthropic/*` slug over the proxy when one will do.** `EVAL_MODEL=anthropic/claude-haiku-4.5`
+  hits the Skin directly — `OPENROUTER_BASE_URL` stays unset (defaults to `https://openrouter.ai/api`),
+  no proxy container at all. This repo's own `.github/workflows/harness-evals.yml` uses exactly this
+  for `agent-evals`/`workflow-evals`, after the proxy+DeepSeek combination hit three real problems on
+  this suite: DeepSeek doesn't reliably dispatch subagents (works inline instead), the DeepSeek/DeepInfra
+  backend behind OpenRouter caps context at 32K tokens (some cases run larger), and the proxy's wildcard
+  route mangled a dispatched subagent's own `model: sonnet` frontmatter into an invalid slug
+  (`openrouter/claude-sonnet-5`, a 400). None of those apply to a real Anthropic model on the Skin — it's
+  the same dispatch path the subscription runner already uses, just billed through OpenRouter. Reach for
+  the proxy specifically when you need a **non-Anthropic** model in a tool tier (Gemini, Llama, …).
+
 The default (`subscription`) path is untouched — the dispatcher only diverges when
 `EVAL_BACKEND=openrouter`.
 
@@ -561,7 +572,7 @@ tokens > 125% of baseline), `missing_data` (a config has zero records for a test
 |--------|-----|
 | A skill's `SKILL.md` (quick check) | `pnpm vitest run skills/<skill>` |
 | A subagent file (quick check) | `pnpm vitest run agents/<agent>` |
-| `CLAUDE.md` / activation / dispatch | `pnpm eval:workflow` |
+| `AGENTS.md` (root `CLAUDE.md` is a symlink to it) / activation / dispatch | `pnpm eval:workflow` |
 | Any artifact's structure | `pnpm eval:quality` |
 | A `SKILL.md` edit you want to **measure** | repeat/delta loop: `--label baseline` before, `--label candidate` after, then `eval:delta` |
 | New skill/agent — is it **worth its tokens**? | `pnpm eval:benchmark skills/<skill> -n 5` |

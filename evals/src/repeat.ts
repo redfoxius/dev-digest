@@ -70,9 +70,10 @@ function printTest(agg: NodeAggregate, times: number): void {
 
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
-  // Cap runs at 2 to keep token spend bounded — LLM sessions are expensive, and 2 runs is enough
-  // to catch a blatantly flaky case. Bump MAX_TIMES if you deliberately want a fuller stability run.
-  const MAX_TIMES = 2;
+  // Cap runs at 5 to keep token spend bounded — LLM sessions are expensive. Bumped from 2 for a
+  // fuller stability run on the architecture-reviewer strict/lite A/B (citation-rate signal was
+  // too noisy at n=2). Bump further if you deliberately want an even fuller stability run.
+  const MAX_TIMES = 5;
   let times = MAX_TIMES;
   let label: string | undefined;
   const vitestArgs: string[] = [];
