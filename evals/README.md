@@ -561,7 +561,7 @@ tokens > 125% of baseline), `missing_data` (a config has zero records for a test
 |--------|-----|
 | A skill's `SKILL.md` (quick check) | `pnpm vitest run skills/<skill>` |
 | A subagent file (quick check) | `pnpm vitest run agents/<agent>` |
-| `CLAUDE.md` / activation / dispatch | `pnpm eval:workflow` |
+| `AGENTS.md` (root `CLAUDE.md` is a symlink to it) / activation / dispatch | `pnpm eval:workflow` |
 | Any artifact's structure | `pnpm eval:quality` |
 | A `SKILL.md` edit you want to **measure** | repeat/delta loop: `--label baseline` before, `--label candidate` after, then `eval:delta` |
 | New skill/agent — is it **worth its tokens**? | `pnpm eval:benchmark skills/<skill> -n 5` |
