@@ -183,6 +183,11 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
+      # evals/README.md warns tool-tier cases hitting OpenRouter under load can get throttled — a
+      # live run hit a 402 "exceed available credits given current in-flight requests" with all
+      # matrix legs firing at once. Cap concurrency instead of letting the whole matrix hammer the
+      # same OpenRouter account simultaneously.
+      max-parallel: 3
       matrix:
         agent: ${{ fromJson(needs.detect.outputs.agents) }}
     defaults:
