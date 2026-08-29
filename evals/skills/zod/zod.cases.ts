@@ -3,6 +3,11 @@ import { fixtureReader } from "../../src/index.js";
 
 const fx = fixtureReader(import.meta.url);
 
+// threshold: 0.6, not 0.7, on every 3-practice case below — with 3 practices the only achievable
+// scores are 0, 0.667, and 1.0, and 0.7 sits between 0.667 and 1.0, so catching 2 of 3 real issues
+// (a good review) always fails. Live CI on DeepSeek hit exactly this: a flaky 2/3 miss on a
+// legitimate practice. 0.6 tolerates one miss without passing a 1/3 or 0/3 review.
+
 // Migrated from the legacy .claude/skills/zod/evals/evals.json (run via scripts/run-skill-evals.mjs
 // + .github/workflows/skill-evals.yml). Same three fixtures and expectations, ported to this
 // package's SkillCase/practices shape.
@@ -38,7 +43,7 @@ export const cases: SkillCase[] = [
       "the review flags payloadSchema.parse(body) on user-controlled request input and recommends safeParse() instead so validation failures don't throw uncaught",
       "the review flags the separately hand-written Payload interface as redundant/risk-of-drift and recommends z.infer<typeof payloadSchema> instead",
     ],
-    threshold: 0.7,
+    threshold: 0.6,
     maxTurns: 8,
   },
   {
@@ -64,7 +69,7 @@ export const cases: SkillCase[] = [
       "flags `metadata: z.any()` as unsafe and recommends `z.unknown()` instead (schema-use-unknown-not-any)",
       "flags `registerSchema.parse(rawBody)` as unsafe on untrusted/raw request input and recommends `safeParse()` (parse-use-safeparse)",
     ],
-    threshold: 0.7,
+    threshold: 0.6,
     maxTurns: 8,
   },
   {
@@ -76,7 +81,7 @@ export const cases: SkillCase[] = [
       "flags `interface ProductUpdateInput` as duplicating the schema shape and recommends `z.infer<typeof productUpdateSchema>` instead (type-use-z-infer)",
       "flags `JSON.parse(rawJson)` followed by an `as ProductUpdateInput` cast as unvalidated/untrusted data that never passes through a zod schema (parse-never-trust-json)",
     ],
-    threshold: 0.7,
+    threshold: 0.6,
     maxTurns: 8,
   },
   {
@@ -88,7 +93,7 @@ export const cases: SkillCase[] = [
       "flags `querySchema` being constructed fresh inside `searchProducts` on every call and recommends hoisting it to module scope (perf-cache-schemas / perf-avoid-dynamic-creation)",
       "flags the `.refine()` cross-field check (minPrice <= maxPrice) as missing a `path`, so the error can't be attributed to a specific field (refine-add-path)",
     ],
-    threshold: 0.7,
+    threshold: 0.6,
     maxTurns: 8,
   },
 ];
