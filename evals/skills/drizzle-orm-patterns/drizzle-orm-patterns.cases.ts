@@ -23,10 +23,15 @@ export const cases: SkillCase[] = [
     name: "flags a self-referencing FK defined without an arrow function",
     kind: "quality",
     prompt: `Review this Drizzle schema and transaction helper for correctness issues.\n\n${SCHEMA_SNIPPET}`,
+    // Dropped a third practice that used to live here ("does not claim .returning() is
+    // universally supported...") — .returning() is never mentioned in SCHEMA_SNIPPET or the
+    // prompt, so it's an absence-of-a-claim check with nothing to react to. llmJudge only PASSes
+    // on a verbatim quote as evidence (src/scoring/llm-judge.ts); there is no quote that can prove
+    // a negative about something never discussed, so this practice was unwinnable regardless of
+    // model quality — it wasn't measuring anything real.
     practices: [
       "the review flags managerId's self-reference (references(users.id)) as needing an arrow function (references(() => users.id)) to avoid the circular-dependency issue, not just silence on this line",
       "the review notes that tx.rollback() throws an exception, so the transferBalance function needs a try/catch around the transaction call site or it will propagate as an unhandled rejection",
-      "the review does not claim .returning() is universally supported across all Drizzle-supported databases without a caveat",
     ],
     threshold: 0.65,
     maxTurns: 8,
