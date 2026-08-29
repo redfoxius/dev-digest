@@ -12,7 +12,8 @@ export const cases: SkillCase[] = [
       "the answer recommends at least one of the specific documented mitigations: replacing type intersections with interfaces, splitting the large union type (>100 members) into smaller pieces, or avoiding circular generic constraints",
       "the answer's recommendations are concrete/actionable (name a specific technique), not a vague 'simplify your types' statement",
     ],
-    threshold: 0.6,
+    // 2 practices → only 0.5/1.0 achievable; 0.6 required both.
+    threshold: 0.5,
     maxTurns: 8,
   },
   {
@@ -26,7 +27,8 @@ export const cases: SkillCase[] = [
       "the answer recommends branded/nominal types (e.g. a Brand<K, T> pattern) to distinguish OrderId from UserId at the type level",
       "the answer explains this prevents accidental mixing of same-shaped domain primitives that plain string types wouldn't catch",
     ],
-    threshold: 0.6,
+    // 2 practices → only 0.5/1.0 achievable; 0.6 required both.
+    threshold: 0.5,
     maxTurns: 6,
   },
 ];

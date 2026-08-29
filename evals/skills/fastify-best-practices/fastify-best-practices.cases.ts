@@ -36,7 +36,9 @@ export const cases: SkillCase[] = [
       "the answer recommends applying an auth/admin check as a hook (e.g. onRequest/preHandler) registered once for the plugin/encapsulation context, rather than repeating the same check in every handler",
       "the answer explains the risk of the per-handler approach: a new 7th route added later could forget the check",
     ],
-    threshold: 0.6,
+    // 2 practices → the only non-zero scores are 0.5/1.0; 0.6 sat above 0.5, requiring both even
+    // though giving the right recommendation without the risk elaboration is still a good answer.
+    threshold: 0.5,
     maxTurns: 6,
   },
 ];

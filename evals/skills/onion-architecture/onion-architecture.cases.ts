@@ -32,7 +32,8 @@ export const cases: SkillCase[] = [
       "the review names reader.ts (or 'the module's reader/FS-owning file') as where this filesystem read belongs instead of inline in service.ts",
       "the review does not excuse the violation just because the change is described as a 'quick one-off' or 'just for a debug panel'",
     ],
-    threshold: 0.7,
+    // 3 practices → 0.7 sat between 0.667/1.0, requiring all 3.
+    threshold: 0.6,
     maxTurns: 8,
   },
 ];

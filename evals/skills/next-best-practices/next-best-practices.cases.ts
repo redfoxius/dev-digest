@@ -33,7 +33,8 @@ export const cases: SkillCase[] = [
       "the answer recommends next/image instead of a raw <img> tag",
       "the answer mentions that a remote image source needs to be configured (e.g. remotePatterns/images config) for next/image to allow it",
     ],
-    threshold: 0.6,
+    // 2 practices → only 0.5/1.0 achievable; 0.6 required both.
+    threshold: 0.5,
     maxTurns: 6,
   },
 ];

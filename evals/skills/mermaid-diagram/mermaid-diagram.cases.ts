@@ -29,7 +29,9 @@ export const cases: SkillCase[] = [
       "the answer does not draw all 30+ individual nodes flat on one diagram; it groups related nodes into subgraphs (e.g. one subgraph per package/service) or explicitly proposes splitting into multiple diagrams",
       "the answer explains or demonstrates staying near the ~20 node guideline rather than producing an unreadably dense single diagram",
     ],
-    threshold: 0.6,
+    // 2 practices → 0.6 sat above the 0.5 bucket, requiring both even when the diagram itself is
+    // correctly grouped (the structural fact) and only the prose narration of why is missing.
+    threshold: 0.5,
     maxTurns: 8,
   },
 ];

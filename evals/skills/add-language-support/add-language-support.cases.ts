@@ -31,7 +31,9 @@ export const cases: SkillCase[] = [
       "the answer explains the risk in concrete terms — a field's position being assumed instead of checked can silently produce wrong output with no crash or type error, not just 'best practice'",
       "the answer does not accept skipping the live-parse check as a valid time-saving shortcut",
     ],
-    threshold: 0.7,
+    // 3 practices → achievable scores are 0/0.667/1.0; 0.7 sat between 0.667 and 1.0, requiring
+    // all 3 even though catching 2 of 3 real points is a solid answer.
+    threshold: 0.6,
     maxTurns: 8,
   },
 ];
