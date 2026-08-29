@@ -40,13 +40,21 @@ export const NAV: NavGroup[] = [
     ],
   },
   {
-    // Eval Dashboard belongs here too (matching the empty `eval*` schema
-    // tables) but isn't built yet — don't add a nav entry for it until its
-    // own lesson ships. Conventions IS built (Conventions Extractor).
     section: "SKILLS LAB",
     items: [
       { key: "skills", label: "Skills", icon: "Sparkles", href: "/skills", gKey: "s" },
       { key: "agents", label: "Agents", icon: "Cpu", href: "/agents", gKey: "a" },
+      {
+        // key: "eval" — matches the pre-existing `activeKeyFor` scaffolding
+        // (`client/src/components/app-shell/helpers.ts`, `pathname.startsWith("/eval")
+        // → "eval"`), written ahead of this lesson so the sidebar highlight
+        // already resolves correctly once this entry exists.
+        key: "eval",
+        label: "Eval Dashboard",
+        icon: "Gauge",
+        href: "/eval-dashboard",
+        gKey: "e",
+      },
       {
         key: "conventions",
         label: "Conventions",
@@ -84,6 +92,7 @@ export const SHORTCUTS: ShortcutDef[] = [
   { keys: "g p", label: "Go to Pull Requests", group: "Navigation" },
   { keys: "g s", label: "Go to Skills", group: "Navigation" },
   { keys: "g a", label: "Go to Agents", group: "Navigation" },
+  { keys: "g e", label: "Go to Eval Dashboard", group: "Navigation" },
   { keys: "g c", label: "Go to Conventions", group: "Navigation" },
   { keys: "g t", label: "Go to Onboarding Tour", group: "Navigation" },
   { keys: "j / k", label: "Next / previous finding", group: "Findings" },
