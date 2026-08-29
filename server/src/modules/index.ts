@@ -13,6 +13,7 @@ import blast from './blast/routes.js';
 import contextDocs from './context-docs/routes.js';
 import onboarding from './onboarding/routes.js';
 import riskBrief from './risk-brief/routes.js';
+import evals from './evals/routes.js';
 
 /**
  * Module registry. Each feature module is a Fastify plugin in
@@ -42,4 +43,5 @@ export const modules: Record<string, FastifyPluginAsync> = {
   contextDocs,
   onboarding,
   riskBrief,
+  evals,
 };

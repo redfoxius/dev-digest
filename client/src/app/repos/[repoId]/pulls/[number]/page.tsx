@@ -7,6 +7,7 @@
 
 import React from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { Skeleton, ErrorState } from "@devdigest/ui";
 import { AppShell } from "../../../../../components/app-shell";
 import { RepoNotFound } from "@/components/repo-not-found";
@@ -22,8 +23,10 @@ import { usePrReviews, useCancelRun, usePrActiveRuns, usePrRuns, useDeleteRun } 
 import { usePrBlastRadius } from "@/lib/hooks/blast";
 import { usePrRiskBrief } from "@/lib/hooks/risk-brief";
 import { buildFlaggedRefsMap } from "@/lib/risk-brief-helpers";
+import { useCreateEvalCaseFromFinding } from "@/lib/hooks/evals";
 import { useActiveRepo, useRepoNotFound } from "../../../../../lib/repo-context";
 import { ApiError } from "../../../../../lib/api";
+import { useToast } from "../../../../../lib/toast";
 import { githubPrUrl, githubBlobUrl } from "../../../../../lib/github-urls";
 import type { FindingRecord } from "@devdigest/shared";
 import type { ScrollTarget } from "../../../../../components/diff-viewer";
@@ -104,6 +107,18 @@ export default function PRDetailPage() {
   function handleViewInDiff(file: string, line: number) {
     setDiffScrollTarget((prev) => ({ path: file, line, nonce: (prev?.nonce ?? 0) + 1 }));
     setTab("diff");
+  }
+
+  // "Turn into eval case" (specs/cross-cutting/eval-pipeline, AC-28/AC-29) —
+  // confirms in place with a toast naming the created case, without
+  // navigating away from this page (unlike handleViewInDiff above).
+  const tPrReview = useTranslations("prReview");
+  const toast = useToast();
+  const createEvalCase = useCreateEvalCaseFromFinding();
+  function handleTurnIntoEvalCase(findingId: string) {
+    createEvalCase.mutate(findingId, {
+      onSuccess: (evalCase) => toast.success(tPrReview("finding.evalCaseCreated", { name: evalCase.name })),
+    });
   }
 
   // Blast Radius callers are frequently files this PR never touched, and
@@ -256,6 +271,7 @@ export default function PRDetailPage() {
             }}
             onRunDone={handleRunSettled}
             onViewInDiff={handleViewInDiff}
+            onTurnIntoEvalCase={handleTurnIntoEvalCase}
           />
         )}
 
