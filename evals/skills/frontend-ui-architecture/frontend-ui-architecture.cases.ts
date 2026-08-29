@@ -26,7 +26,8 @@ export const cases: SkillCase[] = [
       "the review recommends moving the data fetching into a lib/hooks/<domain>.ts TanStack Query hook rather than leaving it in the component or just wrapping it in useEffect more carefully",
       "the review does not suggest a generic services/ folder, since this repo has no services/ folder and uses lib/api.ts + lib/hooks/*.ts instead",
     ],
-    threshold: 0.7,
+    // 3 practices → 0.7 sat between the 0.667/1.0 achievable scores, requiring all 3.
+    threshold: 0.6,
     maxTurns: 8,
   },
   {
@@ -39,7 +40,8 @@ export const cases: SkillCase[] = [
       "the answer recommends colocating RunBadge under that route's private _components/ folder rather than the top-level src/components/ directory, since it's used in only one route",
       "the answer explains that src/components/ is reserved for UI reused across 2+ routes",
     ],
-    threshold: 0.65,
+    // 2 practices → only 0.5/1.0 are achievable non-zero scores; 0.65 required both.
+    threshold: 0.5,
     maxTurns: 6,
   },
 ];

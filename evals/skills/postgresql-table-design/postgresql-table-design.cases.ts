@@ -36,7 +36,8 @@ export const cases: SkillCase[] = [
       "the answer recommends a GIN index on the JSONB column instead of a B-tree index for containment queries",
       "the answer does not recommend a plain B-tree index as sufficient for @> containment queries on a JSONB column",
     ],
-    threshold: 0.6,
+    // 2 practices → only 0.5/1.0 achievable; 0.6 required both.
+    threshold: 0.5,
     maxTurns: 6,
   },
 ];

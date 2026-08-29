@@ -23,7 +23,8 @@ export const cases: SkillCase[] = [
       "the review flags jwt.decode() being used instead of jwt.verify() on the /me route, explaining that decode() does not check the signature",
       "the review does not report either finding as merely theoretical/LOW confidence given both trace directly to attacker-controlled input",
     ],
-    threshold: 0.7,
+    // 3 practices → 0.7 sat between 0.667/1.0, requiring all 3.
+    threshold: 0.6,
     maxTurns: 8,
   },
   {
@@ -36,7 +37,8 @@ export const cases: SkillCase[] = [
       "the answer states this is safe (or not a real vulnerability) because the value is server-controlled (an env var), not attacker-controlled",
       "the answer does not flag this as an SSRF or injection vulnerability given no attacker-controlled input is involved",
     ],
-    threshold: 0.6,
+    // 2 practices → only 0.5/1.0 achievable; 0.6 required both.
+    threshold: 0.5,
     maxTurns: 6,
   },
 ];

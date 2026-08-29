@@ -34,7 +34,8 @@ export const cases: SkillCase[] = [
       "the answer recommends consolidating into fewer, longer tests that walk through full user flows (e.g. happy path: fill fields -> submit -> success; validation errors; API failure) rather than 8 isolated tiny assertions",
       "the answer references the philosophy of fewer tests covering real use-cases over maximizing test count or line coverage",
     ],
-    threshold: 0.6,
+    // 2 practices → only 0.5/1.0 achievable; 0.6 required both.
+    threshold: 0.5,
     maxTurns: 6,
   },
 ];

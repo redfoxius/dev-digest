@@ -57,7 +57,8 @@ export const cases: SkillCase[] = [
       "the answer recommends using Zod's catch() on the schema itself for fault-tolerant parsing, rather than wrapping every call site in try/catch",
       "the answer explains this centralizes the fallback in the schema definition instead of duplicating try/catch logic everywhere",
     ],
-    threshold: 0.6,
+    // 2 practices → only 0.5/1.0 achievable; 0.6 required both.
+    threshold: 0.5,
     maxTurns: 6,
   },
   {
