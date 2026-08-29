@@ -5,7 +5,7 @@ description: "Web application security best practices based on OWASP Top 10:2025
 
 # Security Best Practices — OWASP Top 10:2025
 
-Security guidance for React + Express + MongoDB + JWT stacks. See `examples.md` for unsafe/safe code pairs, `checklists.md` for quick checklists, `references.md` for all sources.
+Security guidance for React + Express + MongoDB + JWT stacks. See `examples.md` for unsafe/safe code pairs, `checklists.md` for quick checklists, `references.md` for all sources. Regression coverage lives in `evals/skills/security/`.
 
 ---
 

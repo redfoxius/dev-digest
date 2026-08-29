@@ -16,6 +16,7 @@ their own AGENTS.md) · Docker (Postgres+pgvector only; API/web run on host).
 - `reviewer-core/`  Pure review engine (diff→LLM→findings), no DB/FS — see [reviewer-core/AGENTS.md](reviewer-core/AGENTS.md)
 - `e2e/`            Deterministic browser e2e — see [e2e/AGENTS.md](e2e/AGENTS.md)
 - `mcp-server/`     Local stdio MCP server exposing PR review as 5 tools, talks to `server/` over HTTP — see [mcp-server/AGENTS.md](mcp-server/AGENTS.md)
+- `evals/`          Evals for the Claude Code harness itself (skills/agents/workflow) — see [evals/README.md](evals/README.md); wired into CI via `.github/workflows/harness-evals.yml`
 - `docs/`           Cross-cutting reference docs (agent prompts, model choice)
 
 ## Commands
