@@ -22,13 +22,25 @@ import { EvalRun, EvalOwnerKind, Conformance, Provider, CiFailOn } from './knowl
  * range") or `must_not_flag` ("no agent finding may land on this file:line
  * range"). Never case-wide — see spec §4.
  */
-export const EvalExpectation = z.object({
-  type: z.enum(['must_find', 'must_not_flag']),
-  file: z.string(),
-  start_line: z.number().int(),
-  end_line: z.number().int(),
-  description: z.string().nullish(),
-});
+export const EvalExpectation = z
+  .object({
+    type: z.enum(['must_find', 'must_not_flag']),
+    // An empty file path can never validly identify a location.
+    file: z.string().min(1),
+    // Line numbers are 1-indexed, never <= 0.
+    start_line: z.number().int().positive(),
+    end_line: z.number().int().positive(),
+    description: z.string().nullish(),
+  })
+  .superRefine((val, ctx) => {
+    if (val.end_line < val.start_line) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'end_line must be >= start_line',
+        path: ['end_line'],
+      });
+    }
+  });
 export type EvalExpectation = z.infer<typeof EvalExpectation>;
 
 /**
