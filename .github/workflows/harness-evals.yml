@@ -1,0 +1,255 @@
+# Harness evals — regression gate for the Claude Code harness itself (skills, agents, CLAUDE.md).
+#
+# Runs the `evals/` vitest package (see evals/README.md) on every PR that touches the harness,
+# scoped to exactly what changed via evals/scripts/ci-detect.mjs:
+#   - a skill under .claude/skills/<name>/ changed  → content-tier evals for that skill
+#   - an agent under .claude/agents/<name>.md changed → tool-tier evals for that agent
+#   - AGENTS.md / any agent / the evals engine itself changed → the systemic workflow tier
+#     (root CLAUDE.md is a symlink to AGENTS.md — see CLAUDE.md's own "Non-default conventions" —
+#     so this repo's real edits land in AGENTS.md; that's what's checked, not the symlink itself)
+#
+# Runs entirely on OpenRouter (never the Anthropic subscription/API key) so CI cost is cheap and
+# predictable. Two different runtimes, per evals/README.md's "Runners" section:
+#
+#   - skill-evals is the CONTENT tier (skillTask -> a direct OpenAI-compatible call, no tool use).
+#     Any OpenRouter model works here natively. Default EVAL_MODEL=deepseek/deepseek-chat — cheap,
+#     and measured at 15/18 pass on this repo's actual skill suite.
+#   - agent-evals and workflow-evals are the TOOL tier (agentTask/workflowTask -> the real Claude
+#     Agent SDK, which only speaks the Anthropic wire protocol). A first pass tried routing this
+#     through DeepSeek via a LiteLLM translating proxy and hit three real problems: DeepSeek
+#     doesn't reliably dispatch subagents (does the work inline instead), a DeepSeek/DeepInfra
+#     backend caps context at 32K tokens (some cases run ~50K+), and the proxy's wildcard route
+#     mangles a dispatched subagent's own `model: sonnet` frontmatter into an invalid slug. Anthropic
+#     models don't have any of these problems — OpenRouter's native "Anthropic Skin" serves them
+#     directly (POST to https://openrouter.ai/api, no proxy container at all), so these two jobs
+#     run EVAL_MODEL=anthropic/claude-haiku-4.5: real Anthropic dispatch behavior, no translation
+#     layer, materially cheaper than Sonnet.
+#
+# EVAL_JUDGE_MODEL (the scorer) is independent of the above — llmJudge always goes through the
+# direct content-tier call (src/runtime/dispatch.ts's runContent), never the Agent SDK, so it never
+# needs the Skin/proxy regardless of which tier is being judged. Default
+# google/gemini-2.5-flash — cross-family from both task models above, to soften self-preference.
+#
+# All three are knobs, not a UI input — override via repository/organization Actions variables
+# (Settings → Secrets and variables → Actions → Variables): EVAL_MODEL, EVAL_JUDGE_MODEL,
+# EVAL_AGENT_MODEL (agent-evals + workflow-evals only).
+#
+# workflow-evals stays non-blocking (continue-on-error) as general LLM-eval flakiness insurance
+# (evals/README.md's own stats call a 20-80% pass rate "flaky") — skill-evals and agent-evals stay
+# blocking since their judged content evals are steadier.
+#
+# A changed skill/agent with NO written evals is never silently skipped — evals/scripts/ci-detect.mjs
+# logs it explicitly ("SKIP <name> (no evals)") and the `detect` job's summary lists it, instead of
+# either failing the run or making it look like nothing happened.
+#
+# Fork-PR guard: the model-calling jobs (skill-evals/agent-evals/workflow-evals) skip cleanly on a
+# pull_request from a fork instead of failing loudly. This is UX, not the security boundary — the
+# `pull_request` trigger (never `pull_request_target`) already means GitHub withholds
+# `secrets.OPENROUTER_API_KEY` from fork runs on its own, so a fork PR would otherwise just hard-fail
+# on an empty key (an OpenRouter auth error).
+name: harness evals
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.claude/skills/**'
+      - '.claude/agents/**'
+      - 'AGENTS.md'
+      - 'evals/**'
+  pull_request:
+    paths:
+      - '.claude/skills/**'
+      - '.claude/agents/**'
+      - 'AGENTS.md'
+      - 'evals/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: harness-evals-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  EVAL_BACKEND: openrouter
+  EVAL_MODEL: ${{ vars.EVAL_MODEL || 'deepseek/deepseek-chat' }}
+  EVAL_JUDGE_MODEL: ${{ vars.EVAL_JUDGE_MODEL || 'google/gemini-2.5-flash' }}
+  OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+
+jobs:
+  detect:
+    name: detect changed artifacts
+    runs-on: ubuntu-latest
+    outputs:
+      skills: ${{ steps.detect.outputs.skills }}
+      agents: ${{ steps.detect.outputs.agents }}
+      run_workflow: ${{ steps.detect.outputs.run_workflow }}
+      skipped_skills: ${{ steps.detect.outputs.skipped_skills }}
+      skipped_agents: ${{ steps.detect.outputs.skipped_agents }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compute changed files
+        id: changed
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE="${{ github.event.pull_request.base.sha }}"
+            HEAD="${{ github.event.pull_request.head.sha }}"
+          else
+            BASE="${{ github.event.before }}"
+            HEAD="${{ github.sha }}"
+          fi
+          {
+            echo "files<<EOF"
+            git diff --name-only "$BASE" "$HEAD"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Run ci-detect
+        id: detect
+        env:
+          CHANGED_FILES: ${{ steps.changed.outputs.files }}
+        run: node evals/scripts/ci-detect.mjs
+
+      # ci-detect already logs SKIP lines to this step's own log (stderr); this also puts them in
+      # the PR checks Summary tab so a "changed a skill/agent with no evals" run doesn't read as
+      # if nothing happened.
+      - name: Change-detection summary
+        if: always()
+        env:
+          SKILLS: ${{ steps.detect.outputs.skills }}
+          AGENTS: ${{ steps.detect.outputs.agents }}
+          RUN_WORKFLOW: ${{ steps.detect.outputs.run_workflow }}
+          SKIPPED_SKILLS: ${{ steps.detect.outputs.skipped_skills }}
+          SKIPPED_AGENTS: ${{ steps.detect.outputs.skipped_agents }}
+        run: |
+          {
+            echo "### harness evals — change detection"
+            echo "- skill evals to run: \`${SKILLS}\`"
+            echo "- agent evals to run: \`${AGENTS}\`"
+            echo "- workflow tier: \`${RUN_WORKFLOW}\`"
+            [ -n "$SKIPPED_SKILLS" ] && echo "- ⚠️ SKIP skills (changed, no evals written): ${SKIPPED_SKILLS}"
+            [ -n "$SKIPPED_AGENTS" ] && echo "- ⚠️ SKIP agents (changed, no evals written): ${SKIPPED_AGENTS}"
+            if [ "${{ github.event_name }}" = "pull_request" ] && [ "${{ github.event.pull_request.head.repo.full_name }}" != "${{ github.repository }}" ]; then
+              echo "- ⚠️ fork PR detected — skill-evals/agent-evals/workflow-evals will skip (no secrets on fork PRs)"
+            fi
+            true
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  skill-evals:
+    name: skill evals
+    needs: detect
+    if: |
+      needs.detect.outputs.skills != '[]' &&
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      # This matrix can run up to ~18 legs, all hitting the same OpenRouter account concurrently
+      # with agent-evals + workflow-evals. A live run hit 402 "exceed available credits given
+      # current in-flight requests" across ALL agent-evals legs even after capping agent-evals'
+      # own max-parallel, because skill-evals (this job) had no cap of its own — the account-wide
+      # concurrency ceiling is shared across every job in the run, not per-job.
+      max-parallel: 5
+      matrix:
+        skill: ${{ fromJson(needs.detect.outputs.skills) }}
+    defaults:
+      run:
+        working-directory: evals
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: evals/pnpm-lock.yaml
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm vitest run "skills/${{ matrix.skill }}"
+
+  agent-evals:
+    name: agent evals
+    needs: detect
+    if: |
+      needs.detect.outputs.agents != '[]' &&
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      # evals/README.md warns tool-tier cases hitting OpenRouter under load can get throttled — a
+      # live run hit a 402 "exceed available credits given current in-flight requests" with all
+      # matrix legs firing at once. Cap concurrency instead of letting the whole matrix hammer the
+      # same OpenRouter account simultaneously.
+      max-parallel: 3
+      matrix:
+        agent: ${{ fromJson(needs.detect.outputs.agents) }}
+    defaults:
+      run:
+        working-directory: evals
+    env:
+      # Anthropic slug via OpenRouter's native Skin (https://openrouter.ai/api, the env.ts default)
+      # — no LiteLLM proxy needed, see the file-header comment for why this tier needs an
+      # Anthropic-family model in the first place.
+      EVAL_MODEL: ${{ vars.EVAL_AGENT_MODEL || 'anthropic/claude-haiku-4.5' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: evals/pnpm-lock.yaml
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm vitest run "agents/${{ matrix.agent }}"
+
+  workflow-evals:
+    name: workflow evals (non-blocking)
+    needs: detect
+    if: |
+      needs.detect.outputs.run_workflow == 'true' &&
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    defaults:
+      run:
+        working-directory: evals
+    env:
+      # Same Anthropic-Skin reasoning and same override var as agent-evals — a dispatched subagent
+      # in a workflow case needs the real Agent SDK dispatch path, which only Anthropic models get
+      # reliably through OpenRouter (see the file-header comment).
+      EVAL_MODEL: ${{ vars.EVAL_AGENT_MODEL || 'anthropic/claude-haiku-4.5' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: evals/pnpm-lock.yaml
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm eval:workflow

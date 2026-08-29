@@ -103,19 +103,32 @@ routed to which files, and any "skipped" notes (files out of scope,
       "skill": "onion-architecture",
       "severity": "CRITICAL",
       "summary": "service.ts imports drizzle-orm directly",
-      "rationale": "Line 42: `import { eq } from 'drizzle-orm'` inside service.ts breaks the dependency rule (.claude/skills/onion-architecture/SKILL.md) — service layer must only depend on repository methods/port interfaces, never Drizzle directly."
+      "rationale": "Line 42: `import { eq } from 'drizzle-orm'` inside service.ts breaks The Dependency Rule (.claude/skills/onion-architecture/SKILL.md) — service layer must only depend on repository methods/port interfaces, never Drizzle directly."
     }
-  ]
+  ],
+  "gate": "FAIL"
 }
 ```
 
 Fields, all required: `file`, `line`, `skill` (which routed skill produced
 this finding), `severity` (`CRITICAL`/`WARNING`/`SUGGESTION` — mapped from
 the routed skill's own CRITICAL/HIGH/MEDIUM), `summary`, `rationale` (must
-include the specific rule citation, not just a restatement of the
-summary). Empty `findings` array is the correct output when nothing
-clears the severity bar — never pad with SUGGESTION-tier noise to appear
-thorough.
+include the specific rule/section name from the routed skill's own
+document, e.g. "The Dependency Rule", "Composition Root", "Domain
+Purity" — not just a restatement of the summary). Empty `findings` array
+is the correct output when nothing clears the severity bar — never pad
+with SUGGESTION-tier noise to appear thorough.
+
+Top-level `gate` is required on every response, even an empty-findings
+one: `"FAIL"` if any finding is `CRITICAL`, `"PASS"` otherwise. State the
+same verdict in the prose header too (e.g. "Gate: FAIL — 1 CRITICAL
+finding"), so it's visible without parsing the JSON.
+
+**Cite evidence verbatim.** `rationale` must quote the exact offending
+line — the actual import statement, function call, or declaration copied
+from the source file — not a paraphrase of what the line does. A
+rationale that describes the problem without a verbatim quote is
+incomplete; go back and copy the line.
 
 ## Discipline
 
