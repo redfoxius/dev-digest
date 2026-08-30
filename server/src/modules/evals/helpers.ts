@@ -47,6 +47,35 @@ export function toEvalRunRecordDto(row: EvalRunRow, caseName: string | null = nu
 }
 
 // ===========================================================================
+// Scoping a frozen `input_diff` down to the finding's own file(s)
+// ===========================================================================
+
+/**
+ * Slices a raw unified diff (git's `diff --git a/X b/X` / `--- ` / `+++ `
+ * format — the same shape `parseUnifiedDiff` reads) down to only the
+ * sections whose new-side path is in `filePaths`. `createFromFinding` uses
+ * this so a case created from one finding freezes just that finding's own
+ * file(s), not the whole PR's diff — a PR touching dozens of files would
+ * otherwise turn every case into a multi-hundred-KB `reviewPullRequest`
+ * call. Falls back to the full `raw` diff if nothing matches (a path-
+ * normalization mismatch should degrade to "too much input", never to an
+ * empty/broken one).
+ */
+export function scopeDiffToFiles(raw: string, filePaths: string[]): string {
+  if (filePaths.length === 0) return raw;
+  const wanted = new Set(filePaths);
+  // Split BEFORE each `diff --git` line, keeping it as the start of its section.
+  const sections = raw.split(/(?=^diff --git )/m);
+  const matched = sections.filter((section) => {
+    const m = section.match(/^\+\+\+ (?:b\/)?(.+)$/m);
+    const path = m?.[1]?.trim();
+    return path !== undefined && path !== '/dev/null' && wanted.has(path);
+  });
+  const result = matched.join('');
+  return result.trim() ? result : raw;
+}
+
+// ===========================================================================
 // Eval-case task framing (WI-6) — reuses `reviews/helpers.ts`'s `taskLine`
 // instructional wording/tone, but NOT `taskLine` itself: that function
 // requires a real `PullRow`, which an eval case never has (spec §4). PR
