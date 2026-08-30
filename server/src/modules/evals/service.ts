@@ -15,7 +15,13 @@ import type { AgentRow, EvalCaseRow, EvalRunRow } from '../../db/rows.js';
 import { resolveAgentRunConfig } from '../agents/helpers.js';
 import { EvalsRepository, type InsertEvalRun } from './repository.js';
 import { aggregateBatch, buildAlert, scoreCase, type ScoreResult } from './scoring.js';
-import { buildEvalTaskLine, evalRunRowToScoreResult, toEvalCaseDto, toEvalRunRecordDto } from './helpers.js';
+import {
+  buildEvalTaskLine,
+  evalRunRowToScoreResult,
+  scopeDiffToFiles,
+  toEvalCaseDto,
+  toEvalRunRecordDto,
+} from './helpers.js';
 
 /**
  * A4 — evals service. Business logic for eval-case lifecycle, run execution,
@@ -114,13 +120,24 @@ export class EvalsService {
       ],
     };
 
+    // Freeze only the finding's own file(s), not the whole PR's diff — a PR
+    // touching dozens of files would otherwise turn every case into a
+    // multi-hundred-KB reviewPullRequest call (observed: a 73-file/329KB PR
+    // diff made a single case's run take minutes). Deliberate metric-scope
+    // narrowing, not free: precision (AC-17) now only measures noise within
+    // this one file, not the whole original PR — an intentional trade-off
+    // for a practical, fast eval set over large real-world PRs.
+    const scopedDiff = scopeDiffToFiles(diff.raw, [finding.file]);
+
     const prFiles = await this.container.reviewRepo.getPrFiles(pull.id);
-    const inputFiles = prFiles.map((f) => ({
-      path: f.path,
-      additions: f.additions,
-      deletions: f.deletions,
-      patch: f.patch,
-    }));
+    const inputFiles = prFiles
+      .filter((f) => f.path === finding.file)
+      .map((f) => ({
+        path: f.path,
+        additions: f.additions,
+        deletions: f.deletions,
+        patch: f.patch,
+      }));
     const inputMeta = {
       repo: `${repoRow.owner}/${repoRow.name}`,
       pr_number: pull.number,
@@ -132,7 +149,7 @@ export class EvalsService {
       workspaceId,
       ownerId: review.agentId,
       name: finding.title,
-      inputDiff: diff.raw,
+      inputDiff: scopedDiff,
       inputFiles,
       inputMeta,
       expectedOutput,
