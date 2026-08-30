@@ -78,3 +78,59 @@ describe("FindingCard — view-in-diff affordance (Phase 4)", () => {
     expect(screen.queryByText("Accept")).not.toBeInTheDocument();
   });
 });
+
+describe("FindingCard — turn into eval case (specs/cross-cutting/eval-pipeline, WI-11)", () => {
+  it("is absent when onTurnIntoEvalCase is omitted (AC-28/AC-29 additive contract)", () => {
+    renderWithIntl(<FindingCard f={FINDING} defaultExpanded onAction={() => {}} />);
+    expect(screen.queryByRole("button", { name: "Turn into eval case" })).not.toBeInTheDocument();
+  });
+
+  it("renders disabled while the finding is undecided (AC-28)", () => {
+    renderWithIntl(
+      <FindingCard f={FINDING} defaultExpanded onAction={() => {}} onTurnIntoEvalCase={() => {}} />,
+    );
+    expect(screen.getByRole("button", { name: "Turn into eval case" })).toBeDisabled();
+  });
+
+  it("enables once the finding is accepted (AC-28)", () => {
+    const accepted = { ...FINDING, accepted_at: "2026-08-29T00:00:00Z" };
+    renderWithIntl(
+      <FindingCard f={accepted} defaultExpanded onAction={() => {}} onTurnIntoEvalCase={() => {}} />,
+    );
+    expect(screen.getByRole("button", { name: "Turn into eval case" })).not.toBeDisabled();
+  });
+
+  it("enables once the finding is dismissed (AC-28)", () => {
+    const dismissed = { ...FINDING, dismissed_at: "2026-08-29T00:00:00Z" };
+    renderWithIntl(
+      <FindingCard f={dismissed} defaultExpanded onAction={() => {}} onTurnIntoEvalCase={() => {}} />,
+    );
+    expect(screen.getByRole("button", { name: "Turn into eval case" })).not.toBeDisabled();
+  });
+
+  it("fires the mutation callback with the finding id when clicked, without toggling expanded state (AC-29)", () => {
+    const onTurnIntoEvalCase = vi.fn();
+    const accepted = { ...FINDING, accepted_at: "2026-08-29T00:00:00Z" };
+    renderWithIntl(
+      <FindingCard f={accepted} onAction={() => {}} onTurnIntoEvalCase={onTurnIntoEvalCase} />,
+    );
+
+    // Card started collapsed — expand it first to reach the actions row,
+    // same precondition the Accept/Dismiss tests rely on.
+    fireEvent.click(screen.getByText("Hardcoded Stripe secret key"));
+    fireEvent.click(screen.getByRole("button", { name: "Turn into eval case" }));
+
+    expect(onTurnIntoEvalCase).toHaveBeenCalledWith("f1");
+  });
+
+  it("never fires the callback while disabled (undecided finding)", () => {
+    const onTurnIntoEvalCase = vi.fn();
+    renderWithIntl(
+      <FindingCard f={FINDING} defaultExpanded onAction={() => {}} onTurnIntoEvalCase={onTurnIntoEvalCase} />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Turn into eval case" }));
+
+    expect(onTurnIntoEvalCase).not.toHaveBeenCalled();
+  });
+});

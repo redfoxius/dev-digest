@@ -27,6 +27,9 @@ interface FindingsTabProps {
   /** "View in diff" affordance on a finding — switches to Files-changed and
    *  scrolls to the exact file:line. Omitted → no affordance rendered. */
   onViewInDiff?: (file: string, line: number) => void;
+  /** "Turn into eval case" affordance on a finding (specs/cross-cutting/
+   *  eval-pipeline, AC-28/AC-29). Omitted → no button rendered. */
+  onTurnIntoEvalCase?: (findingId: string) => void;
 }
 
 export function FindingsTab({
@@ -44,6 +47,7 @@ export function FindingsTab({
   onDelete,
   onRunDone,
   onViewInDiff,
+  onTurnIntoEvalCase,
 }: FindingsTabProps) {
   const handleCancelAll = useCallback(() => {
     liveRunIds.forEach((id) => cancelMutation.mutate(id));
@@ -170,6 +174,7 @@ export function FindingsTab({
             targetRunId={target?.runId ?? null}
             targetNonce={target?.n ?? 0}
             onViewInDiff={onViewInDiff}
+            onTurnIntoEvalCase={onTurnIntoEvalCase}
           />
         ))
       )}

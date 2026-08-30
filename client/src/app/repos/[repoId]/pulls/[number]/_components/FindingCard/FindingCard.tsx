@@ -33,6 +33,7 @@ export function FindingCard({
   repoFullName,
   headSha,
   onViewInDiff,
+  onTurnIntoEvalCase,
 }: {
   f: FindingRecord;
   focused?: boolean;
@@ -45,6 +46,13 @@ export function FindingCard({
    *  switches to Files-changed and scrolls to this finding's file:line.
    *  Omitted → no icon button rendered (additive/no-op). */
   onViewInDiff?: (file: string, line: number) => void;
+  /** "Turn into eval case" (specs/cross-cutting/eval-pipeline, AC-28/AC-29) —
+   *  promotes this finding's accept/dismiss decision into a frozen eval case
+   *  for the agent that produced it. Disabled while the finding is still
+   *  undecided (no `accepted_at`/`dismissed_at`), since its expectation type
+   *  (`must_find` vs `must_not_flag`) can't yet be derived. Omitted → no
+   *  button rendered (additive/no-op, same shape as `onViewInDiff`). */
+  onTurnIntoEvalCase?: (findingId: string) => void;
 }) {
   const t = useTranslations("prReview");
   const [expanded, setExpanded] = React.useState(defaultExpanded ?? false);
@@ -125,6 +133,17 @@ export function FindingCard({
             >
               {t("finding.dismiss")}
             </Button>
+            {onTurnIntoEvalCase && (
+              <Button
+                kind="ghost"
+                size="sm"
+                icon="FlaskConical"
+                disabled={!muted}
+                onClick={() => onTurnIntoEvalCase(f.id)}
+              >
+                {t("finding.turnIntoEvalCase")}
+              </Button>
+            )}
           </div>
         </div>
       )}

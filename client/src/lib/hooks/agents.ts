@@ -3,7 +3,7 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
-import type { Agent, AgentSkillLink, ModelInfo, Provider, ReviewStrategy } from "@devdigest/shared";
+import type { Agent, AgentSkillLink, AgentVersion, ModelInfo, Provider, ReviewStrategy } from "@devdigest/shared";
 
 export function useAgents() {
   return useQuery({
@@ -77,6 +77,31 @@ export function useDeleteAgent() {
       qc.invalidateQueries({ queryKey: ["agents"] });
       qc.removeQueries({ queryKey: ["agent", id] });
     },
+  });
+}
+
+// ---- Agent version history (Eval Dashboard Compare-runs view, AC-22/AC-26/AC-27) ----
+
+/** Every immutable config snapshot for this agent, DESC by `version`
+   (`AgentsRepository.listVersions`, `GET /agents/:id/versions`) — the source
+   list `resolveAgentVersionForBatch` (`CompareRunsModal/helpers.ts`) resolves
+   a batch's live version against. */
+export function useAgentVersions(agentId: string | null | undefined) {
+  return useQuery({
+    queryKey: ["agent-versions", agentId],
+    queryFn: () => api.get<AgentVersion[]>(`/agents/${agentId}/versions`),
+    enabled: !!agentId,
+  });
+}
+
+/** One resolved version's full snapshot (incl. `config.system_prompt`),
+   `GET /agents/:id/versions/:version` — fetched only once a version number
+   has been resolved client-side, hence the extra `version != null` gate. */
+export function useAgentVersion(agentId: string | null | undefined, version: number | null | undefined) {
+  return useQuery({
+    queryKey: ["agent-version", agentId, version],
+    queryFn: () => api.get<AgentVersion>(`/agents/${agentId}/versions/${version}`),
+    enabled: !!agentId && version != null,
   });
 }
 

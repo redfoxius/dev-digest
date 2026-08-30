@@ -111,5 +111,57 @@
   },
   "mount": {
     "body": "Mount point for {owner}. The Agent Editor shell + tab routing are wired by A2 — {owner} renders this tab."
+  },
+  "evals": {
+    "title": "Evals",
+    "newCase": "New case",
+    "runAll": "Run all evals",
+    "runningAll": "Running…",
+    "runAllSuccess": "Eval run complete",
+    "running": "Running…",
+    "runCase": "Run \"{name}\"",
+    "runCaseSuccess": "\"{name}\" ran",
+    "editCase": "Edit \"{name}\"",
+    "deleteCase": "Delete \"{name}\"",
+    "deleteConfirmTitle": "Delete eval case",
+    "deleteConfirmBody": "Delete eval case \"{name}\"? Its run history goes with it. This cannot be undone.",
+    "deleteSuccess": "\"{name}\" deleted",
+    "loadError": "Couldn't load evals for this agent.",
+    "empty": "No eval cases yet. Turn an accepted or dismissed finding into one, or add one manually.",
+    "recall": "Recall",
+    "precision": "Precision",
+    "citationAccuracy": "Citation accuracy",
+    "tracesPassed": "Traces passed",
+    "expectedGot": "expected {expected} / got {got}",
+    "status": {
+      "pass": "Passed on its last run",
+      "fail": "Failed on its last run",
+      "never-run": "Never run"
+    },
+    "modal": {
+      "createTitle": "New eval case",
+      "editTitle": "Edit eval case",
+      "cancel": "Cancel",
+      "save": "Save",
+      "saving": "Saving…",
+      "createSuccess": "Eval case \"{name}\" created",
+      "updateSuccess": "Eval case \"{name}\" updated",
+      "name": "Name",
+      "namePlaceholder": "e.g. Hardcoded secret in config.ts",
+      "notes": "Notes",
+      "tabs": {
+        "diff": "Diff",
+        "files": "Files",
+        "meta": "PR meta"
+      },
+      "diffPlaceholder": "Unified diff text this case runs against…",
+      "filesPlaceholder": "'[{ \"path\": \"src/config.ts\", \"additions\": 1, \"deletions\": 0, \"patch\": \"...\" }]'",
+      "metaPlaceholder": "'{ \"repo\": \"owner/name\", \"pr_number\": 42, \"title\": \"...\" }'",
+      "expectedOutput": "Expected output",
+      "expectedOutputHint": "'{ \"expectations\": [{ \"type\": \"must_find\" | \"must_not_flag\", \"file\": \"...\", \"start_line\": 1, \"end_line\": 1, \"description\": \"...\" }] }'",
+      "passed": "passed",
+      "failed": "failed",
+      "lastRunStatus": "Last run {result} · expected {expected}, got {got} · {duration} · {cost}"
+    }
   }
 }

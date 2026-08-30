@@ -18,12 +18,15 @@ export function FindingsPanel({
   repoFullName,
   headSha,
   onViewInDiff,
+  onTurnIntoEvalCase,
 }: {
   findings: FindingRecord[];
   prId: string;
   repoFullName?: string | null;
   headSha?: string | null;
   onViewInDiff?: (file: string, line: number) => void;
+  /** "Turn into eval case" affordance — omitted → no button rendered. */
+  onTurnIntoEvalCase?: (findingId: string) => void;
 }) {
   const t = useTranslations("prReview");
   const action = useFindingAction();
@@ -71,6 +74,7 @@ export function FindingsPanel({
               headSha={headSha}
               onAction={(act) => action.mutate({ findingId: f.id, action: act, prId })}
               onViewInDiff={onViewInDiff}
+              onTurnIntoEvalCase={onTurnIntoEvalCase}
             />
           ))
         )}
