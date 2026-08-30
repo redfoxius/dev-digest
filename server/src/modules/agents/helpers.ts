@@ -1,6 +1,8 @@
-import type { Agent, AgentVersion, CiFailOn, Provider, ReviewStrategy } from '@devdigest/shared';
+import type { Agent, AgentVersion, CiFailOn, LLMProvider, Provider, ReviewStrategy } from '@devdigest/shared';
 import { AgentVersionConfig } from '@devdigest/shared';
-import type { AgentRow, AgentVersionRow } from './repository.js';
+import type { AgentRow, AgentVersionRow, LinkedSkillRow } from './repository.js';
+import { buildStackFraming } from '../reviews/helpers.js';
+import { REVIEW_STRATEGY } from '../reviews/constants.js';
 
 /**
  * Pure helpers for the agents module — DB row ⇄ DTO mapping and the
@@ -89,4 +91,70 @@ export function isConfigChange(
     (patch.repoIntel !== undefined && patch.repoIntel !== existing.repoIntel) ||
     patch.outputSchema !== undefined
   );
+}
+
+// ===========================================================================
+// resolveAgentRunConfig — the shared "current effective config for this
+// agent" recipe (specs/cross-cutting/eval-pipeline/plan.md WI-6 Step 0).
+// ===========================================================================
+
+/** The subset of an agent's current, LIVE run config — provider client,
+ *  model, strategy, resolved (linked + BOTH-enabled) skill bodies, and the
+ *  final system prompt (base + stack-framing addendum). Everything
+ *  repo-bound (repo-intel enrichment, Project Context Folder docs, Intent
+ *  Layer text, task framing) stays OUTSIDE this shape — an eval case has no
+ *  bound live repo (spec §4), and a real review's `ReviewRunExecutor`
+ *  resolves those separately, around this. */
+export interface ResolvedAgentRunConfig {
+  llm: LLMProvider;
+  model: string;
+  strategy: ReviewStrategy;
+  /** Resolved bodies of every linked skill whose link AND own global
+   *  `enabled` are both true, in `order` — an empty array (never omitted)
+   *  when none resolve; the caller decides whether to pass an empty vs.
+   *  omitted `skills` key downstream. */
+  skills: string[];
+  /** Same skills' ids, parallel to `skills` — for run-level bookkeeping
+   *  (e.g. `recordRunSkills`) that an eval run doesn't need but a real
+   *  review does; kept here so callers never re-fetch `linkedSkills` twice. */
+  skillIds: string[];
+  systemPrompt: string;
+}
+
+/**
+ * Resolve an agent's CURRENT effective run config: the exact
+ * provider/model/strategy/skill-filter/system-prompt recipe
+ * `ReviewRunExecutor.runOneAgent` (`reviews/run-executor.ts`) already applied
+ * inline before this extraction, and `EvalsService.runCases`
+ * (`evals/service.ts`) now ALSO calls — so an eval run reflects a real
+ * review's config by construction, rather than duplicating (and risking
+ * silently drifting from) this recipe
+ * (specs/cross-cutting/eval-pipeline/plan.md, "Shared agent-run-config
+ * resolution" Architectural Constraint).
+ *
+ * Deliberately narrow dependencies (a bound `llm` resolver + the
+ * `agentsRepo.linkedSkills` shape, not a whole `Container`/`AgentsRepository`)
+ * so this stays trivially unit-testable and avoids a helpers.ts ⇄
+ * repository.ts import cycle beyond the one already established
+ * (`repository.ts` already imports `isConfigChange` from this file).
+ */
+export async function resolveAgentRunConfig(
+  llm: (provider: Provider) => Promise<LLMProvider>,
+  agentsRepo: { linkedSkills(agentId: string): Promise<LinkedSkillRow[]> },
+  agent: Pick<AgentRow, 'id' | 'provider' | 'model' | 'strategy' | 'systemPrompt'>,
+  diffFiles: string[],
+): Promise<ResolvedAgentRunConfig> {
+  const resolvedLlm = await llm(agent.provider as Provider);
+
+  const linked = await agentsRepo.linkedSkills(agent.id);
+  const attached = linked.filter((l) => l.enabled && l.skill.enabled);
+  const skills = attached.map((l) => l.skill.body);
+  const skillIds = attached.map((l) => l.skill.id);
+
+  const stackFraming = buildStackFraming(diffFiles);
+  const systemPrompt = stackFraming ? `${agent.systemPrompt}\n\n${stackFraming}` : agent.systemPrompt;
+
+  const strategy = (agent.strategy as ReviewStrategy | null) ?? REVIEW_STRATEGY;
+
+  return { llm: resolvedLlm, model: agent.model, strategy, skills, skillIds, systemPrompt };
 }

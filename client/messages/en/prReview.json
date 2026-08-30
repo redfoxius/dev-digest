@@ -10,7 +10,9 @@
     "replyPlaceholder": "Reply to the author about this finding…",
     "sendReply": "Send reply",
     "cancel": "Cancel",
-    "viewInDiff": "View in diff"
+    "viewInDiff": "View in diff",
+    "turnIntoEvalCase": "Turn into eval case",
+    "evalCaseCreated": "Eval case \"{name}\" created"
   },
   "trifecta": {
     "lethal": "LETHAL TRIFECTA — ALL 3 PRESENT",

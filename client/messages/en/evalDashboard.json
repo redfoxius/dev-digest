@@ -1,0 +1,65 @@
+{
+  "list": {
+    "breadcrumbLab": "Skills Lab",
+    "breadcrumb": "Eval Dashboard",
+    "title": "Eval Dashboard",
+    "subtitle": "Recall, precision, and citation accuracy across every agent's eval set.",
+    "loadError": "Could not load agents.",
+    "emptyTitle": "No agents yet",
+    "emptyBody": "Create an agent, then build up its eval set from accepted or dismissed findings.",
+    "metricLabels": {
+      "recall": "Recall",
+      "precision": "Precision",
+      "citation": "Citation"
+    },
+    "tracesPassed": "{passed}/{total} traces passed",
+    "cases": "{count, plural, one {# case} other {# cases}}",
+    "noRunsYet": "No runs yet",
+    "openDetail": "Open {name}'s eval dashboard"
+  },
+  "drilldown": {
+    "breadcrumbFallback": "Agent",
+    "loadError": "Could not load this agent's eval dashboard.",
+    "metrics": {
+      "recall": "Recall",
+      "precision": "Precision",
+      "citationAccuracy": "Citation accuracy",
+      "tracesPassed": "Traces passed"
+    },
+    "casesTotal": "{count, plural, one {# eval case} other {# eval cases}}",
+    "metricTrend": "Metric trend",
+    "recentRuns": "Recent runs",
+    "noRuns": "No runs yet. Run this agent's eval set to see history here.",
+    "table": {
+      "select": "Select",
+      "ranAt": "Ran at",
+      "recall": "Recall",
+      "precision": "Precision",
+      "citation": "Citation",
+      "passRate": "Pass rate",
+      "cost": "Cost"
+    },
+    "selectRunLabel": "Select run from {date} for comparison",
+    "compare": "Compare",
+    "compareHint": "Select exactly 2 runs to compare"
+  },
+  "compare": {
+    "title": "Compare runs",
+    "loadError": "Could not load version details for this comparison.",
+    "metricHeader": "Metric",
+    "deltaHeader": "Δ",
+    "versionLabel": "v{version}",
+    "earlierRun": "Earlier run",
+    "laterRun": "Later run",
+    "versionUnresolved": "No agent version existed yet at this run's time ({date}).",
+    "metrics": {
+      "recall": "Recall",
+      "precision": "Precision",
+      "citationAccuracy": "Citation accuracy",
+      "cost": "Cost"
+    },
+    "systemPromptDiff": "System prompt diff",
+    "promptDiffUnavailable": "System prompt diff unavailable — one or both runs' agent versions could not be resolved.",
+    "noPromptDiff": "These two versions' system prompts are identical."
+  }
+}

@@ -16,6 +16,43 @@ import { EvalRun, EvalOwnerKind, Conformance, Provider, CiFailOn } from './knowl
 // Eval — case input + persisted run record + dashboard
 // ===========================================================================
 
+/**
+ * One location-scoped assertion inside an eval case's `expected_output`
+ * (spec §10): `must_find` ("an agent finding must land on this file:line
+ * range") or `must_not_flag` ("no agent finding may land on this file:line
+ * range"). Never case-wide — see spec §4.
+ */
+export const EvalExpectation = z
+  .object({
+    type: z.enum(['must_find', 'must_not_flag']),
+    // An empty file path can never validly identify a location.
+    file: z.string().min(1),
+    // Line numbers are 1-indexed, never <= 0.
+    start_line: z.number().int().positive(),
+    end_line: z.number().int().positive(),
+    description: z.string().nullish(),
+  })
+  .superRefine((val, ctx) => {
+    if (val.end_line < val.start_line) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'end_line must be >= start_line',
+        path: ['end_line'],
+      });
+    }
+  });
+export type EvalExpectation = z.infer<typeof EvalExpectation>;
+
+/**
+ * The documented shape of `eval_cases.expected_output` (spec §9/§10) — the
+ * column itself stays `z.unknown()` on `EvalCaseInput` below; this wrapper
+ * is what the service parses it against internally.
+ */
+export const EvalCaseExpectedOutput = z.object({
+  expectations: z.array(EvalExpectation),
+});
+export type EvalCaseExpectedOutput = z.infer<typeof EvalCaseExpectedOutput>;
+
 /** Create/update payload for an eval case (id + owner resolved by the route). */
 export const EvalCaseInput = z.object({
   owner_kind: EvalOwnerKind,

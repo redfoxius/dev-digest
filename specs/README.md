@@ -15,3 +15,4 @@ past spec — `plan.md`, `implementation-report.md`, `test-report.md`,
 | server | go-multi-module-depgraph | SPEC-2026-08-20-go-multi-module-depgraph | clarifying |
 | cross-cutting | onboarding-generator | SPEC-2026-08-20-onboarding-generator | draft |
 | cross-cutting | pr-why-risk-brief | SPEC-2026-08-20-pr-why-risk-brief | draft |
+| cross-cutting | eval-pipeline | SPEC-2026-08-29-eval-pipeline | draft |
